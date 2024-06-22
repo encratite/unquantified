@@ -61,15 +61,17 @@ fn main() {
 
 fn read_ticker_directories(path: PathBuf) {
 	let stopwatch = Stopwatch::start_new();
-	for_each_directory(path, read_time_directories, "Unable to read ticker directory");
+	let mut paths: Vec<PathBuf> = [].to_vec();
+	for_each_directory(path, "Unable to read ticker directory", |tickers_path| {
+		for_each_directory(tickers_path, "Unable to read time frames", |time_frame_path| {
+			paths.push(time_frame_path);
+		});
+	});
+	paths.par_iter().for_each(process_time_frame_data);
 	println!("Processed all directories in {} ms", stopwatch.elapsed_ms());
 }
 
-fn read_time_directories(path: PathBuf) {
-	for_each_directory(path, process_time_frame_data, "Unable to read time frames");
-}
-
-fn for_each_directory(path: PathBuf, handler: impl FnMut(PathBuf) -> (), error_message: &str) {
+fn for_each_directory(path: PathBuf, error_message: &str, handler: impl FnMut(PathBuf) -> ()) {
 	fs::read_dir(path)
 		.expect(error_message)
 		.filter(|x| x.is_ok())
@@ -78,7 +80,7 @@ fn for_each_directory(path: PathBuf, handler: impl FnMut(PathBuf) -> (), error_m
 		.for_each(handler);
 }
 
-fn process_time_frame_data(path: PathBuf) {
+fn process_time_frame_data(path: &PathBuf) {
 	let csv_paths = fs::read_dir(path.clone())
 		.expect("Unable to get list of .csv files")
 		.filter(|x| x.is_ok())
@@ -92,7 +94,6 @@ fn process_time_frame_data(path: PathBuf) {
 	let stopwatch = Stopwatch::start_new();
 	let mut ohlc_map = BTreeMap::new();
 	for csv_path in csv_paths {
-		// println!("Processing {}", csv_path.to_str().unwrap());
 		let mut reader = csv::Reader::from_path(csv_path)
 			.expect("Unable to read .csv file");
 		let headers = reader.headers()
@@ -116,11 +117,6 @@ fn process_time_frame_data(path: PathBuf) {
 						symbol: symbol.clone(),
 						time: time.unwrap()
 					};
-					/*
-					if ohlc_map.contains_key(&key) {
-						continue;
-					}
-					 */
 					let mut open_interest: Option<i32> = None;
 					match record.open_interest.parse::<i32>() {
 						Ok(interest) => {
@@ -146,5 +142,5 @@ fn process_time_frame_data(path: PathBuf) {
 			}
 		}
 	}
-	println!("Merged {} records into B-tree in {} ms", ohlc_map.len(), stopwatch.elapsed_ms());
+	println!("Merged {} records from {} into B-tree in {} ms", ohlc_map.len(), path.to_str().unwrap(), stopwatch.elapsed_ms());
 }
