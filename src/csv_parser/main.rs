@@ -1,5 +1,5 @@
 use std::{
-	collections::BTreeMap,
+	collections::{BTreeMap, HashMap},
 	env,
 	fs::{self, File},
 	path::{Path, PathBuf}
@@ -17,6 +17,8 @@ use chrono::{
 };
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
+
+type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -45,6 +47,11 @@ struct OhlcRecord {
 	open_interest: Option<i32>
 }
 
+#[derive(Archive, Serialize, Deserialize)]
+struct OhlcArchive {
+	time_frames: HashMap<String, Vec<OhlcRecord>>
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct OhlcKey {
 	symbol: Option<String>,
@@ -63,18 +70,39 @@ fn main() {
 	let get_argument = |i| PathBuf::from(&arguments[i]);
 	let input_directory = get_argument(1);
 	let output_directory = get_argument(2);
-	read_ticker_directories(&input_directory, &output_directory);
+	process_ticker_directories(&input_directory, &output_directory);
 }
 
-fn read_ticker_directories(input_directory: &PathBuf, output_directory: &PathBuf) {
+fn process_ticker_directories(input_directory: &PathBuf, output_directory: &PathBuf) {
 	let stopwatch = Stopwatch::start_new();
 	get_directories(input_directory, "Unable to read ticker directory")
-		.map(|x| get_directories(&x, "Unable to read time frames"))
-		.flatten()
 		.collect::<Vec<PathBuf>>()
 		.par_iter()
-		.for_each(|x| process_time_frame_data(x, output_directory));
+		.for_each(|ticker_directory| {
+			let mut archive = OhlcArchive {
+				time_frames: HashMap::new()
+			};
+			let stopwatch = Stopwatch::start_new();
+			get_directories(&ticker_directory, "Unable to read time frames")
+				.for_each(|time_frame_directory| {
+					let time_frame = get_last_token(&time_frame_directory);
+					let time_frame_data = get_time_frame_data(&time_frame_directory);
+					archive.time_frames.insert(time_frame, time_frame_data);
+				});
+			write_archive(ticker_directory, output_directory, &stopwatch, &archive);
+		});
 	println!("Processed all directories in {} ms", stopwatch.elapsed_ms());
+}
+
+fn get_last_token(path: &PathBuf) -> String {
+	path
+		.components()
+		.last()
+		.unwrap()
+		.as_os_str()
+		.to_str()
+		.unwrap()
+		.to_string()
 }
 
 fn get_directories(path: &PathBuf, error_message: &str) -> impl Iterator<Item = PathBuf> {
@@ -85,11 +113,9 @@ fn get_directories(path: &PathBuf, error_message: &str) -> impl Iterator<Item = 
 		.filter(|x| x.is_dir())
 }
 
-fn process_time_frame_data(path: &PathBuf, output_directory: &PathBuf) {
+fn get_time_frame_data(path: &PathBuf) -> Vec<OhlcRecord> {
 	let csv_paths = get_csv_paths(path);
-	println!("Processing files in \"{}\"", path.to_str().unwrap());
-	let stopwatch = Stopwatch::start_new();
-	let mut ohlc_map = BTreeMap::new();
+	let mut ohlc_map = OhlcTreeMap::new();
 	for csv_path in csv_paths {
 		let mut reader = csv::Reader::from_path(csv_path)
 			.expect("Unable to read .csv file");
@@ -109,8 +135,7 @@ fn process_time_frame_data(path: &PathBuf, output_directory: &PathBuf) {
 			}
 		}
 	}
-	println!("Merged {} records from {} in {} ms", ohlc_map.len(), path.to_str().unwrap(), stopwatch.elapsed_ms());
-	serialize_ohlc_records(path, output_directory, &ohlc_map);
+	ohlc_map.into_values().collect()
 }
 
 fn get_csv_paths(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
@@ -125,7 +150,7 @@ fn get_csv_paths(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
 		)
 }
 
-fn add_ohlc_record(record: &CsvRecord, ohlc_map: &mut BTreeMap<OhlcKey, OhlcRecord>) {
+fn add_ohlc_record(record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
 	let mut time = NaiveDateTime::parse_from_str(record.time, "%m/%d/%Y %H:%M");
 	if time.is_err() {
 		let date = NaiveDate::parse_from_str(record.time, "%m/%d/%Y");
@@ -159,38 +184,40 @@ fn add_ohlc_record(record: &CsvRecord, ohlc_map: &mut BTreeMap<OhlcKey, OhlcReco
 	ohlc_map.insert(key, value);
 }
 
-fn serialize_ohlc_records(path: &PathBuf, output_directory: &PathBuf, ohlc_map: &BTreeMap<OhlcKey, OhlcRecord>) {
-	let stopwatch = Stopwatch::start_new();
-	let output_path = get_output_path(path, output_directory);
-	let ohlc_records = ohlc_map.values().cloned().collect::<Vec<OhlcRecord>>();
-	match rkyv::to_bytes::<_, 1024>(&ohlc_records) {
+fn write_archive(time_frame_directory: &PathBuf, output_directory: &PathBuf, stopwatch: &Stopwatch, archive: &OhlcArchive) {
+	let output_path = get_output_path(time_frame_directory, output_directory);
+	match rkyv::to_bytes::<_, 1024>(archive) {
 		Ok(binary_data) => {
-			write_archive(&binary_data, &output_path, &stopwatch);
+			let count: usize = archive.time_frames
+				.values()
+				.map(|x| x.len())
+				.sum();
+			compress_archive(&binary_data, &output_path);
+			println!(
+				"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
+				count,
+				time_frame_directory.to_str().unwrap(),
+				output_path.to_str().unwrap(),
+				stopwatch.elapsed_ms()
+			);
 		}
 		Err(error) => {
-			eprintln!("Failed to serialize B-tree map: {error}");
+			eprintln!("Failed to serialize records: {error}");
 		}
 	}
 }
 
-fn get_output_path(path: &PathBuf, output_directory: &PathBuf) -> PathBuf {
-	let iter = path.iter();
-	let count = 2;
-	let mut final_tokens = iter.skip(path.components().count() - count).take(count);
-	let mut get_token = || final_tokens.next().unwrap().to_str().unwrap();
-	let symbol = get_token();
-	let time_frame =  get_token();
-	let file_name = format!("{symbol}.{time_frame}");
+fn get_output_path(time_frame_directory: &PathBuf, output_directory: &PathBuf) -> PathBuf {
+	let symbol = get_last_token(time_frame_directory);
+	let file_name = format!("{symbol}.zrk");
 	return Path::new(output_directory).join(file_name);
 }
 
-fn write_archive(binary_data: &AlignedVec, output_path: &PathBuf, stopwatch: &Stopwatch) {
+fn compress_archive(binary_data: &AlignedVec, output_path: &PathBuf) {
 	match File::create(output_path.clone()) {
 		Ok(file) => {
 			match zstd::stream::copy_encode(binary_data.as_slice(), file, 1) {
-				Ok(_) => {
-					println!("Serialized records to \"{}\" in {} ms", output_path.to_str().unwrap(), stopwatch.elapsed_ms());
-				}
+				Ok(_) => {}
 				Err(error) => {
 					eprintln!("Failed to write output to file \"{}\": {error}", output_path.to_str().unwrap());
 				}
