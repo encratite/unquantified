@@ -1,22 +1,17 @@
-use std::{
-	collections::{BTreeMap, HashMap},
+use std::{	
 	env,
-	fs::{self, File},
+	fs,
 	path::{Path, PathBuf}
 };
+use std::collections::{HashMap, BTreeMap};
 use serde;
-use rkyv::{
-	Archive,
-	Deserialize,
-	Serialize,
-	util::AlignedVec
-};
 use chrono::{
 	NaiveDate,
 	NaiveDateTime
 };
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
+use common::*;
 
 type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
 
@@ -33,23 +28,6 @@ struct CsvRecord<'a> {
 	volume: i32,
 	#[serde(rename = "Open Int", default)]
 	open_interest: &'a str
-}
-
-#[derive(Debug, Archive, Serialize, Deserialize, Clone)]
-struct OhlcRecord {
-	symbol: Option<String>,
-	time: NaiveDateTime,
-	open: f64,
-	high: f64,
-	low: f64,
-	close: f64,
-	volume: i32,
-	open_interest: Option<i32>
-}
-
-#[derive(Archive, Serialize, Deserialize)]
-struct OhlcArchive {
-	time_frames: HashMap<String, Vec<OhlcRecord>>
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -79,19 +57,60 @@ fn process_ticker_directories(input_directory: &PathBuf, output_directory: &Path
 		.collect::<Vec<PathBuf>>()
 		.par_iter()
 		.for_each(|ticker_directory| {
-			let mut archive = OhlcArchive {
-				time_frames: HashMap::new()
-			};
-			let stopwatch = Stopwatch::start_new();
-			get_directories(&ticker_directory, "Unable to read time frames")
-				.for_each(|time_frame_directory| {
-					let time_frame = get_last_token(&time_frame_directory);
-					let time_frame_data = get_time_frame_data(&time_frame_directory);
-					archive.time_frames.insert(time_frame, time_frame_data);
-				});
-			write_archive(ticker_directory, output_directory, &stopwatch, &archive);
+			process_ticker_directory(ticker_directory, output_directory);
 		});
 	println!("Processed all directories in {} ms", stopwatch.elapsed_ms());
+}
+
+fn process_ticker_directory(ticker_directory: &PathBuf, output_directory: &PathBuf) {
+	let mut archive = OhlcArchive {
+		time_frames: HashMap::new()
+	};
+	let stopwatch = Stopwatch::start_new();
+	get_directories(&ticker_directory, "Unable to read time frames")
+		.for_each(|time_frame_directory| {
+			let time_frame = get_last_token(&time_frame_directory);
+			let time_frame_data = get_time_frame_data(&time_frame_directory);
+			archive.time_frames.insert(time_frame, time_frame_data);
+		});
+	let archive_path = get_archive_path(ticker_directory, output_directory);
+	match write_archive(&archive_path, &archive) {
+		Ok(_) => {}
+		Err(error) => {
+			eprintln!("Failed to write archive: {}", error);
+			return;
+		}
+	}
+	let count = get_record_count(&archive);
+	println!(
+		"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
+		count,
+		ticker_directory.to_str().unwrap(),
+		archive_path.to_str().unwrap(),
+		stopwatch.elapsed_ms()
+	);
+	perform_read_test(&archive_path);
+}
+
+fn get_record_count(archive: &OhlcArchive) -> usize {
+	archive.time_frames
+		.values()
+		.map(|x| x.len())
+		.sum()
+}
+
+fn perform_read_test(archive_path: &PathBuf) {
+	let stopwatch = Stopwatch::start_new();
+	match read_archive(&archive_path) {
+		Ok(archive) => {
+			let read_count = get_record_count(&archive);
+			println!("Read {} records from archive in {} ms", read_count, stopwatch.elapsed_ms());
+		}
+		Err(error) => {
+			eprintln!("Failed to write archive: {}", error);
+			return;
+		}
+	}
 }
 
 fn get_last_token(path: &PathBuf) -> String {
@@ -184,47 +203,8 @@ fn add_ohlc_record(record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
 	ohlc_map.insert(key, value);
 }
 
-fn write_archive(time_frame_directory: &PathBuf, output_directory: &PathBuf, stopwatch: &Stopwatch, archive: &OhlcArchive) {
-	let output_path = get_output_path(time_frame_directory, output_directory);
-	match rkyv::to_bytes::<_, 1024>(archive) {
-		Ok(binary_data) => {
-			let count: usize = archive.time_frames
-				.values()
-				.map(|x| x.len())
-				.sum();
-			compress_archive(&binary_data, &output_path);
-			println!(
-				"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
-				count,
-				time_frame_directory.to_str().unwrap(),
-				output_path.to_str().unwrap(),
-				stopwatch.elapsed_ms()
-			);
-		}
-		Err(error) => {
-			eprintln!("Failed to serialize records: {error}");
-		}
-	}
-}
-
-fn get_output_path(time_frame_directory: &PathBuf, output_directory: &PathBuf) -> PathBuf {
+fn get_archive_path(time_frame_directory: &PathBuf, output_directory: &PathBuf) -> PathBuf {
 	let symbol = get_last_token(time_frame_directory);
 	let file_name = format!("{symbol}.zrk");
 	return Path::new(output_directory).join(file_name);
-}
-
-fn compress_archive(binary_data: &AlignedVec, output_path: &PathBuf) {
-	match File::create(output_path.clone()) {
-		Ok(file) => {
-			match zstd::stream::copy_encode(binary_data.as_slice(), file, 1) {
-				Ok(_) => {}
-				Err(error) => {
-					eprintln!("Failed to write output to file \"{}\": {error}", output_path.to_str().unwrap());
-				}
-			}
-		}
-		Err(error) => {
-			eprintln!("Failed to create output file \"{}\": {error}", output_path.to_str().unwrap());
-		}
-	}
 }

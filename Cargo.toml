@@ -12,6 +12,10 @@ serde = { version = "1.0.203", features = ["derive"] }
 stopwatch = "0.0.7"
 zstd = "0.13.1"
 
+[lib]
+name = "common"
+path = "src/common/lib.rs"
+
 [[bin]]
 name = "csv_parser"
 path = "src/csv_parser/main.rs"
