@@ -89,7 +89,6 @@ fn process_ticker_directory(ticker_directory: &PathBuf, output_directory: &PathB
 		archive_path.to_str().unwrap(),
 		stopwatch.elapsed_ms()
 	);
-	perform_read_test(&archive_path);
 }
 
 fn get_record_count(archive: &OhlcArchive) -> usize {
@@ -97,20 +96,6 @@ fn get_record_count(archive: &OhlcArchive) -> usize {
 		.values()
 		.map(|x| x.len())
 		.sum()
-}
-
-fn perform_read_test(archive_path: &PathBuf) {
-	let stopwatch = Stopwatch::start_new();
-	match read_archive(&archive_path) {
-		Ok(archive) => {
-			let read_count = get_record_count(&archive);
-			println!("Read {} records from archive in {} ms", read_count, stopwatch.elapsed_ms());
-		}
-		Err(error) => {
-			eprintln!("Failed to write archive: {}", error);
-			return;
-		}
-	}
 }
 
 fn get_last_token(path: &PathBuf) -> String {
