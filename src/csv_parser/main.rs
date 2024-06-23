@@ -11,6 +11,7 @@ use chrono::{
 };
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
+use configparser::ini::Ini;
 use common::*;
 
 type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
@@ -37,18 +38,32 @@ struct OhlcKey {
 }
 
 fn main() {
-	let arguments: Vec<String> = env::args().collect();
-	if arguments.len() != 3 {
-		println!("Usage:");
-		let application = env::current_exe().unwrap();
-		println!("{} <path to Barchart .csv files> <output directory>", application.display());
-		return;
-
+	let mut config = Ini::new();
+	let file_name = "csv_parser.ini";
+	match config.load(file_name) {
+		Ok(_) => {}
+		Err(_) => {
+			eprintln!("Failed to read configuration file \"{}\"", file_name);
+			return;
+		}
 	}
-	let get_argument = |i| PathBuf::from(&arguments[i]);
-	let input_directory = get_argument(1);
-	let output_directory = get_argument(2);
-	process_ticker_directories(&input_directory, &output_directory);
+	let get_argument = |key| {
+		match config.get("data", key) {
+			Some(value) => {
+				Ok(PathBuf::from(value))
+			},
+			None => {
+				Err(())
+			}
+		}
+	};
+	let input_directory = get_argument("input_directory");
+	let output_directory = get_argument("output_directory");
+	if input_directory.is_err() || output_directory.is_err() {
+		eprintln!("Missing value in configuration file");
+		return;
+	}
+	process_ticker_directories(&input_directory.unwrap(), &output_directory.unwrap());
 }
 
 fn process_ticker_directories(input_directory: &PathBuf, output_directory: &PathBuf) {
