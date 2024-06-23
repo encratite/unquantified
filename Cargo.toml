@@ -10,6 +10,7 @@ rayon = "1.10.0"
 rkyv = "0.7.44"
 serde = { version = "1.0.203", features = ["derive"] }
 stopwatch = "0.0.7"
+zstd = "0.13.1"
 
 [[bin]]
 name = "csv_parser"
