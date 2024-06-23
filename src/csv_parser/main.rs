@@ -1,9 +1,8 @@
 use std::{	
-	env,
 	fs,
 	path::{Path, PathBuf}
 };
-use std::collections::{HashMap, BTreeMap};
+use std::collections::BTreeMap;
 use serde;
 use chrono::{
 	NaiveDate,
@@ -78,16 +77,8 @@ fn process_ticker_directories(input_directory: &PathBuf, output_directory: &Path
 }
 
 fn process_ticker_directory(ticker_directory: &PathBuf, output_directory: &PathBuf) {
-	let mut archive = OhlcArchive {
-		time_frames: HashMap::new()
-	};
 	let stopwatch = Stopwatch::start_new();
-	get_directories(&ticker_directory, "Unable to read time frames")
-		.for_each(|time_frame_directory| {
-			let time_frame = get_last_token(&time_frame_directory);
-			let time_frame_data = get_time_frame_data(&time_frame_directory);
-			archive.time_frames.insert(time_frame, time_frame_data);
-		});
+	let archive = parse_csv_files(ticker_directory);
 	let archive_path = get_archive_path(ticker_directory, output_directory);
 	match write_archive(&archive_path, &archive) {
 		Ok(_) => {}
@@ -96,21 +87,13 @@ fn process_ticker_directory(ticker_directory: &PathBuf, output_directory: &PathB
 			return;
 		}
 	}
-	let count = get_record_count(&archive);
 	println!(
 		"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
-		count,
+		archive.len(),
 		ticker_directory.to_str().unwrap(),
 		archive_path.to_str().unwrap(),
 		stopwatch.elapsed_ms()
 	);
-}
-
-fn get_record_count(archive: &OhlcArchive) -> usize {
-	archive.time_frames
-		.values()
-		.map(|x| x.len())
-		.sum()
 }
 
 fn get_last_token(path: &PathBuf) -> String {
@@ -132,7 +115,7 @@ fn get_directories(path: &PathBuf, error_message: &str) -> impl Iterator<Item = 
 		.filter(|x| x.is_dir())
 }
 
-fn get_time_frame_data(path: &PathBuf) -> Vec<OhlcRecord> {
+fn parse_csv_files(path: &PathBuf) -> OhlcArchive {
 	let csv_paths = get_csv_paths(path);
 	let mut ohlc_map = OhlcTreeMap::new();
 	for csv_path in csv_paths {

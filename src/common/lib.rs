@@ -1,6 +1,5 @@
 use std::{
 	error::Error,
-	collections::HashMap,
 	fs::File,
 	path::PathBuf
 };
@@ -11,10 +10,7 @@ use rkyv::{
 	Serialize
 };
 
-#[derive(Archive, Serialize, Deserialize)]
-pub struct OhlcArchive {
-	pub time_frames: HashMap<String, Vec<OhlcRecord>>
-}
+pub type OhlcArchive = Vec<OhlcRecord>;
 
 #[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcRecord {
