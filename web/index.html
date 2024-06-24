@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Test</title>
+		<script>
+			let socket = new WebSocket("ws://[::1]:6500/rpc");
+			socket.onopen = event => console.log("Connected to WebSocket");
+			socket.onmessage = event => console.log(`Received message: ${event.data}`);
+			socket.onclose = event => console.log("Connection closed");
+			socket.onerror = event => console.error(event);
+		</script>
+	</head>
+	<body>
+		Test.
+	</body>
+</html>

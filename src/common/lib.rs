@@ -9,6 +9,7 @@ use rkyv::{
 	Deserialize,
 	Serialize
 };
+use configparser::ini::Ini;
 
 pub type OhlcArchive = Vec<OhlcRecord>;
 
@@ -24,7 +25,7 @@ pub struct OhlcRecord {
 	pub open_interest: Option<i32>
 }
 
-pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box <dyn Error>> {
+pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
 	let file = File::open(path)?;
 	let mut buffer = Vec::<u8>::new();
 	zstd::stream::copy_decode(file, &mut buffer)?;
@@ -32,9 +33,21 @@ pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box <dyn Error>> {
 	return Ok(archive);
 }
 
-pub fn write_archive(path: &PathBuf, archive: &OhlcArchive) -> Result<(), Box <dyn Error>> {
+pub fn write_archive(path: &PathBuf, archive: &OhlcArchive) -> Result<(), Box<dyn Error>> {
 	let binary_data = rkyv::to_bytes::<_, 1024>(archive)?;
 	let file = File::create(path.clone())?;
 	zstd::stream::copy_encode(binary_data.as_slice(), file, 1)?;
 	Ok(())
+}
+
+pub fn get_config(path: &str) -> Result<Ini, String> {
+	let mut config = Ini::new();
+	match config.load(path) {
+		Ok(_) => {
+			return Ok(config);
+		},
+		Err(_) => {
+			return Err(format!("Failed to read configuration file \"{}\"", path));
+		}
+	}
 }

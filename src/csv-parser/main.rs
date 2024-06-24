@@ -37,16 +37,17 @@ struct OhlcKey {
 }
 
 fn main() {
-	let mut config = Ini::new();
-	let file_name = "csv_parser.ini";
-	match config.load(file_name) {
-		Ok(_) => {}
-		Err(_) => {
-			eprintln!("Failed to read configuration file \"{}\"", file_name);
+	let config: Ini;
+	match get_config("csv_parser.ini") {
+		Ok(c) => {
+			config = c;
+		}
+		Err(error) => {
+			eprintln!("{error}");
 			return;
 		}
 	}
-	let get_argument = |key| {
+	let get_key = |key| {
 		match config.get("data", key) {
 			Some(value) => {
 				Ok(PathBuf::from(value))
@@ -56,8 +57,8 @@ fn main() {
 			}
 		}
 	};
-	let input_directory = get_argument("input_directory");
-	let output_directory = get_argument("output_directory");
+	let input_directory = get_key("input_directory");
+	let output_directory = get_key("output_directory");
 	if input_directory.is_err() || output_directory.is_err() {
 		eprintln!("Missing value in configuration file");
 		return;
