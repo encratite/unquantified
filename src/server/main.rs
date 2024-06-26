@@ -1,12 +1,25 @@
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 use std::net::SocketAddr;
 use configparser::ini::Ini;
 use futures_util::{FutureExt, SinkExt, StreamExt};
+use serde_json::Value;
 use warp::Filter;
 use warp::filters::ws::Message;
 use tokio::time::{sleep, Duration};
-use chrono::offset::Local;
+use serde::{Deserialize, Serialize};
 use common::*;
+
+#[derive(Deserialize)]
+struct RpcRequest {
+	name: String,
+	arguments: Vec<Value>
+}
+
+#[derive(Serialize)]
+struct RpcResponse {
+	result: Value,
+	error: Option<String>
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
@@ -39,7 +52,13 @@ async fn run_server(address: SocketAddr) {
 	let rpc = warp::path("rpc")
 		.and(warp::ws())
 		.map(|ws: warp::ws::Ws| {
-			ws.on_upgrade(handle_client)
+            ws.on_upgrade(|socket| {
+                async move {
+                    if let Err(e) = handle_client(socket).await {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            })
 		});
 	let routes = index
 		.or(rpc);
@@ -48,17 +67,19 @@ async fn run_server(address: SocketAddr) {
 		.await;
 }
 
-async fn handle_client(socket: warp::ws::WebSocket) {
-	let (mut sender, mut _receiver) = socket.split();
-	loop {
-		let message = Message::text(Local::now().to_string());
-		match sender.send(message).await {
-			Ok(_) => {},
-			Err(error) => {
-				eprintln!("Client disconnected: {}", error.to_string());
-				return;
-			}
-		}
-		sleep(Duration::from_secs(1)).await;
+async fn handle_client(socket: warp::ws::WebSocket) -> Result<(), Box<dyn Error>> {
+	let requests = HashMap::from([
+		("getHistory", get_history)
+	]);
+	let (mut sender, mut receiver) = socket.split();
+	while let Some(message) = receiver.next().await {
+		let json_message = message?;
+		let json = json_message.to_str().map_err(|_| "Unexpected message type")?;
+		let request: RpcRequest = serde_json::from_str(json)?;
 	}
+	Ok(())
+}
+
+fn get_history(arguments: Vec<Value>) -> Result<Value, String> {
+	Err("Not implemented".to_string())
 }
