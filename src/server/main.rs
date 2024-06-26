@@ -1,38 +1,26 @@
-use std::{collections::HashMap, error::Error};
+use std::error::Error;
 use std::net::SocketAddr;
-use configparser::ini::Ini;
-use futures_util::{FutureExt, SinkExt, StreamExt};
-use serde_json::Value;
-use warp::Filter;
-use warp::filters::ws::Message;
-use tokio::time::{sleep, Duration};
-use serde::{Deserialize, Serialize};
+use axum::response::IntoResponse;
+use axum::extract::Json;
+use axum::routing::post;
+use axum::Router;
+use chrono::{DateTime, FixedOffset};
+use serde::Deserialize;
+use tower_http::services::{ServeDir, ServeFile};
 use common::*;
 
 #[derive(Deserialize)]
-struct RpcRequest {
-	name: String,
-	arguments: Vec<Value>
-}
-
-#[derive(Serialize)]
-struct RpcResponse {
-	result: Value,
-	error: Option<String>
+struct GetHistoryRequest {
+	symbol: String,
+	from: DateTime<FixedOffset>,
+	to: DateTime<FixedOffset>,
+	// Minutes, 1440 for daily data
+	time_frame: u16
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>>{
-	let config: Ini;
-	match get_config("server.ini") {
-		Ok(c) => {
-			config = c;
-		}
-		Err(error) => {
-			eprintln!("{error}");
-			return Err(error.into());
-		}
-	}
+	let config = get_config("server.ini")?;
 	let get_key = |key| {
 		config.get("server", key)
 			.expect(&*format!("Failed to find key \"{}\" in configuration file", key))
@@ -47,39 +35,15 @@ async fn main() -> Result<(), Box<dyn Error>>{
 
 async fn run_server(address: SocketAddr) {
 	println!("Running server on {}", address);
-	let index = warp::path::end()
-		.and(warp::fs::file("web/index.html"));
-	let rpc = warp::path("rpc")
-		.and(warp::ws())
-		.map(|ws: warp::ws::Ws| {
-            ws.on_upgrade(|socket| {
-                async move {
-                    if let Err(e) = handle_client(socket).await {
-                        eprintln!("Error: {}", e);
-                    }
-                }
-            })
-		});
-	let routes = index
-		.or(rpc);
-	warp::serve(routes)
-		.run(address)
-		.await;
+	let serve_dir = ServeDir::new("web")
+		.not_found_service(ServeFile::new("web/index.html"));
+	let app = Router::new()
+		.route("/history", post(get_history))
+		.fallback_service(serve_dir);
+	let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
-async fn handle_client(socket: warp::ws::WebSocket) -> Result<(), Box<dyn Error>> {
-	let requests = HashMap::from([
-		("getHistory", get_history)
-	]);
-	let (mut sender, mut receiver) = socket.split();
-	while let Some(message) = receiver.next().await {
-		let json_message = message?;
-		let json = json_message.to_str().map_err(|_| "Unexpected message type")?;
-		let request: RpcRequest = serde_json::from_str(json)?;
-	}
-	Ok(())
-}
-
-fn get_history(arguments: Vec<Value>) -> Result<Value, String> {
-	Err("Not implemented".to_string())
+async fn get_history(Json(request): Json<GetHistoryRequest>) -> impl IntoResponse {
+    format!("Received symbol: {}", request.symbol)
 }

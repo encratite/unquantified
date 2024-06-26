@@ -1,9 +1,11 @@
 use std::{
 	error::Error,
 	fs::File,
-	path::PathBuf
+	path::PathBuf,
+	str::FromStr
 };
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono_tz::Tz;
 use rkyv::{
 	Archive,
 	Deserialize,
@@ -11,7 +13,11 @@ use rkyv::{
 };
 use configparser::ini::Ini;
 
-pub type OhlcArchive = Vec<OhlcRecord>;
+#[derive(Archive, Serialize, Deserialize)]
+pub struct OhlcArchive {
+	pub records: Vec<OhlcRecord>,
+	pub time_zone: String
+}
 
 #[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcRecord {
@@ -40,14 +46,19 @@ pub fn write_archive(path: &PathBuf, archive: &OhlcArchive) -> Result<(), Box<dy
 	Ok(())
 }
 
-pub fn get_config(path: &str) -> Result<Ini, String> {
+pub fn get_config(path: &str) -> Result<Ini, Box<dyn Error>> {
 	let mut config = Ini::new();
 	match config.load(path) {
-		Ok(_) => {
-			return Ok(config);
-		},
-		Err(_) => {
-			return Err(format!("Failed to read configuration file \"{}\"", path));
-		}
+		Ok(_) => Ok(config),
+		Err(error) => Err(format!("Failed to read configuration file \"{}\": {}", path, error.to_string()).into())
+	}
+}
+
+impl OhlcArchive {
+	pub fn add_tz(&self, time: NaiveDateTime) -> DateTime<Tz> {
+		let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(time, Utc);
+		let time_zone = Tz::from_str(self.time_zone.as_str())
+			.expect("Invalid time zone in archive");
+		time_utc.with_timezone(&time_zone)
 	}
 }

@@ -3,11 +3,22 @@
 	<head>
 		<title>Test</title>
 		<script>
-			let socket = new WebSocket("ws://[::1]:6500/rpc");
-			socket.onopen = event => console.log("Connected to WebSocket");
-			socket.onmessage = event => console.log(`Received message: ${event.data}`);
-			socket.onclose = event => console.log("Connection closed");
-			socket.onerror = event => console.error(event);
+			const test = {
+				symbol: "ES"
+			};
+			const json = JSON.stringify(test);
+			const url = "/history";
+			const options = {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json"
+				},
+				body: json
+			};
+			fetch(url, options)
+				.then(response => response.text())
+				.then(text => console.log(text))
+				.catch(error => console.error(error));
 		</script>
 	</head>
 	<body>
