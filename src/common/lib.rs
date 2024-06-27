@@ -15,7 +15,9 @@ use configparser::ini::Ini;
 
 #[derive(Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcArchive {
-	pub records: Vec<OhlcRecord>,
+	pub daily: Vec<OhlcRecord>,
+	pub intraday: Vec<OhlcRecord>,
+	pub intraday_time_frame: u16,
 	pub time_zone: String
 }
 

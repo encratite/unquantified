@@ -1,7 +1,8 @@
 use std::{	
-	error::Error, fs, path::{Path, PathBuf}
+	error::Error, ffi::OsStr, fs, path::{Component, Path, PathBuf}
 };
 use std::collections::BTreeMap;
+use regex::Regex;
 use serde;
 use chrono::{
 	NaiveDate, NaiveDateTime
@@ -60,9 +61,9 @@ impl<'a> CsvParser<'a> {
 			.to_string()
 	}
 
-	fn get_directories(path: &PathBuf, error_message: &str) -> impl Iterator<Item = PathBuf> {
+	fn get_directories(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
 		fs::read_dir(path)
-			.expect(error_message)
+			.expect(format!("Unable to read directory \"{}\"", path.to_str().unwrap()).as_str())
 			.filter(|x| x.is_ok())
 			.map(|x| x.unwrap().path())
 			.filter(|x| x.is_dir())
@@ -90,9 +91,36 @@ impl<'a> CsvParser<'a> {
 		}
 	}
 
+	fn get_time_frame_directory<'b>(prefix: &str, time_frame_directories: &'b Vec<PathBuf>) -> Option<(&'b PathBuf, u16)> {
+		for directory in time_frame_directories.iter() {
+			if let Some(Component::Normal(last_component)) = directory.components().last() {
+				if let Some(tuple) = Self::get_time_frame_captures(last_component, prefix, directory) {
+					return Some(tuple);
+				}
+			}
+		}
+		None
+	}
+
+	fn get_time_frame_captures<'b>(last_component: &'b OsStr, prefix: &str, directory: &'b PathBuf) -> Option<(&'b PathBuf, u16)> {
+		let pattern = Regex::new("^([A-Z])(\\d+)$").unwrap();
+		if let Some(captures) = pattern.captures(last_component.to_str().unwrap()) {
+			if captures.get(1).unwrap().as_str() == prefix {
+				let time_frame: u16 = captures
+					.get(2)
+					.unwrap()
+					.as_str()
+					.parse()
+					.unwrap();
+				return Some((directory, time_frame))
+			}
+		}
+		None
+	}
+
 	pub fn run(&self) {
 		let stopwatch = Stopwatch::start_new();
-		Self::get_directories(self.input_directory, "Unable to read ticker directory")
+		Self::get_directories(self.input_directory)
 			.collect::<Vec<PathBuf>>()
 			.par_iter()
 			.for_each(|ticker_directory| {
@@ -103,8 +131,25 @@ impl<'a> CsvParser<'a> {
 
 	fn process_ticker_directory(&self, ticker_directory: &PathBuf) {
 		let stopwatch = Stopwatch::start_new();
-		let archive = self.parse_csv_files(ticker_directory);
+		let time_frame_directories: Vec<PathBuf> = Self::get_directories(ticker_directory).collect();
+		let directory_count = time_frame_directories.len();
+		if directory_count != 2 {
+			panic!("Unexpected sub directory count ({}) in path \"{}\"", directory_count, ticker_directory.to_str().unwrap());
+		}
+		let (daily_path, _) = Self::get_time_frame_directory("D", &time_frame_directories)
+			.expect("Unable to find daily path");
+		let (intraday_path, intraday_time_frame) = Self::get_time_frame_directory("M", &time_frame_directories)
+			.expect("Unable to find intraday path");
+		let daily = self.parse_csv_files(daily_path);
+		let intraday = self.parse_csv_files(intraday_path);
 		let archive_path = self.get_archive_path(ticker_directory);
+		let time_zone = self.time_zone.to_string();
+		let archive = OhlcArchive {
+			daily,
+			intraday,
+			intraday_time_frame,
+			time_zone
+		};
 		match write_archive(&archive_path, &archive) {
 			Ok(_) => {}
 			Err(error) => {
@@ -114,14 +159,14 @@ impl<'a> CsvParser<'a> {
 		}
 		println!(
 			"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
-			archive.records.len(),
+			archive.daily.len() + archive.intraday.len(),
 			ticker_directory.to_str().unwrap(),
 			archive_path.to_str().unwrap(),
 			stopwatch.elapsed_ms()
 		);
 	}
 
-	fn parse_csv_files(&self, path: &PathBuf) -> OhlcArchive {
+	fn parse_csv_files(&self, path: &PathBuf) -> Vec<OhlcRecord> {
 		let csv_paths = Self::get_csv_paths(path);
 		let mut ohlc_map = OhlcTreeMap::new();
 		for csv_path in csv_paths {
@@ -137,10 +182,7 @@ impl<'a> CsvParser<'a> {
 				self.add_ohlc_record(&record, &mut ohlc_map);
 			}
 		}
-		OhlcArchive {
-			records: ohlc_map.into_values().collect(),
-			time_zone: self.time_zone.to_string()
-		}
+		ohlc_map.into_values().collect()
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
