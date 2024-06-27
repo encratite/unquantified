@@ -16,7 +16,7 @@ type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct CsvRecord<'a> {
-	symbol: Option<&'a str>,
+	ticker: Option<&'a str>,
 	time: &'a str,
 	open: f64,
 	high: f64,
@@ -30,7 +30,7 @@ struct CsvRecord<'a> {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct OhlcKey {
-	symbol: Option<String>,
+	ticker: Option<String>,
 	time: NaiveDateTime
 }
 
@@ -148,14 +148,14 @@ impl<'a> CsvParser<'a> {
 		else {
 			return;
 		};
-		let symbol = record.symbol.map(|x| x.to_string());
+		let ticker = record.ticker.map(|x| x.to_string());
 		let key = OhlcKey {
-			symbol: symbol.clone(),
+			ticker: ticker.clone(),
 			time: time
 		};
 		let open_interest = record.open_interest.parse::<i32>().ok();
 		let value = OhlcRecord {
-			symbol: symbol,
+			ticker,
 			time: time,
 			open: record.open,
 			high: record.high,
@@ -168,8 +168,8 @@ impl<'a> CsvParser<'a> {
 	}
 
 	fn get_archive_path(&self, time_frame_directory: &PathBuf) -> PathBuf {
-		let symbol = Self::get_last_token(time_frame_directory);
-		let file_name = format!("{symbol}.zrk");
+		let ticker = Self::get_last_token(time_frame_directory);
+		let file_name = get_archive_file_name(&ticker);
 		return Path::new(self.output_directory).join(file_name);
 	}
 }

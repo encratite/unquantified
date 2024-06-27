@@ -13,7 +13,7 @@ use rkyv::{
 };
 use configparser::ini::Ini;
 
-#[derive(Archive, Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcArchive {
 	pub records: Vec<OhlcRecord>,
 	pub time_zone: String
@@ -21,7 +21,7 @@ pub struct OhlcArchive {
 
 #[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcRecord {
-	pub symbol: Option<String>,
+	pub ticker: Option<String>,
 	pub time: NaiveDateTime,
 	pub open: f64,
 	pub high: f64,
@@ -52,6 +52,10 @@ pub fn get_config(path: &str) -> Result<Ini, Box<dyn Error>> {
 		Ok(_) => Ok(config),
 		Err(error) => Err(format!("Failed to read configuration file \"{}\": {}", path, error.to_string()).into())
 	}
+}
+
+pub fn get_archive_file_name(ticker: &String) -> String {
+	format!("{ticker}.zrk")
 }
 
 impl OhlcArchive {
