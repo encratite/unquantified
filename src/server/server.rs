@@ -28,12 +28,14 @@ struct GetHistoryRequest {
 	from: DateTime<FixedOffset>,
 	to: DateTime<FixedOffset>,
 	// Minutes, 1440 for daily data
+	#[serde(rename = "timeFrame")]
 	time_frame: u16
 }
 
 #[derive(Serialize)]
 struct GetHistoryResponse {
-	tickers: HashMap<String, Vec<OhlcRecordWeb>>
+	tickers: Option<HashMap<String, Vec<OhlcRecordWeb>>>,
+	error: Option<String>
 }
 
 #[derive(Serialize)]
@@ -59,7 +61,8 @@ impl ServerState {
 
 impl OhlcRecordWeb {
 	pub fn new(record: &OhlcRecord, archive: &OhlcArchive) -> Result<OhlcRecordWeb, Box<dyn Error>> {
-		let time = get_date_time_string(record.time, &archive.time_zone)?;
+		let tz = Tz::from_str(&archive.time_zone)?;
+		let time = get_date_time_string(record.time, &tz)?;
 		Ok(OhlcRecordWeb {
 			ticker: record.ticker.clone(),
 			time: time,
@@ -91,9 +94,28 @@ async fn get_history(
 	State(state): State<Arc<ServerState>>,
 	Json(request): Json<GetHistoryRequest>
 ) -> impl IntoResponse {
-	let archives = request.tickers
-		.into_iter()
-		.map(|x| get_archive(&x, &state));
+	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = request.tickers
+		.iter()
+		.map(|x| get_archive(&x, &state))
+		.map(|x| match x {
+			Ok(archive) => get_ohlc_records(&request.from, &request.to, request.time_frame, &archive),
+			Err(error) => Err(error)
+		})
+		.collect();
+	let response = match result {
+		Ok(ticker_records) => {
+			let tuples = request.tickers.into_iter().zip(ticker_records.into_iter()).collect();
+			GetHistoryResponse {
+				tickers: Some(tuples),
+				error: None
+			}
+		},
+		Err(error) => GetHistoryResponse {
+			tickers: None,
+			error: Some(error.to_string())
+		}
+	};
+	Json(response)
 }
 
 fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
@@ -116,9 +138,81 @@ fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArch
 	}
 }
 
-fn get_date_time_string(time: NaiveDateTime, time_zone: &String) -> Result<String, Box<dyn Error>> {
+fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
 	let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(time, Utc);
-	let tz = Tz::from_str(time_zone)?;
-	let time_tz = time_utc.with_timezone(&tz);
+	time_utc.with_timezone(tz)
+}
+
+fn get_date_time_string(time: NaiveDateTime, tz: &Tz) -> Result<String, Box<dyn Error>> {
+	let time_tz = get_date_time_tz(time, &tz);
 	Ok(time_tz.to_rfc3339())
+}
+
+fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
+	let tz = Tz::from_str(archive.time_zone.as_str())?;
+	if time_frame >= 1440 {
+		return get_raw_records_from_archive(from, to, &tz, &archive.daily, &archive)
+	}
+	else if time_frame == archive.intraday_time_frame {
+		return get_raw_records_from_archive(from, to, &tz, &archive.intraday, &archive);
+	}
+	else if time_frame < archive.intraday_time_frame {
+		return Err("Requested time frame too small for intraday data in archive".into());
+	}
+	else if time_frame % archive.intraday_time_frame != 0 {
+		let message = format!("Requested time frame must be a multiple of {}", archive.intraday_time_frame);
+		return Err(message.into());
+	}
+	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
+	// This doesn't merge continuous contracts correctly
+	archive.intraday
+		.iter()
+		.filter(|x| matches_from_to(from, to, &tz, x))
+		.collect::<Vec<_>>()
+		.chunks(chunk_size)
+		.filter(|x| x.len() == chunk_size)
+		.map(|x| -> Result<OhlcRecordWeb, Box<dyn Error>> {
+			let first = x.first().unwrap();
+			let last = x.last().unwrap();
+			let ticker = first.ticker.clone();
+			let time = get_date_time_string(first.time, &tz)?;
+			let open = first.open;
+			let high = x
+				.iter()
+				.max_by(|x, y| x.high.partial_cmp(&y.high).unwrap())
+				.unwrap()
+				.high;
+			let low = x
+				.iter()
+				.min_by(|x, y| x.low.partial_cmp(&y.low).unwrap())
+				.unwrap()
+				.low;
+			let close = last.close;
+			let volume = x.iter().map(|x| x.volume).sum();
+			let open_interest = x.iter().map(|x| x.open_interest).sum();
+			Ok(OhlcRecordWeb {
+				ticker,
+				time,
+				open,
+				high,
+				low,
+				close,
+				volume,
+				open_interest
+			})
+		})
+		.collect()
+}
+
+fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, tz: &Tz, record: &OhlcRecord) -> bool {
+	let time = get_date_time_tz(record.time, tz);
+	time >= *from && time < *to
+}
+
+fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, tz: &Tz, records: &Vec<OhlcRecord>, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
+	records
+		.iter()
+		.filter(|x| matches_from_to(from, to, tz, x))
+		.map(|x| OhlcRecordWeb::new(&x, archive))
+		.collect()
 }

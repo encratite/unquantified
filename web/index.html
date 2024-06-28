@@ -3,10 +3,25 @@
 	<head>
 		<title>Test</title>
 		<script>
-			const test = {
-				symbol: "ES"
+			const request = {
+				tickers: [
+					"BTCUSD",
+					"CL",
+					"ES",
+					"EURUSD",
+					"GC",
+					"NG",
+					"NQ",
+					"VIX",
+					"ZE",
+					"ZN",
+					"ZT"
+				],
+				from: "2000-01-01T00:00:00+02:00",
+				to: "2100-01-01T00:00:00+02:00",
+				timeFrame: 1440
 			};
-			const json = JSON.stringify(test);
+			const json = JSON.stringify(request);
 			const url = "/history";
 			const options = {
 				method: "POST",
@@ -15,9 +30,14 @@
 				},
 				body: json
 			};
+			let start = performance.now();
 			fetch(url, options)
-				.then(response => response.text())
-				.then(text => console.log(text))
+				.then(response => response.json())
+				.then(json => {
+					let duration = performance.now() - start;
+					console.log(`Call took ${duration} ms`);
+					console.log(json);
+				})
 				.catch(error => console.error(error));
 		</script>
 	</head>
