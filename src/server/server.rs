@@ -47,6 +47,7 @@ struct OhlcRecordWeb {
 	pub low: f64,
 	pub close: f64,
 	pub volume: i32,
+	#[serde(rename = "openInterest")]
 	pub open_interest: Option<i32>
 }
 
