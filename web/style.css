@@ -1,27 +1,35 @@
-.resetZoom {
-	transition: background .25s,border-color .25s;
-	background: rgba(40,44,52,.05);
+body {
+	padding: 0 16px 0 16px;
+}
+
+#editor {
+	border: 1px solid #bbb;
+	margin: 0 16px 0 16px;
+}
+
+.plot {
+	text-align: right;
+	width: 1000px;
+	height: 500px;
+	padding: 0 16px 16px 0;
+	margin-bottom: 16px;
+}
+
+.plot button {
+	position: relative;
+	bottom: 26px;
+	right: 0;
+	transition: background 0.25s, border-color 0.25s;
+	background: rgba(40, 44, 52, 0.05);
 	border: 1px solid transparent;
 	border-radius: 6px;
 	color: #3080d0;
-	text-decoration: none!important;
-	font-size: .8rem;
-	padding: 8px 16px;
-	margin: 0 8px 8px 0;
+	text-decoration: none !important;
+	font-size: 0.8rem;
+	padding: 6px 12px;
 	cursor: pointer;
 	-webkit-user-select: none;
 	-moz-user-select: none;
 	-ms-user-select: none;
 	user-select: none;
-
-	margin-top: 12px;
-	float: right;
-}
-
-#editor { 
-	position: absolute;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	left: 0;
 }

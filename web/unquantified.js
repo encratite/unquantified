@@ -1,14 +1,9 @@
-/*
-import * as luxon from "./luxon/luxon.js";
-import { Chart, ChartConfiguration, ChartTypeRegistry } from "./chart.js/chart.js";
-*/
-
 function loadData() {
 	const request = {
 		tickers: [
 			"ES"
 		],
-		from: "2023-11-01T00:00:00+02:00",
+		from: "2024-01-01T00:00:00+02:00",
 		to: "2024-06-01T00:00:00+02:00",
 		timeFrame: 1440
 	};
@@ -33,21 +28,19 @@ function getTime(timeString) {
 }
 
 function drawChart(historyResponse) {
-	const div = document.createElement("div");
-	div.style.width = "1500px";
+	const chartContainer = document.createElement("div");
+	chartContainer.classList.add("plot");
 	const canvas = document.createElement("canvas");
-	div.appendChild(canvas);
-	document.body.appendChild(div);
+	chartContainer.appendChild(canvas);
 	const button = document.createElement("button");
-	button.className = "resetZoom";
 	button.textContent = "Reset zoom";
-	div.appendChild(button);
+	chartContainer.appendChild(button);
+	const content = document.getElementById("content");
+	content.appendChild(chartContainer);
 	const context = canvas.getContext("2d");
 	if (context === null) {
 		throw new Error("Failed to create 2D context");
 	}
-	context.canvas.width = 1000;
-	context.canvas.height = 500;
 	const ticker = Object.keys(historyResponse.tickers)[0];
 	const records = historyResponse.tickers[ticker];
 	const barData = records.map(ohlc => {
@@ -65,12 +58,13 @@ function drawChart(historyResponse) {
 			data: barData
 		}
 	];
-	const options: ChartConfiguration<keyof ChartTypeRegistry, any, unknown> = {
+	const options = {
 		type: "candlestick",
 		data: {
 			datasets: datasets
 		},
 		options: {
+			maintainAspectRatio: false,
 			plugins: {
 				zoom: {
 					pan: {
@@ -82,6 +76,9 @@ function drawChart(historyResponse) {
 						},
 						mode: "x",
 					}
+				},
+				legend: {
+					position: "bottom"
 				}
 			},
 			transitions: {
@@ -94,17 +91,36 @@ function drawChart(historyResponse) {
 		}
 	};
 	const chart = new Chart(context, options);
-	button.onclick = event => chart.resetZoom();
+	button.onclick = _ => chart.resetZoom();
+	$(chartContainer).resizable();
 }
 
 function initializeEditor() {
 	const container = document.getElementById("editor");
 	const editor = ace.edit(container);
+	editor.setOptions({
+		fontSize: "14px",
+		useWorker: false
+	});
+	editor.setShowPrintMargin(false);
 	editor.setTheme("ace/theme/monokai");
 	editor.session.setMode("ace/mode/javascript");
+	editor.session.setUseWrapMode(true);
+	editor.renderer.setShowGutter(false);
+	const resizeEditor = () => {
+		const screenLength = editor.getSession().getScreenLength();
+		const scrollbarWidth = editor.renderer.scrollBar.getWidth();
+        const newHeight = screenLength * editor.renderer.lineHeight + scrollbarWidth;
+        container.style.height = newHeight.toString() + "px";
+        editor.resize();
+    };
+    resizeEditor();
+    editor.getSession().on("change", resizeEditor);
+	editor.focus();
+	editor.navigateFileEnd();
 }
 
-document.addEventListener("DOMContentLoaded", event => {
+document.addEventListener("DOMContentLoaded", _ => {
 	initializeEditor();
-	// loadData();
+	loadData();
 });
