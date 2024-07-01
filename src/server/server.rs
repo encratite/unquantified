@@ -13,7 +13,7 @@ use chrono_tz::Tz;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use dashmap::DashMap;
 use common::*;
 
@@ -81,8 +81,7 @@ pub async fn run(address: SocketAddr, data_directory: String) {
 	println!("Running server on {}", address);
 	let state = ServerState::new(data_directory);
 	let state_arc = Arc::new(state);
-	let serve_dir = ServeDir::new("web")
-		.not_found_service(ServeFile::new("web/index.html"));
+	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
 		.route("/history", post(get_history))
 		.with_state(state_arc)

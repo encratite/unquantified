@@ -1,0 +1,27 @@
+.resetZoom {
+	transition: background .25s,border-color .25s;
+	background: rgba(40,44,52,.05);
+	border: 1px solid transparent;
+	border-radius: 6px;
+	color: #3080d0;
+	text-decoration: none!important;
+	font-size: .8rem;
+	padding: 8px 16px;
+	margin: 0 8px 8px 0;
+	cursor: pointer;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+
+	margin-top: 12px;
+	float: right;
+}
+
+#editor { 
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
+}

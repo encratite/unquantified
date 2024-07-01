@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ES2022",
+		"outDir": "../../web/scripts",
+		"typeRoots": [
+			"../../node_modules/@types",
+			"../../node_modules",
+		],
+		"types": [
+			"luxon",
+			"chart.js",
+			"chartjs-chart-financial",
+			"chartjs-plugin-zoom",
+			"ace"
+		],
+		"lib": [
+			"DOM",
+			"ES2022",
+			"ES2022.Intl"
+		]
+	}
+}
