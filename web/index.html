@@ -11,7 +11,7 @@
 		<script src="https://code.jquery.com/jquery-3.7.1.js"></script>
 		<script src="https://code.jquery.com/ui/1.13.3/jquery-ui.js"></script>
 		<script src="./scripts/highlight-rules.js"></script>
-		<script src="./scripts/unquantified.js"></script>
+		<script src="./scripts/unquantified.js" type="module"></script>
 		<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.3/themes/base/jquery-ui.css">
 		<link rel="stylesheet" href="./style.css">
 		<link rel="icon" type="image/x-icon" href="./favicon.ico">
@@ -27,17 +27,15 @@ $tickers = [ES, NQ, CL]
 plotCandlestick ES, -6mo, last
 plotCandlestick ES, -6mo, now
 plotLine [ES, NQ, CL], -1y, $t2, daily
-localTime on
 plotLine $tickers, -1y, $t2, daily
-localTime off
 plotLine $tickers, $t2, +1h, daily
 plotLine $tickers, $t2, +1w, 1h
-plotline GC, 2024-02-01 08:00, 2024-02-01 17:00, 15m
-plotline $ticker, 2024-02-01 08:00:00, 2024-02-01 17:00:00, 30m
-covariance [ES, NQ, GC, CL, NG]
-covariance [ES, NQ, GC, CL, NG], first, last
-covariance [ES, NQ, GC, CL, NG], $t1, $t2
-covariance all, $t1, $t2
+plotLine GC, 2024-02-01 08:00, 2024-02-01 17:00, 15m
+plotLine $ticker, 2024-02-01 08:00:00, 2024-02-01 17:00:00, 30m
+correlation [ES, NQ, GC, CL, NG]
+correlation [ES, NQ, GC, CL, NG], first, last
+correlation [ES, NQ, GC, CL, NG], $t1, $t2
+correlation all, $t1, $t2
 walkForward amazing_sma_crossover_strat, NQ, -4y, last, 15m
 $parameters = {sma1: 10 to 20, sma2: 20 to 40, risk_reward: 3.0, max_bars: 15}
 walkForward amazing_sma_crossover_strat, NQ, -4y, last, 30m, $parameters

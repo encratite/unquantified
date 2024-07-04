@@ -9,7 +9,7 @@ const UnquantifiedHighlightRules = function() {
 		"start": [
 			{
 				token: "keyword",
-				regex: /(?:on|off|first|last|now|daily|all|to|step)\b/
+				regex: /(?:true|false|first|last|now|daily|all|to|step)\b/
 			}, {
 				token: "operator",
 				regex: "="

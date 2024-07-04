@@ -1,3 +1,6 @@
+import "./engine.js";
+import ScriptingEngine from "./engine.js";
+
 function loadData() {
 	const request = {
 		tickers: [
@@ -143,9 +146,42 @@ function initializeEditor() {
     editor.getSession().on("change", resizeEditor);
 	editor.focus();
 	editor.navigateFileEnd();
+	return editor;
+}
+
+async function plotCandlestick(callArguments) {
+	console.log("plotCandlestick", callArguments);
+}
+
+async function plotLine(callArguments) {
+	console.log("plotLine", callArguments);
+}
+
+async function correlation(callArguments) {
+	console.log("correlation", callArguments);
+}
+
+async function winRatio(callArguments) {
+	console.log("winRatio", callArguments);
+}
+
+async function walkForward(callArguments) {
+	console.log("walkForward", callArguments);
 }
 
 document.addEventListener("DOMContentLoaded", _ => {
-	initializeEditor();
-	loadData();
+	const editor = initializeEditor();
+	// loadData();
+	const script = editor.getValue();
+	const callHandlers = {
+		plotCandlestick: plotCandlestick,
+		plotLine: plotLine,
+		correlation: correlation,
+		winRatio: winRatio,
+		walkForward: walkForward,
+	};
+	const engine = new ScriptingEngine(callHandlers);
+	engine.run(script)
+		.then(() => console.log("Done executing script"))
+		.catch(error => console.error(`Scripting error: ${error}`));
 });
