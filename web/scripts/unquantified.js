@@ -3,7 +3,7 @@ function loadData() {
 		tickers: [
 			"ES"
 		],
-		from: "2024-01-01T00:00:00+02:00",
+		from: "2000-01-01T00:00:00+02:00",
 		to: "2024-06-01T00:00:00+02:00",
 		timeFrame: 1440
 	};
@@ -19,12 +19,37 @@ function loadData() {
 	fetch(url, options)
 		.then(response => response.json())
 		.then(historyResponse => drawChart(historyResponse))
+		// .then(historyResponse => winRatioTest(historyResponse.tickers["ES"]))
 		.catch(error => console.error(error));
 }
 
 function getTime(timeString) {
 	const time = luxon.DateTime.fromISO(timeString);
 	return time.valueOf();
+}
+
+function winRatioTest(records) {
+	let tradesWon = 0;
+	let tradesLost = 0;
+	let gains = 0;
+	let losses = 0;
+	for (let i = 0; i < records.length - 1; i++) {
+		let ohlc1 = records[i];
+		let ohlc2 = records[i + 1];
+		let difference = ohlc2.close - ohlc1.close;
+		if (difference > 0) {
+			gains += difference;
+			tradesWon++;
+		}
+		else {
+			losses -= difference;
+			tradesLost++;
+		}
+	}
+	const winRatio = tradesWon / (tradesWon + tradesLost);
+	const profitRatio = gains / losses;
+	console.log(`Win ratio: ${(winRatio * 100).toFixed(1)}%`);
+	console.log(`Profit ratio: ${profitRatio.toFixed(2)}`);
 }
 
 function drawChart(historyResponse) {
@@ -75,7 +100,7 @@ function drawChart(historyResponse) {
 							enabled: true
 						},
 						mode: "x",
-					}
+					},
 				},
 				legend: {
 					position: "bottom"
@@ -103,8 +128,8 @@ function initializeEditor() {
 		useWorker: false
 	});
 	editor.setShowPrintMargin(false);
-	editor.setTheme("ace/theme/monokai");
-	editor.session.setMode("ace/mode/javascript");
+	const mode = new UnquantifiedMode();
+	editor.session.setMode(mode);
 	editor.session.setUseWrapMode(true);
 	editor.renderer.setShowGutter(false);
 	const resizeEditor = () => {

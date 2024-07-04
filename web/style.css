@@ -33,3 +33,19 @@ body {
 	-ms-user-select: none;
 	user-select: none;
 }
+
+.ace_command {
+	color: #213bff;
+}
+
+.ace_variable {
+	color: #ff006e !important;
+}
+
+.ace_ticker {
+	color: #777;
+}
+
+.ace_keyword {
+	color: black !important;
+}
