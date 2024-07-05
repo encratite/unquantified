@@ -1,10 +1,12 @@
-class Value {
+export const SecondsPerDay = 1440;
+
+export class Value {
 	getJsonValue() {
 		throw new Error("Not implemented");
 	}
 }
 
-class BasicValue {
+export class BasicValue {
 	constructor(value) {
 		this.value = value;
 	}
@@ -14,20 +16,20 @@ class BasicValue {
 	}
 }
 
-class Numeric extends BasicValue {
+export class Numeric extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
 }
 
-class Bool extends BasicValue {
+export class Bool extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
 }
 
 // Either a Date object or one of the special keywords "first", "last", "now"
-class DateTime extends BasicValue {
+export class DateTime extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
@@ -42,14 +44,13 @@ class DateTime extends BasicValue {
 	}
 }
 
-class TimeFrame extends Value {
-	constructor(minutes) {
-		super();
-		this.minutes = minutes;
+export class TimeFrame extends BasicValue {
+	constructor(value) {
+		super(value);
 	}
 }
 
-class Offset extends Value {
+export class Offset extends Value {
 	constructor(offset, unit) {
 		super();
 		this.offset = offset;
@@ -62,13 +63,13 @@ class Offset extends Value {
 }
 
 // Either a ticker like "ES", "NQ" or the special keyword "all" 
-class Ticker extends BasicValue {
+export class Ticker extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
 }
 
-class Array extends BasicValue {
+export class Array extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
@@ -78,19 +79,19 @@ class Array extends BasicValue {
 	}
 }
 
-class FileName extends BasicValue {
+export class FileName extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
 }
 
-class Parameters extends BasicValue {
+export class Parameters extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
 }
 
-export default class ScriptingEngine {
+export class ScriptingEngine {
 	pattern = {
 		// Statements
 		multiLineAssignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\{[\s\S]+?\})\s*?(?:\n|$)/,
@@ -268,7 +269,7 @@ export default class ScriptingEngine {
 				minutes = 60 * value;
 			}
 			else if (match[0] === "daily") {
-				minutes = 1440;
+				minutes = SecondsPerDay;
 			}
 			else {
 				throw new Error(`Unable to parse time frame: ${valueString}`);
@@ -391,8 +392,7 @@ export default class ScriptingEngine {
 		if (limit != null && step == null) {
 			step = 1;
 		}
-		parameters[parameterName] =
-		{
+		parameters[parameterName] = {
 			value: value,
 			limit: limit,
 			step: step

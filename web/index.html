@@ -10,42 +10,21 @@
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.35.0/ace.js"></script>
 		<script src="https://code.jquery.com/jquery-3.7.1.js"></script>
 		<script src="https://code.jquery.com/ui/1.13.3/jquery-ui.js"></script>
-		<script src="./scripts/highlight-rules.js"></script>
-		<script src="./scripts/unquantified.js" type="module"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
 		<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.3/themes/base/jquery-ui.css">
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.css">
 		<link rel="stylesheet" href="./style.css">
 		<link rel="icon" type="image/x-icon" href="./favicon.ico">
+		<script type="module">
+			import { WebUi } from "./scripts/web-ui.js";
+
+			document.addEventListener("DOMContentLoaded", _ => {
+				const webUi = new WebUi();
+				webUi.initialize();
+			});
+		</script>
 	</head>
 	<body>
 		<div id="content"></div>
-		<div id="editor">$t1 = 2024-01-01
-$t2 = 2024-06-01
-$t3 = 2024-02-01 08:00:00
-$t4 = 2024-02-01 17:00:00
-$ticker = GC
-$tickers = [ES, NQ, CL]
-plotCandlestick ES, -6mo, last
-plotCandlestick ES, -6mo, now
-plotLine [ES, NQ, CL], -1y, $t2, daily
-plotLine $tickers, -1y, $t2, daily
-plotLine $tickers, $t2, +1h, daily
-plotLine $tickers, $t2, +1w, 1h
-plotLine GC, 2024-02-01 08:00, 2024-02-01 17:00, 15m
-plotLine $ticker, 2024-02-01 08:00:00, 2024-02-01 17:00:00, 30m
-correlation [ES, NQ, GC, CL, NG]
-correlation [ES, NQ, GC, CL, NG], first, last
-correlation [ES, NQ, GC, CL, NG], $t1, $t2
-correlation all, $t1, $t2
-walkForward amazing_sma_crossover_strat, NQ, -4y, last, 15m
-$parameters = {sma1: 10 to 20, sma2: 20 to 40, risk_reward: 3.0, max_bars: 15}
-walkForward amazing_sma_crossover_strat, NQ, -4y, last, 30m, $parameters
-$parameters = {
-	sma1: 10 to 25 step 5,
-	sma2: 20 to 50 step 10,
-	risk_reward: 2.5,
-	max_bars: 15
-}
-walkForward amazing_sma_crossover_strat, NQ, -4y, last, 30m, $parameters
-winRatio NQ, $t1, $t2</div>
 	</body>
 </html>

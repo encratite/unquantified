@@ -27,7 +27,7 @@ const UnquantifiedHighlightRules = function() {
 				regex: /-?\d+(?:\.\d+)?\b/
 			}, {
 				token : "variable",
-				regex : /\$[A-Za-z0-9_]+/
+				regex : /\$[A-Za-z_][A-Za-z0-9_]*/
 			}, {
 				token : "ticker",
 				regex : /[A-Z]{2,}/
@@ -43,7 +43,7 @@ const UnquantifiedHighlightRules = function() {
 
 oop.inherits(UnquantifiedHighlightRules, TextHighlightRules);
 
-var UnquantifiedMode = function() {
+export const UnquantifiedMode = function() {
 	this.HighlightRules = UnquantifiedHighlightRules;
 };
 const TextMode = ace.require("ace/mode/text").Mode;
