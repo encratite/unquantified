@@ -84,13 +84,19 @@ class FileName extends BasicValue {
 	}
 }
 
+class Parameters extends BasicValue {
+	constructor(value) {
+		super(value);
+	}
+}
+
 export default class ScriptingEngine {
 	pattern = {
 		// Statements
-		assignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)\s*?(?:\n|$)/,
+		multiLineAssignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\{[\s\S]+?\})\s*?(?:\n|$)/,
+		assignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*?(?:\n|$)/,
 		arrayOnlyCall: /^([a-z][A-Za-z0-9]*)\s+(\[.+?\])\s*?(?:\n|$)/,
-		arrayCall: /^([a-z][A-Za-z0-9]*)\s+(\[.+?\]\s*,\s*)?(.+?)\s*?(?:\n|$)/,
-		call: /^([a-z][A-Za-z0-9]*)\s+(.+?)\s*?(?:\n|$)/,
+		call: /^([a-z][A-Za-z0-9]*)\s+(?:(\[.+?\])\s*,\s*)?(.+?)\s*?(?:\n|$)/,
 		// Values
 		numeric: /^-?\d+(?:\.\d+)?$/,
 		date: /^(?:(\d{4})-(\d{2})-(\d{2})|first|last|now)$/,
@@ -102,6 +108,8 @@ export default class ScriptingEngine {
 		variable: /^\$([A-Za-z_][A-Za-z0-9_]*)$/,
 		bool: /^(?:true|false)$/,
 		fileName: /^[a-z][a-z0-9_]*$/,
+		parameters: /^\{([\s\S]+?)\}$/,
+		parameter: /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+(?:\.\d+)?)(?:\s+to\s+(-?\d+(?:\.\d+)?)(?:\s+step\s+(-?\d+(?:\.\d+)?))?)?$/,
 	};
 
 	constructor(callHandlers) {
@@ -112,9 +120,9 @@ export default class ScriptingEngine {
 	async run(script) {
 		let input = script.trim();
 		const matchPatterns = [
+			[this.pattern.multiLineAssignment, this.processMultiLineAssignment.bind(this)],
 			[this.pattern.assignment, this.processAssignment.bind(this)],
 			[this.pattern.arrayOnlyCall, this.processArrayOnlyCall.bind(this)],
-			[this.pattern.arrayCall, this.processArrayCall.bind(this)],
 			[this.pattern.call, this.processCall.bind(this)]
 		];
 		while (input.length > 0) {
@@ -139,6 +147,13 @@ export default class ScriptingEngine {
 		}
 	}
 
+	async processMultiLineAssignment(match) {
+		const variable = match[1];
+		const valueString = match[2].replace("\n", " ");
+		const value = this.getValueFromString(valueString);
+		this.variables[variable] = value;
+	}
+
 	async processAssignment(match) {
 		const variable = match[1];
 		const valueString = match[2];
@@ -152,17 +167,18 @@ export default class ScriptingEngine {
 		await this.performCall(command, [array]);
 	}
 
-	async processArrayCall(match) {
-		const command = match[1];
-		const array = this.getArray(match[2]);
-		const otherArguments = this.getCallArguments(match[3]);
-		const callArguments = [array].concat(otherArguments);
-		await this.performCall(command, callArguments);
-	}
-
 	async processCall(match) {
 		const command = match[1];
-		const callArguments = this.getCallArguments(match[2]);
+		const otherArguments = this.getCallArguments(match[3]);
+		let callArguments = otherArguments;
+		const arrayString = match[2];
+		if (arrayString != null) {
+			const array = this.getArray(arrayString);
+			if (array == null) {
+				throw new Error(`Unable to parse array: ${arrayString}`);
+			}
+			callArguments = [array].concat(otherArguments);
+		}
 		await this.performCall(command, callArguments);
 	}
 
@@ -178,6 +194,7 @@ export default class ScriptingEngine {
 			this.getVariable.bind(this),
 			this.getBool.bind(this),
 			this.getFileName.bind(this),
+			this.getParameters.bind(this),
 		];
 		for (const parser of parsers) {
 			const value = parser(valueString);
@@ -326,6 +343,19 @@ export default class ScriptingEngine {
 		return null;
 	}
 
+	getParameters(valueString) {
+		const match = this.pattern.parameters.exec(valueString);
+		if (match != null) {
+			const parametersObject = {};
+			match[1]
+				.split(",")
+				.forEach(x => this.setParameter(x.trim(), parametersObject));
+			const parameters = new Parameters(parametersObject);
+			return parameters;
+		}
+		return null;
+	}
+
 	async performCall(command, commandArguments) {
 		const handler = this.callHandlers[command];
 		if (handler == null) {
@@ -339,5 +369,33 @@ export default class ScriptingEngine {
 			.split(",")
 			.map(x => this.getValueFromString(x.trim()));
 		return callArguments;
+	}
+
+	setParameter(parameterString, parameters) {
+		const match = this.pattern.parameter.exec(parameterString);
+		if (match == null) {
+			throw new Error(`Unable to parse parameter: ${parameterString}`);
+		}
+		const parameterName = match[1];
+		const value = parseFloat(match[2]);
+		let limit = null;
+		const limitString = match[3];
+		if (limitString != null) {
+			limit = parseFloat(limitString);
+		}
+		let step = null;
+		const stepString = match[4];
+		if (stepString != null) {
+			step = parseFloat(stepString);
+		}
+		if (limit != null && step == null) {
+			step = 1;
+		}
+		parameters[parameterName] =
+		{
+			value: value,
+			limit: limit,
+			step: step
+		};
 	}
 }
