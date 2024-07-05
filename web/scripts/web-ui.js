@@ -103,21 +103,7 @@ export class WebUi {
 		if (context === null) {
 			throw new Error("Failed to create 2D context");
 		}
-		let type;
-		let datasets;
-		if (isCandlestick) {
-			type = "candlestick";
-			datasets = this.getCandlestickDatasets(history);
-		}
-		else {
-			type = "line";
-			datasets = this.getLineDatasets(history);
-		}
 		const options = {
-			type: type,
-			data: {
-				datasets: datasets
-			},
 			options: {
 				maintainAspectRatio: false,
 				plugins: {
@@ -144,7 +130,43 @@ export class WebUi {
 					}
 				}
 			}
-		};
+		}
+		if (isCandlestick) {
+			options.type = "candlestick";
+			options.data = {
+				datasets: this.getCandlestickDatasets(history)
+			};
+		}
+		else {
+			options.type = "line";
+			options.data = {
+				datasets: this.getLineDatasets(history)
+			};
+			const innerOptions = options.options;
+			innerOptions.parsing = false;
+			innerOptions.scales = {
+				x: {
+					type: "timeseries",
+					offset: true,
+					ticks: {
+						major: {
+							enabled: true,
+						},
+						source: "data",
+						maxRotation: 0,
+						autoSkip: true,
+						autoSkipPadding: 75,
+						sampleSize: 100
+					},
+				},
+				y: {
+					type: "linear"
+				}
+			};
+			innerOptions.pointStyle = false;
+			innerOptions.borderJoinStyle = "bevel";
+			innerOptions.pointHitRadius = 3;
+		}
 		const chart = new Chart(context, options);
 		button.onclick = _ => chart.resetZoom();
 		$(container).resizable();
@@ -201,7 +223,8 @@ export class WebUi {
 		const editor = ace.edit(container);
 		editor.setOptions({
 			fontSize: "14px",
-			useWorker: false
+			useWorker: false,
+			autoScrollEditorIntoView: true
 		});
 		editor.setShowPrintMargin(false);
 		editor.setHighlightActiveLine(false);
@@ -234,6 +257,7 @@ export class WebUi {
 				this.disableHighlight();
 				this.editorContainer.classList.add("read-only");
 				this.createEditor();
+				window.scrollTo(0, document.body.scrollHeight);
 			}
 			catch (error) {
 				toastr.error(error, "Script Error");
@@ -280,7 +304,7 @@ export class WebUi {
 				tickers = [tickerArgument.getJsonValue()];
 			}
 			else if (tickerArgument instanceof Array) {
-				for (const t of tickerArgument) {
+				for (const t of tickerArgument.value) {
 					if (!(t instanceof Ticker)) {
 						throw new Error("Encountered an invalid data type in a ticker array");
 					}
@@ -298,11 +322,11 @@ export class WebUi {
 	}
 
 	async plotCandlestick(callArguments) {
-		this.plot(callArguments, true);
+		await this.plot(callArguments, true);
 	}
 
 	async plotLine(callArguments) {
-		this.plot(callArguments, false);
+		await this.plot(callArguments, false);
 	}
 
 	async correlation(callArguments) {

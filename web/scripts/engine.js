@@ -307,7 +307,7 @@ export class ScriptingEngine {
 				.split(",")
 				.map(x => this.getValueFromString(x.trim()));
 			const array = new Array(values);
-			return values;
+			return array;
 		}
 		return null;
 	}
