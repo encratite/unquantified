@@ -35,6 +35,10 @@ const UnquantifiedHighlightRules = function() {
 				token : "command",
 				regex : /^[A-Za-z]+\b/
 			}
+			, {
+				token : "string",
+				regex : /".+?"/
+			}
 		]
 	};
 

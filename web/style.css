@@ -44,7 +44,7 @@ body {
 	color: #213bff;
 }
 
-.ace_variable {
+.ace_variable, .ace_string {
 	color: #ff006e !important;
 }
 

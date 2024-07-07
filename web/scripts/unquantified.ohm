@@ -1,0 +1,25 @@
+Unquantified {
+	Program = Command*
+	Command = (Assignment | Call) (eol | end)
+	Assignment = variable "=" (Value | Parameters)
+	Value = variable | dateTime | date | offset | timeFrame | numeric | ticker | keyword | string | Array | Parameters
+	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
+	Parameter = identifier ":" numeric ("to" numeric ("step" numeric)?)?
+	Call = identifier Value ("," Value)*
+	Array = "[" ticker ("," ticker)* "]"
+	identifier = lower (alnum | "_") *
+	variable = "$" identifier
+	nonZeroDigit = "1".."9"
+	numeric = "-"? nonZeroDigit digit* ("." digit+)?
+	date = nonZeroDigit digit digit digit "-" digit digit "-" digit digit
+	dateTime = date space+ digit digit ":" digit digit (":" digit digit)?
+	offset = ("+" | "-") nonZeroDigit digit* ("mo" | "m" | "h" | "d" | "w" | "y")
+	timeFrame = nonZeroDigit digit* ("m" | "h")
+	ticker = upper+
+	stringDelimiter = "\""
+	string = stringDelimiter (~stringDelimiter any)* stringDelimiter
+	keyword = "true" | "false" | "first" | "last" | "now" | "daily" | "all"
+	space := " " | "\t"
+	whitespace = " " | "\t" | "\r" | "\n"
+	eol = "\r"? "\n"
+}

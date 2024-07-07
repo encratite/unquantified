@@ -92,269 +92,138 @@ export class Parameters extends BasicValue {
 }
 
 export class ScriptingEngine {
-	pattern = {
-		// Statements
-		multiLineAssignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\{[\s\S]+?\})\s*?(?:\n|$)/,
-		assignment: /^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*?(?:\n|$)/,
-		arrayOnlyCall: /^([a-z][A-Za-z0-9]*)\s+(\[.+?\])\s*?(?:\n|$)/,
-		call: /^([a-z][A-Za-z0-9]*)\s+(?:(\[.+?\])\s*,\s*)?(.+?)\s*?(?:\n|$)/,
-		// Values
-		numeric: /^-?\d+(?:\.\d+)?$/,
-		date: /^(?:(\d{4})-(\d{2})-(\d{2})|first|last|now)$/,
-		dateTime: /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/,
-		timeFrame: /^(?:(\d+)(m|h)|daily)$/,
-		offset: /^((?:\+|-)\d+)(m|h|d|w|mo|y)$/,
-		ticker: /^(?:[A-Z][A-Z0-9]+|all)$/,
-		array: /^\[(.+?)\]$/,
-		variable: /^\$([A-Za-z_][A-Za-z0-9_]*)$/,
-		bool: /^(?:true|false)$/,
-		fileName: /^[a-z][a-z0-9_]*$/,
-		parameters: /^\{([\s\S]+?)\}$/,
-		parameter: /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+(?:\.\d+)?)(?:\s+to\s+(-?\d+(?:\.\d+)?)(?:\s+step\s+(-?\d+(?:\.\d+)?))?)?$/,
-	};
-
 	constructor(callHandlers) {
 		this.variables = {};
 		this.callHandlers = callHandlers;
+		this.grammar = null;
+		this.semantics = null;
+	}
+
+	async initialize() {
+		const grammarSource = await fetch("./scripts/unquantified.ohm")
+			.then(response => response.text());
+		this.grammar = ohm.grammar(grammarSource);
+		this.semantics = this.grammar.createSemantics();
+		this.semantics.addOperation("eval", {
+			Program: (commands) => {
+				commands.eval();
+			},
+			Command: (command, _) => {
+				command.eval();
+			},
+			Assignment: (variable, _, value) => {
+				console.log("Assignment", variable.eval(), value.eval());
+			},
+			Call: (identifier, firstValue, _, otherValues) => {
+				console.log("Call", identifier.eval(), firstValue.eval(), otherValues.eval());
+			},
+			Parameters: (_, __, first, ___, ____, others, _____, ______) => {
+				return [first.eval()].concat(others.eval());
+			},
+			Parameter: (identifier, _, from, __, to, ___, step) => {
+				return {
+					identifier: identifier.eval(),
+					from: from.eval(),
+					to: to.eval(),
+					step: step.eval()
+				};
+			},
+			Array: (_, first, __, others, ___) => {
+				return [first.eval()].concat(others.eval());
+			},
+			identifier: (first, others) => {
+				return first.sourceString + others.sourceString;
+			},
+			variable: (_, identifier) => {
+				return identifier.eval();
+			},
+			numeric: (negative, first, others, _, fractional) => {
+				let numericString = (negative ? negative.sourceString : "") + first.sourceString + (others ? others.sourceString : "");
+				if (fractional) {
+					numericString += `.${fractional.sourceString}`;
+				}
+				return parseFloat(numericString);
+			},
+			date: (year1, year2, year3, year4, _, month1, month2, __, day1, day2) => {
+				const yearString = year1.sourceString + year2.sourceString + year3.sourceString + year4.sourceString;
+				const monthString = month1.sourceString + month2.sourceString;
+				const dayString = day1.sourceString + day2.sourceString;
+				const yearInt = parseInt(yearString);
+				const monthInt = parseInt(monthString);
+				const dayInt = parseInt(dayString);
+				const date = new Date(yearInt, monthInt - 1, dayInt);
+				return date;
+			},
+			dateTime: (date, _, hour1, hour2, __, minute1, minute2, ___, second1, second2) => {
+				const dateObject = date.eval();
+				const hoursString = hour1.sourceString + hour2.sourceString;
+				const minutesString = minute1.sourceString + minute2.sourceString;
+				const secondsString = second1 ? (second1.sourceString + second2.sourceString) : null;
+				const hours = parseInt(hoursString);
+				const minutes = parseInt(minutesString);
+				const seconds = secondsString ? parseInt(secondsString) : 0;
+				const dateTime = new Date(dateObject.getYear(), dateObject.getMonth(), dateObject.getDate(), hours, minutes, seconds);
+				return dateTime;
+			},
+			offset: (sign, first, others, unit) => {
+				const offsetString = sign.sourceString + first.sourceString + (others ? others.sourceString : "");
+				const offsetInt = parseInt(offsetString);
+				const offset = new Offset(offsetInt, unit.sourceString);
+				return offset;
+			},
+			timeFrame: (first, others, unit) => {
+				const timeFrameString = first.sourceString + (others ? others.sourceString : "");
+				const timeFrameInt = parseInt(timeFrameString);
+				if (unit.sourceString === "h") {
+					timeFrameInt *= 60;
+				}
+				const timeFrame = new TimeFrame(timeFrameInt);
+				return timeFrame;
+			},
+			ticker: chars => {
+				return new Ticker(chars.sourceString);
+			},
+			string: (_, content, __) => {
+				return content.sourceString;
+			},
+			keyword: keyword => {
+				switch (keyword.sourceString) {
+					case "true":
+						return new Bool(true);
+					case "false":
+						return new Bool(false);
+					case "first":
+						throw new Error("Not implemented");
+					case "last":
+						throw new Error("Not implemented");
+					case "now":
+						return new DateTime(new Date());
+					case "daily":
+						return new TimeFrame(SecondsPerDay);
+					case "all":
+						throw new Error("Not implemented");
+				}
+				throw new Error(`Unknown keyword: ${keyword.sourceString}`);
+			},
+			whitespace: _ => {
+				return null;
+			},
+			eol: _ => {
+				return null;
+			},
+			_iter: items => {
+				return items.children.map(item => item.eval());
+			}
+		});
 	}
 
 	async run(script) {
-		let input = script.trim();
-		const matchPatterns = [
-			[this.pattern.multiLineAssignment, this.processMultiLineAssignment.bind(this)],
-			[this.pattern.assignment, this.processAssignment.bind(this)],
-			[this.pattern.arrayOnlyCall, this.processArrayOnlyCall.bind(this)],
-			[this.pattern.call, this.processCall.bind(this)]
-		];
-		while (input.length > 0) {
-			let matched = false;
-			for (let tuple of matchPatterns) {
-				const pattern = tuple[0];
-				const handler = tuple[1];
-				const match = pattern.exec(input);
-				if (match != null) {
-					await handler(match);
-					input = input.substr(match[0].length).trim();
-					matched = true;
-					break;
-				}
-			}
-			if (!matched) {
-				const linePattern = /^.+/;
-				const match = linePattern.exec(input)
-				const line = match[0];
-				throw new Error(`Unable to parse line: ${line}`);
-			}
+		const match = this.grammar.match(script);
+		if (!match.succeeded()) {
+			const errorPosition = match.getRightmostFailurePosition();
+			throw new Error(`Failed to parse script (position ${errorPosition})`);
 		}
-	}
-
-	async processMultiLineAssignment(match) {
-		const variable = match[1];
-		const valueString = match[2].replace("\n", " ");
-		const value = this.getValueFromString(valueString);
-		this.variables[variable] = value;
-	}
-
-	async processAssignment(match) {
-		const variable = match[1];
-		const valueString = match[2];
-		const value = this.getValueFromString(valueString);
-		this.variables[variable] = value;
-	}
-
-	async processArrayOnlyCall(match) {
-		const command = match[1];
-		const array = this.getArray(match[2]);
-		await this.performCall(command, [array]);
-	}
-
-	async processCall(match) {
-		const command = match[1];
-		const otherArguments = this.getCallArguments(match[3]);
-		let callArguments = otherArguments;
-		const arrayString = match[2];
-		if (arrayString != null) {
-			const array = this.getArray(arrayString);
-			if (array == null) {
-				throw new Error(`Unable to parse array: ${arrayString}`);
-			}
-			callArguments = [array].concat(otherArguments);
-		}
-		await this.performCall(command, callArguments);
-	}
-
-	getValueFromString(valueString) {
-		const parsers = [
-			this.getNumeric.bind(this),
-			this.getDate.bind(this),
-			this.getDateTime.bind(this),
-			this.getTimeFrame.bind(this),
-			this.getOffset.bind(this),
-			this.getTicker.bind(this),
-			this.getArray.bind(this),
-			this.getVariable.bind(this),
-			this.getBool.bind(this),
-			this.getFileName.bind(this),
-			this.getParameters.bind(this),
-		];
-		for (const parser of parsers) {
-			const value = parser(valueString);
-			if (value != null)
-				return value;
-		}
-		throw new Error(`Unable to parse value: ${valueString}`);
-	}
-
-	getNumeric(valueString) {
-		const match = this.pattern.numeric.exec(valueString);
-		if (match != null) {
-			const value = parseFloat(valueString);
-			const numeric = new Numeric(value);
-			return numeric;
-		}
-		return null;
-	}
-
-	getDate(valueString) {
-		const match = this.pattern.date.exec(valueString)
-		if (match != null) {
-			const keyword = match[0];
-			if (
-				keyword === "first" ||
-				keyword === "last" ||
-				keyword === "now"
-			) {
-				const dateTime = new DateTime(keyword);
-				return dateTime;
-			}
-			else {
-				const year = parseInt(match[1]);
-				const month = parseInt(match[2]);
-				const day = parseInt(match[3]);
-				const value = new Date(year, month - 1, day);
-				const dateTime = new DateTime(value);
-				return dateTime;
-			}
-		}
-		return null;
-	}
-
-	getDateTime(valueString) {
-		const match = this.pattern.dateTime.exec(valueString);
-		if (match != null) {
-			const year = parseInt(match[1]);
-			const month = parseInt(match[2]);
-			const day = parseInt(match[3]);
-			const hours = parseInt(match[4]);
-			const minutes = parseInt(match[5]);
-			const secondsMatch = match[6];
-			const seconds = secondsMatch != null ? parseInt(secondsMatch) : 0;
-			const value = new Date(year, month - 1, day, hours, minutes, seconds);
-			const dateTime = new DateTime(value);
-			return dateTime;
-		}
-		return null;
-	}
-
-	getTimeFrame(valueString) {
-		const match = this.pattern.timeFrame.exec(valueString);
-		if (match != null) {
-			const value = parseInt(match[1]);
-			const unit = match[2];
-			let minutes = null;
-			if (unit === "m") {
-				minutes = value;
-			}
-			else if (unit === "h") {
-				minutes = 60 * value;
-			}
-			else if (match[0] === "daily") {
-				minutes = SecondsPerDay;
-			}
-			else {
-				throw new Error(`Unable to parse time frame: ${valueString}`);
-			}
-			const timeFrame = new TimeFrame(minutes);
-			return timeFrame;
-		}
-		return null;
-	}
-
-	getOffset(valueString) {
-		const match = this.pattern.offset.exec(valueString);
-		if (match != null) {
-			const value = parseInt(match[1]);
-			const unit = match[2];
-			const offset = new Offset(value, unit);
-			return offset;
-		}
-		return null;
-	}
-
-	getTicker(valueString) {
-		const match = this.pattern.ticker.exec(valueString);
-		if (match != null) {
-			const ticker = new Ticker(match[0]);
-			return ticker;
-		}
-		return null;
-	}
-
-	getArray(valueString) {
-		const match = this.pattern.array.exec(valueString);
-		if (match != null) {
-			const values = match[1]
-				.split(",")
-				.map(x => this.getValueFromString(x.trim()));
-			const array = new Array(values);
-			return array;
-		}
-		return null;
-	}
-
-	getVariable(valueString) {
-		const match = this.pattern.variable.exec(valueString);
-		if (match != null) {
-			const variableName = match[1];
-			const value = this.variables[variableName];
-			if (value == null) {
-				throw new Error(`Unknown variable: ${valueString}`);
-			}
-			return value;
-		}
-		return null;
-	}
-
-	getBool(valueString) {
-		const match = this.pattern.bool.exec(valueString);
-		if (match != null) {
-			const boolean = match[0] === "true";
-			const value = new Bool(boolean);
-			return boolean;
-		}
-		return null;
-	}
-
-	getFileName(valueString) {
-		const match = this.pattern.fileName.exec(valueString);
-		if (match != null) {
-			const value = new FileName(match[0]);
-			return value;
-		}
-		return null;
-	}
-
-	getParameters(valueString) {
-		const match = this.pattern.parameters.exec(valueString);
-		if (match != null) {
-			const parametersObject = {};
-			match[1]
-				.split(",")
-				.forEach(x => this.setParameter(x.trim(), parametersObject));
-			const parameters = new Parameters(parametersObject);
-			return parameters;
-		}
-		return null;
+		const result = this.semantics(match).eval();
 	}
 
 	async performCall(command, commandArguments) {
@@ -363,39 +232,5 @@ export class ScriptingEngine {
 			throw new Error(`Unknown command: ${command}`);
 		}
 		await handler(commandArguments);
-	}
-
-	getCallArguments(argumentString) {
-		const callArguments = argumentString
-			.split(",")
-			.map(x => this.getValueFromString(x.trim()));
-		return callArguments;
-	}
-
-	setParameter(parameterString, parameters) {
-		const match = this.pattern.parameter.exec(parameterString);
-		if (match == null) {
-			throw new Error(`Unable to parse parameter: ${parameterString}`);
-		}
-		const parameterName = match[1];
-		const value = parseFloat(match[2]);
-		let limit = null;
-		const limitString = match[3];
-		if (limitString != null) {
-			limit = parseFloat(limitString);
-		}
-		let step = null;
-		const stepString = match[4];
-		if (stepString != null) {
-			step = parseFloat(stepString);
-		}
-		if (limit != null && step == null) {
-			step = 1;
-		}
-		parameters[parameterName] = {
-			value: value,
-			limit: limit,
-			step: step
-		};
 	}
 }

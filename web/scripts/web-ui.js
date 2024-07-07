@@ -11,6 +11,15 @@ import {
 
 export class WebUi {
 	constructor() {
+		this.content = null;
+		this.editor = null;
+		this.editorContainer = null;
+		this.engine = null;
+	}
+
+	async initialize() {
+		this.content = document.getElementById("content");
+		this.createEditor();
 		const callHandlers = {
 			plotCandlestick: this.plotCandlestick.bind(this),
 			plotLine: this.plotLine.bind(this),
@@ -19,14 +28,7 @@ export class WebUi {
 			walkForward: this.walkForward.bind(this),
 		};
 		this.engine = new ScriptingEngine(callHandlers);
-		this.content = null;
-		this.editor = null;
-		this.editorContainer = null;
-	}
-
-	initialize() {
-		this.content = document.getElementById("content");
-		this.createEditor();
+		await this.engine.initialize();
 	}
 
 	invoke(url, request) {
