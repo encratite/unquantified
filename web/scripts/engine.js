@@ -1,5 +1,25 @@
 export const SecondsPerDay = 1440;
 
+export class Assignment {
+	constructor(variable, value) {
+		this.variable = variable;
+		this.value = value;
+	}
+}
+
+export class Call {
+	constructor(name, callArguments) {
+		this.name = name;
+		this.callArguments = callArguments;
+	}
+}
+
+export class Variable {
+	constructor(name) {
+		this.name = name;
+	}
+}
+
 export class Value {
 	getJsonValue() {
 		throw new Error("Not implemented");
@@ -91,6 +111,16 @@ export class Parameters extends BasicValue {
 	}
 }
 
+export class Parameter extends Value {
+	constructor(name, value, limit, increment) {
+		super();
+		this.name = name;
+		this.value = value;
+		this.limit = limit;
+		this.increment = increment;
+	}
+}
+
 export class ScriptingEngine {
 	constructor(callHandlers) {
 		this.variables = {};
@@ -105,28 +135,28 @@ export class ScriptingEngine {
 		this.grammar = ohm.grammar(grammarSource);
 		this.semantics = this.grammar.createSemantics();
 		this.semantics.addOperation("eval", {
-			Program: (commands) => {
-				commands.eval();
+			Program: commands => {
+				return commands.eval();
 			},
 			Command: (command, _) => {
-				command.eval();
+				return command.eval();
 			},
 			Assignment: (variable, _, value) => {
-				console.log("Assignment", variable.eval(), value.eval());
+				const assignment = new Assignment(variable.eval().name, value.eval());
+				return assignment;
 			},
 			Call: (identifier, firstValue, _, otherValues) => {
-				console.log("Call", identifier.eval(), firstValue.eval(), otherValues.eval());
+				const callArguments = [firstValue.eval()].concat(otherValues.eval());
+				const call = new Call(identifier.sourceString, callArguments);
+				return call;
 			},
 			Parameters: (_, __, first, ___, ____, others, _____, ______) => {
-				return [first.eval()].concat(others.eval());
+				const parameters = new Parameters([first.eval()].concat(others.eval()));
+				return parameters;
 			},
 			Parameter: (identifier, _, from, __, to, ___, step) => {
-				return {
-					identifier: identifier.eval(),
-					from: from.eval(),
-					to: to.eval(),
-					step: step.eval()
-				};
+				const parameter = new Parameter(identifier.eval(), from.eval(), to.eval(), step.eval());
+				return parameter;
 			},
 			Array: (_, first, __, others, ___) => {
 				return [first.eval()].concat(others.eval());
@@ -135,12 +165,14 @@ export class ScriptingEngine {
 				return first.sourceString + others.sourceString;
 			},
 			variable: (_, identifier) => {
-				return identifier.eval();
+				const name = identifier.eval();
+				const variable = new Variable(name);
+				return variable;
 			},
 			numeric: (negative, first, others, _, fractional) => {
 				let numericString = (negative ? negative.sourceString : "") + first.sourceString + (others ? others.sourceString : "");
 				if (fractional) {
-					numericString += `.${fractional.sourceString}`;
+					numericString = `${numericString}.${fractional.sourceString}`;
 				}
 				return parseFloat(numericString);
 			},
@@ -173,7 +205,7 @@ export class ScriptingEngine {
 			},
 			timeFrame: (first, others, unit) => {
 				const timeFrameString = first.sourceString + (others ? others.sourceString : "");
-				const timeFrameInt = parseInt(timeFrameString);
+				let timeFrameInt = parseInt(timeFrameString);
 				if (unit.sourceString === "h") {
 					timeFrameInt *= 60;
 				}
@@ -184,35 +216,35 @@ export class ScriptingEngine {
 				return new Ticker(chars.sourceString);
 			},
 			string: (_, content, __) => {
-				return content.sourceString;
+				const fileName = new FileName(content.sourceString);
+				return fileName;
 			},
 			keyword: keyword => {
-				switch (keyword.sourceString) {
+				const string = keyword.sourceString;
+				switch (string) {
 					case "true":
 						return new Bool(true);
 					case "false":
 						return new Bool(false);
 					case "first":
-						throw new Error("Not implemented");
 					case "last":
-						throw new Error("Not implemented");
 					case "now":
-						return new DateTime(new Date());
+						return new DateTime(string);
 					case "daily":
 						return new TimeFrame(SecondsPerDay);
 					case "all":
-						throw new Error("Not implemented");
+						return new Ticker(string);
 				}
 				throw new Error(`Unknown keyword: ${keyword.sourceString}`);
 			},
 			whitespace: _ => {
 				return null;
 			},
-			eol: _ => {
+			eol: (_, __) => {
 				return null;
 			},
-			_iter: items => {
-				return items.children.map(item => item.eval());
+			_iter: (...children) => {
+				return children.map(item => item.eval());
 			}
 		});
 	}
@@ -224,6 +256,7 @@ export class ScriptingEngine {
 			throw new Error(`Failed to parse script (position ${errorPosition})`);
 		}
 		const result = this.semantics(match).eval();
+		console.log(result);
 	}
 
 	async performCall(command, commandArguments) {
