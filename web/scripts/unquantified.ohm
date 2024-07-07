@@ -1,6 +1,6 @@
 Unquantified {
-	Program = Command*
-	Command = (Assignment | Call) (eol | end)
+	Program = Statement*
+	Statement = (Assignment | Call) (eol | end)
 	Assignment = variable "=" (Value | Parameters)
 	Value = variable | dateTime | date | offset | timeFrame | numeric | ticker | keyword | string | Array | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"

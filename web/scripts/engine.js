@@ -135,11 +135,11 @@ export class ScriptingEngine {
 		this.grammar = ohm.grammar(grammarSource);
 		this.semantics = this.grammar.createSemantics();
 		this.semantics.addOperation("eval", {
-			Program: commands => {
-				return commands.eval();
+			Program: statements => {
+				return statements.eval();
 			},
-			Command: (command, _) => {
-				return command.eval();
+			Statement: (statement, _) => {
+				return statement.eval();
 			},
 			Assignment: (variable, _, value) => {
 				const assignment = new Assignment(variable.eval().name, value.eval());
@@ -159,7 +159,9 @@ export class ScriptingEngine {
 				return parameter;
 			},
 			Array: (_, first, __, others, ___) => {
-				return [first.eval()].concat(others.eval());
+				const elements = [first.eval()].concat(others.eval());
+				const array = new Array(elements);
+				return array;
 			},
 			identifier: (first, others) => {
 				return first.sourceString + others.sourceString;
@@ -184,17 +186,19 @@ export class ScriptingEngine {
 				const monthInt = parseInt(monthString);
 				const dayInt = parseInt(dayString);
 				const date = new Date(yearInt, monthInt - 1, dayInt);
-				return date;
+				const dateTime = new DateTime(date);
+				return dateTime;
 			},
 			dateTime: (date, _, hour1, hour2, __, minute1, minute2, ___, second1, second2) => {
-				const dateObject = date.eval();
+				const dateObject = date.eval().value;
 				const hoursString = hour1.sourceString + hour2.sourceString;
 				const minutesString = minute1.sourceString + minute2.sourceString;
 				const secondsString = second1 ? (second1.sourceString + second2.sourceString) : null;
 				const hours = parseInt(hoursString);
 				const minutes = parseInt(minutesString);
 				const seconds = secondsString ? parseInt(secondsString) : 0;
-				const dateTime = new Date(dateObject.getYear(), dateObject.getMonth(), dateObject.getDate(), hours, minutes, seconds);
+				const newDate = new Date(dateObject.getYear(), dateObject.getMonth(), dateObject.getDate(), hours, minutes, seconds);
+				const dateTime = new DateTime(newDate);
 				return dateTime;
 			},
 			offset: (sign, first, others, unit) => {
@@ -255,15 +259,39 @@ export class ScriptingEngine {
 			const errorPosition = match.getRightmostFailurePosition();
 			throw new Error(`Failed to parse script (position ${errorPosition})`);
 		}
-		const result = this.semantics(match).eval();
-		console.log(result);
+		const syntaxTree = this.semantics(match).eval();
+		for (const statement of syntaxTree) {
+			if (statement instanceof Assignment) {
+				const values = this.substituteVariables([statement.value]);
+				this.variables[statement.variable] = values[0];
+			}
+			else if (statement instanceof Call) {
+				const handler = this.callHandlers[statement.name];
+				if (handler == null) {
+					throw new Error(`Unknown call: ${statement.name}`);
+				}
+				const callArguments = this.substituteVariables(statement.callArguments);
+				await handler(callArguments);
+			}
+			else {
+				throw new Error("Unknown statement");
+			}
+		}
 	}
 
-	async performCall(command, commandArguments) {
-		const handler = this.callHandlers[command];
-		if (handler == null) {
-			throw new Error(`Unknown command: ${command}`);
-		}
-		await handler(commandArguments);
+	substituteVariables(input) {
+		const output = input.map(x => {
+			if (x instanceof Variable) {
+				const value = this.variables[x.name];
+				if (value == null) {
+					throw new Error(`Unknown variable: ${x.name}`);
+				}
+				return value;
+			}
+			else {
+				return x;
+			}
+		});
+		return output;
 	}
 }
