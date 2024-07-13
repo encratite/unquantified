@@ -140,9 +140,10 @@ export class WebUi {
 			};
 		}
 		else {
+			const datasets = this.getLineDatasets(history);
 			options.type = "line";
 			options.data = {
-				datasets: this.getLineDatasets(history)
+				datasets: datasets
 			};
 			const innerOptions = options.options;
 			innerOptions.parsing = false;
@@ -168,6 +169,23 @@ export class WebUi {
 			innerOptions.pointStyle = false;
 			innerOptions.borderJoinStyle = "bevel";
 			innerOptions.pointHitRadius = 3;
+			const multiMode = datasets.length > 1;
+			if (multiMode) {
+				const footer = tooltipItems => {
+					const close = tooltipItems[0].raw.c;
+					return `Close: ${close}`;
+				};
+				innerOptions.plugins.tooltip = {
+					callbacks: {
+						footer: footer,
+					}
+				};
+				innerOptions.scales.y.ticks = {
+					callback: value => {
+						return `${value.toFixed(1)}%`;
+					}
+				};
+			}
 		}
 		const chart = new Chart(context, options);
 		button.onclick = _ => chart.resetZoom();
@@ -200,13 +218,27 @@ export class WebUi {
 	}
 
 	getLineDatasets(history) {
-		const datasets = Object.keys(history.tickers)
+		const tickers = Object.keys(history.tickers);
+		const multiMode = tickers.length > 1;
+		const datasets = tickers
 			.map(ticker => {
 				const records = history.tickers[ticker];
+				let firstClose = null;
+				if (records.length > 0) {
+					firstClose = records[0].close;
+				}
 				const data = records.map(ohlc => {
+					let value;
+					if (multiMode) {
+						value = ohlc.close / firstClose * 100.0;
+					}
+					else {
+						value = ohlc.close;
+					}
 					return {
 						x: this.getTime(ohlc.time),
-						y: ohlc.close
+						y: value,
+						c: ohlc.close
 					};
 				});
 				return {
