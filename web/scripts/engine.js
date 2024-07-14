@@ -56,10 +56,20 @@ export class DateTime extends BasicValue {
 
 	getJsonValue() {
 		if (this.value instanceof Date) {
-			return this.value.toISOString();
+			return {
+				date: this.value.toISOString(),
+				offset: null,
+				offsetUnit: null,
+				specialKeyword: null
+			};
 		}
 		else {
-			return this.value;
+			return {
+				date: null,
+				offset: null,
+				offsetUnit: null,
+				specialKeyword: this.value
+			};
 		}
 	}
 }
@@ -78,7 +88,12 @@ export class Offset extends Value {
 	}
 
 	getJsonValue() {
-		throw new Error("Offsets cannot be directly evaluated");
+		return {
+			date: null,
+			offset: this.offset,
+			offsetUnit: this.unit,
+			specialKeyword: null
+		}
 	}
 }
 
