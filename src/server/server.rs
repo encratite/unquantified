@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::OsStr;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -140,7 +142,8 @@ async fn get_correlation(
 }
 
 fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
-	let ticker_archives: Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> = request.tickers
+	let tickers = resolve_tickers(request.tickers, &state)?;
+	let ticker_archives: Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> = tickers
 		.iter()
 		.map(|x| get_archive(&x, &state))
 		.collect();
@@ -153,7 +156,7 @@ fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Resu
 		.collect();
 	match result {
 		Ok(ticker_records) => {
-			let tuples = request.tickers.into_iter().zip(ticker_records.into_iter()).collect();
+			let tuples = tickers.into_iter().zip(ticker_records.into_iter()).collect();
 			Ok(tuples)
 		},
 		Err(error) => Err(error)
@@ -251,4 +254,27 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 		.filter(|x| matches_from_to(from, to, tz, x))
 		.map(|x| OhlcRecordWeb::new(&x, archive))
 		.collect()
+}
+
+fn resolve_tickers(tickers: Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
+	let all_keyword = "all";
+	if tickers.iter().any(|x| x == all_keyword) {
+		let data_directory = &*state.data_directory;
+		let entries = fs::read_dir(data_directory)
+			.expect("Unable to get list of archives");
+		let result = entries
+			.filter_map(|x| x.ok())
+			.map(|x| x.path())
+			.filter(|x| x.is_file())
+			.filter(|x| x.extension()
+				.and_then(|x| x.to_str()) == Some("zrk"))
+			.filter_map(|x| x.file_stem()
+				.and_then(|x| x.to_str())
+				.map(|x| x.to_string()))
+			.collect();
+		Ok(result)
+	}
+	else {
+		Ok(tickers)
+	}
 }

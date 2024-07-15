@@ -72,12 +72,11 @@ impl<'a> CsvParser<'a> {
 	fn get_csv_paths(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
 		fs::read_dir(path.clone())
 			.expect("Unable to get list of .csv files")
-			.filter(|x| x.is_ok())
-			.map(|x| x.unwrap().path())
+			.filter_map(|x| x.ok())
+			.map(|x| x.path())
 			.filter(|x|
 				x.is_file() &&
-				x.extension().is_some() &&
-				x.extension().unwrap() == "csv"
+				x.extension().and_then(|x| x.to_str()) == Some("csv")
 			)
 	}
 
