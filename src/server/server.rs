@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use axum::extract::{Json, State};
 use axum::routing::post;
 use axum::Router;
-use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, TimeZone};
+use chrono::{DateTime, FixedOffset};
 use chrono_tz::Tz;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -16,30 +16,7 @@ use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use dashmap::DashMap;
 use common::*;
-
-#[derive(Deserialize, Clone)]
-enum OffsetUnit {
-	#[serde(rename = "m")]
-	Minutes,
-	#[serde(rename = "h")]
-	Hours,
-	#[serde(rename = "d")]
-	Days,
-	#[serde(rename = "w")]
-	Weeks,
-	#[serde(rename = "mo")]
-	Months,
-	#[serde(rename = "y")]
-	Years
-}
-
-#[derive(Deserialize, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-enum SpecialDateTime {
-	First,
-	Last,
-	Now
-}
+use crate::datetime::*;
 
 struct ServerState {
 	data_directory: Arc<String>,
@@ -56,39 +33,22 @@ struct GetHistoryRequest {
 	time_frame: u16
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RelativeDateTime {
-	date: Option<DateTime<FixedOffset>>,
-	/*
-	offset and offset_unit encode relative offsets such as +15m, -1w and -4y.
-	If set, all other members of RelativeDateTime must be set to None.
-	The following unit strings are supported:
-	- "m": minutes
-	- "h": hours
-	- "d": days
-	- "w": weeks
-	- "mo": months
-	- "y": years
-	*/
-	offset: Option<i16>,
-	offset_unit: Option<OffsetUnit>,
-	/*
-	This optional member is used for the special keywords in the Unquantified prompt language:
-	- "first": Evaluates to the first point in time at which data is available for the specified symbol.
-	  If it is being used with multiple symbols, the minmum point in time out of all of them is used.
-	  This keyword may only be used for the "from" parameter.
-	- "last": Evaluates to the last point in time at wich data is available. With multiple symbols, the maximum is used.
-	  This keyword may only be used for the "to" parameter.
-	- "now": Evaluates to the current point in time.
-	  This keyword may only be used for the "to" parameter.
-	*/
-	special_keyword: Option<SpecialDateTime>
-}
-
 #[derive(Serialize)]
 struct GetHistoryResponse {
 	tickers: Option<HashMap<String, Vec<OhlcRecordWeb>>>,
+	error: Option<String>
+}
+
+#[derive(Deserialize)]
+struct GetCorrelationRequest {
+	tickers: Vec<String>,
+	from: RelativeDateTime,
+	to: RelativeDateTime
+}
+
+#[derive(Serialize)]
+struct GetCorrelationResponse {
+	correlation: Option<Vec<Vec<f64>>>,
 	error: Option<String>
 }
 
@@ -110,36 +70,6 @@ impl ServerState {
 		ServerState {
 			data_directory: Arc::new(data_directory),
 			ticker_cache: Arc::new(DashMap::new())
-		}
-	}
-}
-
-impl RelativeDateTime {
-	pub fn resolve(&self, other: &RelativeDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
-		match (self.date.is_some(), self.offset.is_some(), self.offset_unit.is_some(), self.special_keyword.is_some()) {
-			(true, false, false, false) => Ok(self.date.unwrap()),
-			(false, true, true, false) => {
-				let other_time = other.to_fixed(archives)?;
-				let offset_time = get_offset_date_time(&other_time, self.offset.unwrap(), self.offset_unit.clone().unwrap())
-					.expect("Invalid offset calculation".into());
-				Ok(offset_time)
-			},
-			(false, false, false, true) => {
-				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), archives)?;
-				Ok(special_time)
-			},
-			_ => Err("Invalid relative date time".into())
-		}
-	}
-
-	fn to_fixed(&self, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
-		match (self.date.is_some(), self.special_keyword.is_some()) {
-			(true, false) => Ok(self.date.unwrap()),
-			(false, true) => {
-				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), archives)?;
-				Ok(special_time)
-			},
-			_ => Err("Invalid combination of relative date times".into())
 		}
 	}
 }
@@ -168,6 +98,7 @@ pub async fn run(address: SocketAddr, data_directory: String) {
 	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
 		.route("/history", post(get_history))
+		.route("/correlation", post(get_correlation))
 		.with_state(state_arc)
 		.fallback_service(serve_dir);
 	let listener = TcpListener::bind(address).await.unwrap();
@@ -185,6 +116,23 @@ async fn get_history(
 		},
 		Err(error) => GetHistoryResponse {
 			tickers: None,
+			error: Some(error.to_string())
+		}
+	};
+	Json(response)
+}
+
+async fn get_correlation(
+	State(state): State<Arc<ServerState>>,
+	Json(request): Json<GetCorrelationRequest>
+) -> impl IntoResponse {
+	let response = match get_correlation_data(request, state) {
+		Ok(data) => GetCorrelationResponse {
+			correlation: Some(data),
+			error: None
+		},
+		Err(error) => GetCorrelationResponse {
+			correlation: None,
 			error: Some(error.to_string())
 		}
 	};
@@ -212,6 +160,10 @@ fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Resu
 	}
 }
 
+fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>) -> Result<Vec<Vec<f64>>, Box<dyn Error>> {
+	panic!("Not implemented");
+}
+
 fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
 	// Simple directory traversal check
 	let pattern = Regex::new("^[A-Z0-9]+$")?;
@@ -230,22 +182,6 @@ fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArch
 		state.ticker_cache.insert(ticker.to_string(), Arc::clone(&archive_arc));
 		Ok(archive_arc)
 	}
-}
-
-fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
-	tz.from_local_datetime(&time)
-		.single()
-		.unwrap()
-}
-
-fn get_date_time_fixed(time: NaiveDateTime, tz: &Tz) -> DateTime<FixedOffset> {
-	let time_tz = get_date_time_tz(time, tz);
-	time_tz.fixed_offset()
-}
-
-fn get_date_time_string(time: NaiveDateTime, tz: &Tz) -> Result<String, Box<dyn Error>> {
-	let time_tz = get_date_time_tz(time, tz);
-	Ok(time_tz.to_rfc3339())
 }
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
@@ -315,74 +251,4 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 		.filter(|x| matches_from_to(from, to, tz, x))
 		.map(|x| OhlcRecordWeb::new(&x, archive))
 		.collect()
-}
-
-fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
-	if special_keyword == SpecialDateTime::Now {
-		let now: DateTime<Local> = Local::now();
-		let now_with_timezone: DateTime<FixedOffset> = now.with_timezone(now.offset());
-		Ok(now_with_timezone)
-	}
-	else {
-		let is_first = special_keyword == SpecialDateTime::First;
-		let times = archives
-			.iter()
-			.map(|x| resolve_first_last(is_first, x))
-			.collect::<Result<Vec<DateTime<FixedOffset>>, Box<dyn Error>>>()?;
-		let time = if is_first {
-			times.iter().min()
-		}
-		else {
-			times.iter().max()
-		};
-		match time {
-			Some(x) => Ok(*x),
-			None => Err("No records available".into())
-		}
-	}
-}
-
-fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
-	let tz = Tz::from_str(archive.time_zone.as_str())?;
-	let mut time_values = archive.intraday
-		.iter()
-		.map(|x| x.time);
-	let get_some_time = |time| match time {
-		Some(x) => Ok(get_date_time_fixed(x, &tz)),
-		None => Err("No records available".into())
-	};
-	if is_first {
-		get_some_time(time_values.next())
-	}
-	else {
-		get_some_time(time_values.last())
-	}
-}
-
-fn get_offset_date_time(time: &DateTime<FixedOffset>, offset: i16, offset_unit: OffsetUnit) -> Option<DateTime<FixedOffset>> {
-	let add_signed = |duration: fn(i64) -> TimeDelta, x: i16|
-		time.checked_add_signed(duration(x as i64));
-	let get_months = |x: i16| if x >= 0 {
-		Months::new(x as u32)
-	}
-	else {
-		Months::new((- x) as u32)
-	};
-	let add_sub_months = |x| {
-		let months = get_months(x);
-		if offset >= 0 {
-			time.checked_add_months(months)
-		}
-		else {
-			time.checked_sub_months(months)
-		}
-	};
-	match offset_unit {
-		OffsetUnit::Minutes => add_signed(Duration::minutes, offset),
-		OffsetUnit::Hours => add_signed(Duration::hours, offset),
-		OffsetUnit::Days => add_signed(Duration::days, offset),
-		OffsetUnit::Weeks => add_signed(Duration::days, 7 * offset),
-		OffsetUnit::Months => add_sub_months(offset),
-		OffsetUnit::Years => add_sub_months(12 * offset),
-	}
 }

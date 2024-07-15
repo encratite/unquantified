@@ -21,7 +21,7 @@ pub struct OhlcArchive {
 	pub time_zone: String
 }
 
-#[derive(Debug, Archive, Serialize, Deserialize, Clone)]
+#[derive(Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcRecord {
 	pub ticker: Option<String>,
 	pub time: NaiveDateTime,
