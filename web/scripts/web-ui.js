@@ -63,7 +63,8 @@ export class WebUi {
 		const options = {
 			setZone: true
 		};
-		return luxon.DateTime.fromISO(timeString, options);
+		const dateTime = luxon.DateTime.fromISO(timeString, options);
+		return dateTime;
 	}
 
 	winRatioTest(records) {
@@ -107,6 +108,13 @@ export class WebUi {
 		if (context === null) {
 			throw new Error("Failed to create 2D context");
 		}
+		const titleCallback = tooltipItems => {
+			const context = tooltipItems[0];
+			const dateTime = context.raw.time;
+			const formatString = timeFrame.value === SecondsPerDay ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
+			const title = dateTime.toFormat(formatString);
+			return title;
+		};
 		const options = {
 			options: {
 				maintainAspectRatio: false,
@@ -124,6 +132,11 @@ export class WebUi {
 					},
 					legend: {
 						position: "bottom"
+					},
+					tooltip: {
+						callbacks: {
+							title: titleCallback
+						}
 					}
 				},
 				transitions: {
@@ -170,22 +183,6 @@ export class WebUi {
 			innerOptions.pointStyle = false;
 			innerOptions.borderJoinStyle = "bevel";
 			innerOptions.pointHitRadius = 3;
-			const titleCallback = tooltipItems => {
-				const context = tooltipItems[0];
-				const dateTime = context.raw.x;
-				const formatString = timeFrame.value === SecondsPerDay ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
-				const title = dateTime.toFormat(formatString);
-				return title;
-			};
-			const labelCallback = context => {
-				return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
-			};
-			innerOptions.plugins.tooltip = {
-				callbacks: {
-					title: titleCallback,
-					label: labelCallback
-				}
-			};
 			const multiMode = datasets.length > 1;
 			if (multiMode) {
 				innerOptions.scales.y.ticks = {
@@ -193,6 +190,10 @@ export class WebUi {
 						return `${value.toFixed(1)}%`;
 					}
 				};
+				const labelCallback = context => {
+					return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
+				};
+				innerOptions.plugins.tooltip.callbacks.label = labelCallback;
 			}
 		}
 		const chart = new Chart(context, options);
@@ -208,12 +209,14 @@ export class WebUi {
 		const ticker = tickers[0];
 		const records = history.tickers[ticker];
 		const data = records.map(ohlc => {
+			const dateTime = this.getTime(ohlc.time);
 			return {
-				x: this.getTime(ohlc.time),
+				x: dateTime.valueOf(),
 				o: ohlc.open,
 				h: ohlc.high,
 				l: ohlc.low,
-				c: ohlc.close
+				c: ohlc.close,
+				time: dateTime
 			};
 		});
 		const datasets = [
@@ -243,10 +246,12 @@ export class WebUi {
 					else {
 						value = ohlc.close;
 					}
+					const dateTime = this.getTime(ohlc.time);
 					return {
-						x: this.getTime(ohlc.time),
+						x: dateTime.valueOf(),
 						y: value,
-						c: ohlc.close
+						c: ohlc.close,
+						time: dateTime
 					};
 				});
 				return {
