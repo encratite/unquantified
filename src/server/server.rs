@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use axum::extract::{Json, State};
 use axum::routing::post;
 use axum::Router;
-use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, Utc};
+use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, TimeZone};
 use chrono_tz::Tz;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -233,8 +233,9 @@ fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArch
 }
 
 fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
-	let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(time, Utc);
-	time_utc.with_timezone(tz)
+	tz.from_local_datetime(&time)
+		.single()
+		.unwrap()
 }
 
 fn get_date_time_fixed(time: NaiveDateTime, tz: &Tz) -> DateTime<FixedOffset> {
@@ -243,7 +244,7 @@ fn get_date_time_fixed(time: NaiveDateTime, tz: &Tz) -> DateTime<FixedOffset> {
 }
 
 fn get_date_time_string(time: NaiveDateTime, tz: &Tz) -> Result<String, Box<dyn Error>> {
-	let time_tz = get_date_time_tz(time, &tz);
+	let time_tz = get_date_time_tz(time, tz);
 	Ok(time_tz.to_rfc3339())
 }
 

@@ -60,8 +60,10 @@ export class WebUi {
 	}
 
 	getTime(timeString) {
-		const time = luxon.DateTime.fromISO(timeString);
-		return time.valueOf();
+		const options = {
+			setZone: true
+		};
+		return luxon.DateTime.fromISO(timeString, options);
 	}
 
 	winRatioTest(records) {
@@ -92,7 +94,7 @@ export class WebUi {
 		this.content.appendChild(element);
 	}
 
-	createChart(history, isCandlestick) {
+	createChart(history, isCandlestick, timeFrame) {
 		const container = document.createElement("div");
 		container.className = "plot";
 		const canvas = document.createElement("canvas");
@@ -146,7 +148,6 @@ export class WebUi {
 				datasets: datasets
 			};
 			const innerOptions = options.options;
-			innerOptions.parsing = false;
 			innerOptions.scales = {
 				x: {
 					type: "timeseries",
@@ -160,7 +161,7 @@ export class WebUi {
 						autoSkip: true,
 						autoSkipPadding: 75,
 						sampleSize: 100
-					},
+					}
 				},
 				y: {
 					type: "linear"
@@ -169,17 +170,24 @@ export class WebUi {
 			innerOptions.pointStyle = false;
 			innerOptions.borderJoinStyle = "bevel";
 			innerOptions.pointHitRadius = 3;
+			const titleCallback = tooltipItems => {
+				const context = tooltipItems[0];
+				const dateTime = context.raw.x;
+				const formatString = timeFrame.value === SecondsPerDay ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
+				const title = dateTime.toFormat(formatString);
+				return title;
+			};
+			const labelCallback = context => {
+				return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
+			};
+			innerOptions.plugins.tooltip = {
+				callbacks: {
+					title: titleCallback,
+					label: labelCallback
+				}
+			};
 			const multiMode = datasets.length > 1;
 			if (multiMode) {
-				const footer = tooltipItems => {
-					const close = tooltipItems[0].raw.c;
-					return `Close: ${close}`;
-				};
-				innerOptions.plugins.tooltip = {
-					callbacks: {
-						footer: footer,
-					}
-				};
 				innerOptions.scales.y.ticks = {
 					callback: value => {
 						return `${value.toFixed(1)}%`;
@@ -352,7 +360,7 @@ export class WebUi {
 		this.checkFromTo(from, to);
 		this.checkTimeFrame(timeFrame);
 		const history = await this.getHistory(tickers, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
-		this.createChart(history, isCandlestick);
+		this.createChart(history, isCandlestick, timeFrame);
 	}
 
 	async plotCandlestick(callArguments) {
