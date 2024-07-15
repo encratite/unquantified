@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::ffi::OsStr;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -50,8 +49,15 @@ struct GetCorrelationRequest {
 
 #[derive(Serialize)]
 struct GetCorrelationResponse {
-	correlation: Option<Vec<Vec<f64>>>,
+	correlation: Option<CorrelationData>,
 	error: Option<String>
+}
+
+#[derive(Serialize)]
+struct CorrelationData {
+	correlation: Vec<Vec<f64>>,
+	from: DateTime<FixedOffset>,
+	to: DateTime<FixedOffset>
 }
 
 #[derive(Serialize)]
@@ -142,12 +148,8 @@ async fn get_correlation(
 }
 
 fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
-	let tickers = resolve_tickers(request.tickers, &state)?;
-	let ticker_archives: Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> = tickers
-		.iter()
-		.map(|x| get_archive(&x, &state))
-		.collect();
-	let archives = ticker_archives?;
+	let resolved_tickers = resolve_tickers(&request.tickers, &state)?;
+	let archives = get_ticker_archives(&resolved_tickers, &state)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
 	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = archives
@@ -156,14 +158,58 @@ fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Resu
 		.collect();
 	match result {
 		Ok(ticker_records) => {
-			let tuples = tickers.into_iter().zip(ticker_records.into_iter()).collect();
+			let tuples = resolved_tickers.into_iter().zip(ticker_records.into_iter()).collect();
 			Ok(tuples)
 		},
 		Err(error) => Err(error)
 	}
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>) -> Result<Vec<Vec<f64>>, Box<dyn Error>> {
+fn get_ticker_archives(tickers: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
+	tickers
+		.iter()
+		.map(|x| get_archive(&x, &state))
+		.collect()
+}
+
+fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>) -> Result<CorrelationData, Box<dyn Error>> {
+	let resolved_tickers = resolve_tickers(&request.tickers, &state)?;
+	let archives = get_ticker_archives(&resolved_tickers, &state)?;
+	let mut from = request.from.resolve(&request.to, &archives)?;
+	let mut to = request.to.resolve(&request.from, &archives)?;
+	let get_fixed_time = |x: &OhlcRecord, archive: &OhlcArchive| archive.add_tz(x.time).fixed_offset();
+	for archive in &archives {
+		let add_tz = |x: &OhlcRecord| Some(get_fixed_time(x, &archive));
+		let records = &archive.daily;
+		let first = records
+			.iter()
+			.next()
+			.and_then(add_tz);
+		let last = records
+			.iter()
+			.last()
+			.and_then(add_tz);
+		match (first, last) {
+			(Some(first_time), Some(last_time)) => {
+				from = from.max(first_time);
+				to = to.min(last_time);
+			}
+			_ => return Err("Missing records in archive".into())
+		}
+	}
+	let mut indexes = HashMap::new();
+	let first_archive = &archives.iter().next()
+		.ok_or_else(|| "No archives spcified")?;
+	let mut i = 0;
+	for x in &first_archive.daily {
+		let fixed_time = get_fixed_time(&x, &first_archive);
+		if fixed_time >= from && fixed_time <= to {
+			indexes.insert(fixed_time, i);
+			i += 1;
+		}
+	}
+	for archive in &archives {
+	}
 	panic!("Not implemented");
 }
 
@@ -256,7 +302,7 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 		.collect()
 }
 
-fn resolve_tickers(tickers: Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
+fn resolve_tickers(tickers: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
 	let all_keyword = "all";
 	if tickers.iter().any(|x| x == all_keyword) {
 		let data_directory = &*state.data_directory;
@@ -275,6 +321,6 @@ fn resolve_tickers(tickers: Vec<String>, state: &Arc<ServerState>) -> Result<Vec
 		Ok(result)
 	}
 	else {
-		Ok(tickers)
+		Ok(tickers.clone())
 	}
 }
