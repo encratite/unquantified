@@ -11,6 +11,7 @@ use axum::routing::post;
 use axum::Router;
 use chrono::{DateTime, FixedOffset};
 use chrono_tz::Tz;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -178,6 +179,7 @@ fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>)
 	let mut from = request.from.resolve(&request.to, &archives)?;
 	let mut to = request.to.resolve(&request.from, &archives)?;
 	let get_fixed_time = |x: &OhlcRecord, archive: &OhlcArchive| archive.add_tz(x.time).fixed_offset();
+	// Determine common time range
 	for archive in &archives {
 		let add_tz = |x: &OhlcRecord| Some(get_fixed_time(x, &archive));
 		let records = &archive.daily;
@@ -197,20 +199,86 @@ fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>)
 			_ => return Err("Missing records in archive".into())
 		}
 	}
+	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
+	let in_range = |fixed_time| fixed_time >= from && fixed_time <= to;
 	let mut indexes = HashMap::new();
 	let first_archive = &archives.iter().next()
-		.ok_or_else(|| "No archives spcified")?;
-	let mut i = 0;
+		.ok_or_else(|| "No archives specified")?;
+	let mut i: usize = 0;
 	for x in &first_archive.daily {
 		let fixed_time = get_fixed_time(&x, &first_archive);
-		if fixed_time >= from && fixed_time <= to {
+		if in_range(fixed_time) {
 			indexes.insert(fixed_time, i);
 			i += 1;
 		}
 	}
-	for archive in &archives {
+	let count = indexes.len();
+	let delta_samples: Vec<(Vec<f64>, f64)> = archives.par_iter().map(|archive| {
+		let mut sum = 0f64;
+		let initial_value = 0f64;
+		let mut samples = vec![initial_value; count];
+		// Get close samples for the dynamic time range
+		for record in &archive.daily {
+			let fixed_time = get_fixed_time(&record, &archive);
+			if in_range(fixed_time) {
+				if let Some(index) = indexes.get(&fixed_time) {
+					let sample = record.close;
+					samples[*index] = sample;
+					sum += sample;
+				}
+			}
+		}
+		let mean = sum / (count as f64);
+		let mut square_sum = 0f64;
+		for x in &mut samples {
+			if *x != initial_value {
+				// Store pre-calculated x_i - x_mean values
+				*x -= mean;
+			}
+			else {
+				// Fill out gaps in the data with the mean value
+				*x = mean;
+			}
+			square_sum += *x * *x;
+		}
+		let sqrt = square_sum.sqrt();
+		(samples, sqrt)
+	}).collect();
+	// Create a square a matrix, default to 1.0 for diagonal elements
+	let mut matrix = vec![vec![1f64; count]; count];
+	// Generate a list of pairs (i, j) of indices for one half of the matrix, excluding the diagonal, for parallel processing
+	let mut pairs = Vec::new();
+	for i in 0..count {
+		for j in 0..count {
+			if i < j {
+				pairs.push((i, j));
+			}
+		}
 	}
-	panic!("Not implemented");
+	// Calculate Pearson correlation coefficients
+	let coefficients: Vec<(usize, usize, f64)> = pairs.par_iter().map(|(i, j)| {
+		let (x_samples, x_sqrt) = &delta_samples[*i];
+		let (y_samples, y_sqrt) = &delta_samples[*j];
+		let mut sum = 0f64;
+		for k in 0..count {
+			let delta_x = x_samples[k];
+			let delta_y = y_samples[k];
+			sum += delta_x * delta_y;
+		}
+		let coefficient = sum / (x_sqrt * y_sqrt);
+		(*i, *j, coefficient)
+	}).collect();
+	// Store correlation coefficients symmetrically
+	for (i, j, coefficient) in coefficients {
+		matrix[i][j] = coefficient;
+		matrix[j][i] = coefficient;
+	}
+	let output = CorrelationData {
+		correlation: matrix,
+		from: from,
+		to: to
+	};
+	Ok(output)
 }
 
 fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
