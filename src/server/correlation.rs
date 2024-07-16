@@ -17,8 +17,9 @@ pub fn get_correlation_matrix(request_from: DateTime<FixedOffset>, request_to: D
 	// Determine smallest overlapping time range across all OHLC records
 	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
-	let (count, delta_samples) = get_delta_samples(&from, &to, &archives)?;
+	let delta_samples = get_delta_samples(&from, &to, &archives)?;
 	// Create a square a matrix, default to 1.0 for diagonal elements
+	let count = archives.len();
 	let mut matrix = vec![vec![1f64; count]; count];
 	// Generate a list of pairs (i, j) of indices for one half of the matrix, excluding the diagonal, for parallel processing
 	let mut pairs = Vec::new();
@@ -33,8 +34,9 @@ pub fn get_correlation_matrix(request_from: DateTime<FixedOffset>, request_to: D
 	let coefficients: Vec<(usize, usize, f64)> = pairs.par_iter().map(|(i, j)| {
 		let (x_samples, x_sqrt) = &delta_samples[*i];
 		let (y_samples, y_sqrt) = &delta_samples[*j];
+		assert!(x_samples.len() == y_samples.len());
 		let mut sum = 0f64;
-		for k in 0..count {
+		for k in 0..x_samples.len() {
 			let delta_x = x_samples[k];
 			let delta_y = y_samples[k];
 			sum += delta_x * delta_y;
@@ -85,7 +87,7 @@ fn get_fixed_time(x: &OhlcRecord, archive: &OhlcArchive) -> DateTime<FixedOffset
 	 archive.add_tz(x.time).fixed_offset()
 }
 
-fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<(usize, Vec<(Vec<f64>, f64)>), Box<dyn Error>> {
+fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>, Box<dyn Error>> {
 	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
 	let in_range = |fixed_time| fixed_time >= *from && fixed_time <= *to;
 	let mut indexes = HashMap::new();
@@ -131,5 +133,5 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 		let sqrt = square_sum.sqrt();
 		(samples, sqrt)
 	}).collect();
-	Ok((count, delta_samples))
+	Ok(delta_samples)
 }

@@ -59,6 +59,16 @@ export class WebUi {
 		return response;
 	}
 
+	async getCorrelation(tickers, from, to) {
+		const request = {
+			tickers: tickers,
+			from: from,
+			to: to
+		};
+		const response = await this.invoke("/correlation", request);
+		return response;
+	}
+
 	getTime(timeString) {
 		const options = {
 			setZone: true
@@ -332,9 +342,7 @@ export class WebUi {
 	}
 
 	async plot(callArguments, isCandlestick) {
-		if (callArguments.length < 3 || callArguments.length > 4) {
-			throw new Error("Invalid number of arguments");
-		}
+		this.validateArgumentCount(callArguments, 3, 4);
 		const tickerArgument = callArguments[0];
 		const from = callArguments[1];
 		const to = callArguments[2];
@@ -351,19 +359,15 @@ export class WebUi {
 				tickers = [tickerArgument.getJsonValue()];
 			}
 			else if (tickerArgument instanceof Array) {
-				for (const t of tickerArgument.value) {
-					if (!(t instanceof Ticker)) {
-						throw new Error("Encountered an invalid data type in a ticker array");
-					}
-				}
+				this.validateTickers(tickerArgument);
 				tickers = tickerArgument.getJsonValue();
 			}
 			else {
 				throw new Error("Invalid ticker data type");
 			}
 		}
-		this.checkFromTo(from, to);
-		this.checkTimeFrame(timeFrame);
+		this.validateFromTo(from, to);
+		this.validateTimeFrame(timeFrame);
 		const history = await this.getHistory(tickers, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
 		this.createChart(history, isCandlestick, timeFrame);
 	}
@@ -377,7 +381,14 @@ export class WebUi {
 	}
 
 	async correlation(callArguments) {
-		console.log("correlation", callArguments);
+		this.validateArgumentCount(callArguments, 1, 3);
+		const tickerArgument = callArguments[0];
+		const from = callArguments[1] || new DateTime("first");
+		const to = callArguments[2] || new DateTime("last");
+		this.validateTickers(tickerArgument);
+		this.validateFromTo(from, to);
+		const correlation = await this.getCorrelation(tickerArgument.getJsonValue(), from.getJsonValue(), to.getJsonValue());
+		console.log(correlation);
 	}
 
 	async winRatio(callArguments) {
@@ -388,23 +399,37 @@ export class WebUi {
 		console.log("walkForward", callArguments);
 	}
 
-	checkFromTo(from, to) {
+	validateArgumentCount(callArguments, min, max) {
+		if (callArguments.length < min || callArguments.length > max) {
+			throw new Error("Invalid number of arguments");
+		}
+	}
+
+	validateTickers(tickers) {
+		for (const t of tickers.value) {
+			if (!(t instanceof Ticker)) {
+				throw new Error("Encountered an invalid data type in a ticker array");
+			}
+		}
+	}
+
+	validateFromTo(from, to) {
 		let dateTimeCount = 0;
 		let offsetCount = 0;
-		const dateTimeCheck = x => {
+		const validateDateTime = x => {
 			if (x instanceof DateTime) {
 				dateTimeCount++;
 			}
 		};
-		const offsetCheck = x => {
+		const validateOffset = x => {
 			if (x instanceof Offset) {
 				offsetCount++;
 			}
 		};
-		dateTimeCheck(from);
-		dateTimeCheck(to);
-		offsetCheck(from);
-		offsetCheck(to);
+		validateDateTime(from);
+		validateDateTime(to);
+		validateOffset(from);
+		validateOffset(to);
 		if (
 			dateTimeCount + offsetCount < 2 ||
 			dateTimeCount == 0
@@ -413,7 +438,7 @@ export class WebUi {
 		}
 	}
 
-	checkTimeFrame(timeFrame) {
+	validateTimeFrame(timeFrame) {
 		if (
 			!(timeFrame instanceof TimeFrame) ||
 			timeFrame.value < 1 ||
