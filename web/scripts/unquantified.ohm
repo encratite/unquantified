@@ -6,7 +6,8 @@ Unquantified {
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
 	Parameter = identifier ":" numeric ("to" numeric ("step" numeric)?)?
 	Call = identifier Value ("," Value)*
-	Array = "[" ticker ("," ticker)* "]"
+	Array = "[" ticker SeparatedTicker* "]"
+	SeparatedTicker = ("," | "|") ticker
 	identifier = lower (alnum | "_") *
 	variable = "$" identifier
 	nonZeroDigit = "1".."9"

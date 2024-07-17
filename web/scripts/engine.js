@@ -111,6 +111,7 @@ export class Offset extends Value {
 export class Ticker extends BasicValue {
 	constructor(value) {
 		super(value);
+		this.separator = false;
 	}
 
 	getJsonValue() {
@@ -192,10 +193,17 @@ export class ScriptingEngine {
 				const parameter = new Parameter(identifier.eval(), from.eval(), to.eval(), step.eval());
 				return parameter;
 			},
-			Array: (_, first, __, others, ___) => {
+			Array: (_, first, others, __) => {
 				const elements = [first.eval()].concat(others.eval());
 				const array = new Array(elements);
 				return array;
+			},
+			SeparatedTicker: (separator, ticker) => {
+				const output = ticker.eval();
+				if (separator.sourceString === "|") {
+					output.separator = true;
+				}
+				return output;
 			},
 			identifier: (first, others) => {
 				return first.sourceString + others.sourceString;

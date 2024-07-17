@@ -10,6 +10,8 @@ import {
 	Keyword
 } from "./engine.js";
 
+const LocalStorageKey = "unquantified";
+
 export class WebUi {
 	constructor() {
 		this.content = null;
@@ -21,6 +23,10 @@ export class WebUi {
 	async initialize() {
 		this.content = document.getElementById("content");
 		this.createEditor();
+		const data = this.getLocalStorageData();
+		if (data.lastScript != null) {
+			this.editor.setValue(data.lastScript, 1);
+		}
 		const callHandlers = {
 			plotCandlestick: this.plotCandlestick.bind(this),
 			plotLine: this.plotLine.bind(this),
@@ -78,6 +84,11 @@ export class WebUi {
 		return dateTime;
 	}
 
+	getDateFormat(dateTime, short) {
+		const formatString = short ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
+		return dateTime.toFormat(formatString);
+	}
+
 	winRatioTest(records) {
 		let tradesWon = 0;
 		let tradesLost = 0;
@@ -122,8 +133,8 @@ export class WebUi {
 		const titleCallback = tooltipItems => {
 			const context = tooltipItems[0];
 			const dateTime = context.raw.time;
-			const formatString = timeFrame.value === SecondsPerDay ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
-			const title = dateTime.toFormat(formatString);
+			const short = timeFrame.value === SecondsPerDay;
+			const title = this.getDateFormat(dateTime, short);
 			return title;
 		};
 		const options = {
@@ -312,6 +323,9 @@ export class WebUi {
 			this.enableEditor(false);
 			try {
 				await this.engine.run(script);
+				const data = this.getLocalStorageData();
+				data.lastScript = script;
+				this.setLocalStorageData(data);
 				this.disableHighlight();
 				this.editorContainer.classList.add("read-only");
 				this.createEditor();
@@ -322,6 +336,20 @@ export class WebUi {
 				this.enableEditor(true);
 			}
 		}
+	}
+
+	getLocalStorageData() {
+		const json = localStorage.getItem(LocalStorageKey);
+		if (json == null) {
+			return {};
+		}
+		const data = JSON.parse(json);
+		return data;
+	}
+
+	setLocalStorageData(data) {
+		const json = JSON.stringify(data);
+		localStorage.setItem(LocalStorageKey, json);
 	}
 
 	enableEditor(enable) {
@@ -342,10 +370,11 @@ export class WebUi {
 		session.$bracketHighlight = null;
 	}
 
-	renderCorrelationMatrix(correlation) {
-		const table = document.createElement("table");
-		table.className = "correlation";
-		this.append(table);
+	renderCorrelationMatrix(correlation, separators) {
+		const container = document.createElement("div");
+		container.className = "correlation";
+		this.append(container);
+		const table = this.createElement("table", container);
 		const createRow = () => this.createElement("tr", table);
 		const createCell = (text, row) => {
 			const element = this.createElement("td", row);
@@ -357,9 +386,16 @@ export class WebUi {
 		const firstRow = createRow();
 		createCell(null, firstRow);
 		const tickers = correlation.tickers;
-		tickers.forEach(ticker => {
-			createCell(ticker, firstRow);
-		});
+		const setSeparatorStyle = (cell, i, top) => {
+			if (separators != null && separators[i] === true) {
+				cell.className = top ? "separator-top" : "separator-left";
+			}
+		};
+		for (let i = 0; i < tickers.length; i++) {
+			const ticker = tickers[i];
+			const cell = createCell(ticker, firstRow);
+			setSeparatorStyle(cell, i, true);
+		}
 		const chromaScale = chroma.scale("RdYlBu").padding([0, 0.07]);
 		const correlationMin = -1;
 		const correlationMax = 1;
@@ -367,7 +403,8 @@ export class WebUi {
 			const ticker = tickers[i];
 			const data = correlation.correlation[i];
 			const row = createRow();
-			createCell(ticker, row);
+			const cell = createCell(ticker, row);
+			setSeparatorStyle(cell, i, false);
 			for (let j = 0; j < tickers.length; j++) {
 				const coefficient = data[j];
 				const cell = createCell(coefficient.toFixed(2), row);
@@ -379,6 +416,10 @@ export class WebUi {
 				cell.style.backgroundColor = color;
 			}
 		}
+		const from = this.getTime(correlation.from);
+		const to = this.getTime(correlation.to);
+		const fromToLabel = this.createElement("div", container);
+		fromToLabel.textContent = `Showing data from ${this.getDateFormat(from, true)} to ${this.getDateFormat(to, true)}`;
 	}
 
 	createElement(tag, parent) {
@@ -430,13 +471,17 @@ export class WebUi {
 
 	async correlation(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 3);
-		const tickerArgument = callArguments[0];
+		const tickers = callArguments[0];
 		const from = callArguments[1] || new DateTime(Keyword.First);
 		const to = callArguments[2] || new DateTime(Keyword.Last);
-		this.validateTickers(tickerArgument);
+		this.validateTickers(tickers);
 		this.validateFromTo(from, to);
-		const response = await this.getCorrelation(tickerArgument.getJsonValue(), from.getJsonValue(), to.getJsonValue());
-		this.renderCorrelationMatrix(response.correlation);
+		const response = await this.getCorrelation(tickers.getJsonValue(), from.getJsonValue(), to.getJsonValue());
+		let separators = null;
+		if (tickers instanceof Array) {
+			separators = tickers.value.map(x => x.separator);
+		}
+		this.renderCorrelationMatrix(response.correlation, separators);
 	}
 
 	async winRatio(callArguments) {
