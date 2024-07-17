@@ -65,9 +65,9 @@ export class DateTime extends BasicValue {
 	}
 
 	getJsonValue() {
-		if (this.value instanceof Date) {
+		if (this.value instanceof luxon.DateTime) {
 			return {
-				date: this.value.toISOString(),
+				date: this.value.toISO(),
 				offset: null,
 				offsetUnit: null,
 				specialKeyword: null
@@ -134,7 +134,7 @@ export class Array extends BasicValue {
 	}
 }
 
-export class FileName extends BasicValue {
+export class String extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
@@ -162,6 +162,7 @@ export class ScriptingEngine {
 		this.callHandlers = callHandlers;
 		this.grammar = null;
 		this.semantics = null;
+		this.timezone = null;
 	}
 
 	async initialize() {
@@ -227,20 +228,24 @@ export class ScriptingEngine {
 				const yearInt = parseInt(yearString);
 				const monthInt = parseInt(monthString);
 				const dayInt = parseInt(dayString);
-				const date = new Date(yearInt, monthInt - 1, dayInt);
+				const date = this.createDate(yearInt, monthInt, dayInt);
 				const dateTime = new DateTime(date);
 				return dateTime;
 			},
 			dateTime: (date, _, hour1, hour2, __, minute1, minute2, ___, second1, second2) => {
-				const dateObject = date.eval().value;
+				const dateTime = date.eval().value;
 				const hoursString = hour1.sourceString + hour2.sourceString;
 				const minutesString = minute1.sourceString + minute2.sourceString;
 				const secondsString = second1 ? (second1.sourceString + second2.sourceString) : null;
 				const hours = parseInt(hoursString);
 				const minutes = parseInt(minutesString);
 				const seconds = secondsString ? parseInt(secondsString) : 0;
-				const newDate = new Date(dateObject.getYear(), dateObject.getMonth(), dateObject.getDate(), hours, minutes, seconds);
-				const dateTime = new DateTime(newDate);
+				const hms = {
+					hours: hours,
+					minutes: minutes,
+					seconds
+				};
+				dateTime.set(hms);
 				return dateTime;
 			},
 			offset: (sign, first, others, unit) => {
@@ -262,7 +267,7 @@ export class ScriptingEngine {
 				return new Ticker(chars.sourceString);
 			},
 			string: (_, content, __) => {
-				const fileName = new FileName(content.sourceString);
+				const fileName = new String(content.sourceString);
 				return fileName;
 			},
 			keyword: keyword => {
@@ -321,6 +326,10 @@ export class ScriptingEngine {
 		}
 	}
 
+	setTimezone(timezone) {
+		this.timezone = timezone;
+	}
+
 	substituteVariables(input) {
 		const output = input.map(x => {
 			if (x instanceof Variable) {
@@ -335,5 +344,19 @@ export class ScriptingEngine {
 			}
 		});
 		return output;
+	}
+
+	createDate(year, month, day) {
+		const options = {};
+		if (this.timezone != null) {
+			options.zone = this.timezone;
+		}
+		const ymd = {
+			year: year,
+			month: month,
+			day: day
+		};
+		const dateTime = luxon.DateTime.fromObject(ymd, options);
+		return dateTime;
 	}
 }

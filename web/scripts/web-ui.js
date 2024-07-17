@@ -7,7 +7,8 @@ import {
 	Ticker,
 	Array,
 	SecondsPerDay,
-	Keyword
+	Keyword,
+	String
 } from "./engine.js";
 
 const LocalStorageKey = "unquantified";
@@ -23,19 +24,21 @@ export class WebUi {
 	async initialize() {
 		this.content = document.getElementById("content");
 		this.createEditor();
+		const callHandlers = {
+			candle: this.plotCandlestick.bind(this),
+			plot: this.plotLine.bind(this),
+			correlation: this.correlation.bind(this),
+			timezone: this.timezone.bind(this)
+		};
+		this.engine = new ScriptingEngine(callHandlers);
+		await this.engine.initialize();
 		const data = this.getLocalStorageData();
 		if (data.lastScript != null) {
 			this.editor.setValue(data.lastScript, 1);
 		}
-		const callHandlers = {
-			plotCandlestick: this.plotCandlestick.bind(this),
-			plotLine: this.plotLine.bind(this),
-			correlation: this.correlation.bind(this),
-			winRatio: this.winRatio.bind(this),
-			walkForward: this.walkForward.bind(this),
-		};
-		this.engine = new ScriptingEngine(callHandlers);
-		await this.engine.initialize();
+		if (data.timezone != null) {
+			this.engine.setTimezone(data.timezone);
+		}
 	}
 
 	invoke(url, request) {
@@ -87,30 +90,6 @@ export class WebUi {
 	getDateFormat(dateTime, short) {
 		const formatString = short ? "dd LLL yyyy" : "dd LLL yyyy HH:mm:ss";
 		return dateTime.toFormat(formatString);
-	}
-
-	winRatioTest(records) {
-		let tradesWon = 0;
-		let tradesLost = 0;
-		let gains = 0;
-		let losses = 0;
-		for (let i = 0; i < records.length - 1; i++) {
-			let ohlc1 = records[i];
-			let ohlc2 = records[i + 1];
-			let difference = ohlc2.close - ohlc1.close;
-			if (difference > 0) {
-				gains += difference;
-				tradesWon++;
-			}
-			else {
-				losses -= difference;
-				tradesLost++;
-			}
-		}
-		const winRatio = tradesWon / (tradesWon + tradesLost);
-		const profitRatio = gains / losses;
-		console.log(`Win ratio: ${(winRatio * 100).toFixed(1)}%`);
-		console.log(`Profit ratio: ${profitRatio.toFixed(2)}`);
 	}
 
 	append(element) {
@@ -484,12 +463,16 @@ export class WebUi {
 		this.renderCorrelationMatrix(response.correlation, separators);
 	}
 
-	async winRatio(callArguments) {
-		console.log("winRatio", callArguments);
-	}
-
-	async walkForward(callArguments) {
-		console.log("walkForward", callArguments);
+	async timezone(callArguments) {
+		this.validateArgumentCount(callArguments, 1, 1);
+		const timezoneArgument = callArguments[0];
+		if (!(timezoneArgument instanceof String)) {
+			throw new Error("Invalid timezone data type");
+		}
+		const timezone = timezoneArgument.value;
+		const data = this.getLocalStorageData();
+		data.timezone = timezone;
+		this.engine.setTimezone(timezone);
 	}
 
 	validateArgumentCount(callArguments, min, max) {
