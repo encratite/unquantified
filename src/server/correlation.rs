@@ -8,12 +8,13 @@ use common::*;
 
 #[derive(Serialize)]
 pub struct CorrelationData {
-	pub correlation: Vec<Vec<f64>>,
+	pub tickers: Vec<String>,
 	pub from: DateTime<FixedOffset>,
-	pub to: DateTime<FixedOffset>
+	pub to: DateTime<FixedOffset>,
+	pub correlation: Vec<Vec<f64>>,
 }
 
-pub fn get_correlation_matrix(request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData, Box<dyn Error>> {
+pub fn get_correlation_matrix(tickers: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData, Box<dyn Error>> {
 	// Determine smallest overlapping time range across all OHLC records
 	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
@@ -50,9 +51,10 @@ pub fn get_correlation_matrix(request_from: DateTime<FixedOffset>, request_to: D
 		matrix[j][i] = coefficient;
 	}
 	let output = CorrelationData {
-		correlation: matrix,
+		tickers: tickers,
 		from: from,
-		to: to
+		to: to,
+		correlation: matrix
 	};
 	Ok(output)
 }

@@ -173,7 +173,7 @@ fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>)
 	let archives = get_ticker_archives(&resolved_tickers, &state)?;
 	let from = request.from.resolve(&request.to, &archives)?;
 	let to = request.to.resolve(&request.from, &archives)?;
-	get_correlation_matrix(from, to, archives)
+	get_correlation_matrix(resolved_tickers, from, to, archives)
 }
 
 fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {

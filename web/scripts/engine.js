@@ -1,5 +1,15 @@
 export const SecondsPerDay = 1440;
 
+export const Keyword = {
+	True: "true",
+	False: "false",
+	First: "first",
+	Last: "last",
+	Now: "now",
+	Daily: "daily",
+	All: "all"
+};
+
 export class Assignment {
 	constructor(variable, value) {
 		this.variable = variable;
@@ -101,6 +111,15 @@ export class Offset extends Value {
 export class Ticker extends BasicValue {
 	constructor(value) {
 		super(value);
+	}
+
+	getJsonValue() {
+		if (this.value === Keyword.All) {
+			return [this.value];
+		}
+		else {
+			return this.value;
+		}
 	}
 }
 
@@ -241,17 +260,17 @@ export class ScriptingEngine {
 			keyword: keyword => {
 				const string = keyword.sourceString;
 				switch (string) {
-					case "true":
+					case Keyword.True:
 						return new Bool(true);
-					case "false":
+					case Keyword.False:
 						return new Bool(false);
-					case "first":
-					case "last":
-					case "now":
+					case Keyword.First:
+					case Keyword.Last:
+					case Keyword.Now:
 						return new DateTime(string);
-					case "daily":
+					case Keyword.Daily:
 						return new TimeFrame(SecondsPerDay);
-					case "all":
+					case Keyword.All:
 						return new Ticker(string);
 				}
 				throw new Error(`Unknown keyword: ${keyword.sourceString}`);

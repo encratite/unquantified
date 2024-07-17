@@ -6,7 +6,8 @@ import {
 	TimeFrame,
 	Ticker,
 	Array,
-	SecondsPerDay
+	SecondsPerDay,
+	Keyword
 } from "./engine.js";
 
 export class WebUi {
@@ -341,6 +342,53 @@ export class WebUi {
 		session.$bracketHighlight = null;
 	}
 
+	renderCorrelationMatrix(correlation) {
+		const table = document.createElement("table");
+		table.className = "correlation";
+		this.append(table);
+		const createRow = () => this.createElement("tr", table);
+		const createCell = (text, row) => {
+			const element = this.createElement("td", row);
+			if (text != null) {
+				element.textContent = text;
+			}
+			return element;
+		};
+		const firstRow = createRow();
+		createCell(null, firstRow);
+		const tickers = correlation.tickers;
+		tickers.forEach(ticker => {
+			createCell(ticker, firstRow);
+		});
+		const chromaScale = chroma.scale("RdYlBu").padding([0, 0.07]);
+		const correlationMin = -1;
+		const correlationMax = 1;
+		for (let i = 0; i < tickers.length; i++) {
+			const ticker = tickers[i];
+			const data = correlation.correlation[i];
+			const row = createRow();
+			createCell(ticker, row);
+			for (let j = 0; j < tickers.length; j++) {
+				const coefficient = data[j];
+				const cell = createCell(coefficient.toFixed(2), row);
+				const scale = (coefficient - correlationMin) / (correlationMax - correlationMin);
+				if (scale < 0 || scale > 1) {
+					throw new Error("Invalid scale in correlation matrix");
+				}
+				const color = chromaScale(scale).hex();
+				cell.style.backgroundColor = color;
+			}
+		}
+	}
+
+	createElement(tag, parent) {
+		const element = document.createElement(tag);
+		if (parent != null) {
+			parent.appendChild(element);
+		}
+		return element;
+	}
+
 	async plot(callArguments, isCandlestick) {
 		this.validateArgumentCount(callArguments, 3, 4);
 		const tickerArgument = callArguments[0];
@@ -383,12 +431,12 @@ export class WebUi {
 	async correlation(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 3);
 		const tickerArgument = callArguments[0];
-		const from = callArguments[1] || new DateTime("first");
-		const to = callArguments[2] || new DateTime("last");
+		const from = callArguments[1] || new DateTime(Keyword.First);
+		const to = callArguments[2] || new DateTime(Keyword.Last);
 		this.validateTickers(tickerArgument);
 		this.validateFromTo(from, to);
-		const correlation = await this.getCorrelation(tickerArgument.getJsonValue(), from.getJsonValue(), to.getJsonValue());
-		console.log(correlation);
+		const response = await this.getCorrelation(tickerArgument.getJsonValue(), from.getJsonValue(), to.getJsonValue());
+		this.renderCorrelationMatrix(response.correlation);
 	}
 
 	async winRatio(callArguments) {
@@ -406,10 +454,15 @@ export class WebUi {
 	}
 
 	validateTickers(tickers) {
-		for (const t of tickers.value) {
-			if (!(t instanceof Ticker)) {
-				throw new Error("Encountered an invalid data type in a ticker array");
+		if (tickers instanceof Array) {
+			for (const t of tickers.value) {
+				if (!(t instanceof Ticker)) {
+					throw new Error("Encountered an invalid data type in a ticker array");
+				}
 			}
+		}
+		else if (!(tickers instanceof Ticker)) {
+			throw new Error("Invalid ticker data type");
 		}
 	}
 
