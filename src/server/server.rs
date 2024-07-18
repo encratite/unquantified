@@ -30,7 +30,7 @@ struct ServerState {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetHistoryRequest {
-	tickers: Vec<String>,
+	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime,
 	// Minutes, 1440 for daily data
@@ -45,7 +45,7 @@ struct GetHistoryResponse {
 
 #[derive(Deserialize)]
 struct GetCorrelationRequest {
-	tickers: Vec<String>,
+	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime
 }
@@ -59,14 +59,14 @@ struct GetCorrelationResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OhlcRecordWeb {
-	pub ticker: Option<String>,
+	pub symbol: String,
 	pub time: String,
 	pub open: f64,
 	pub high: f64,
 	pub low: f64,
 	pub close: f64,
-	pub volume: i32,
-	pub open_interest: Option<i32>
+	pub volume: u32,
+	pub open_interest: Option<u32>
 }
 
 impl ServerState {
@@ -83,7 +83,7 @@ impl OhlcRecordWeb {
 		let tz = Tz::from_str(&archive.time_zone)?;
 		let time = get_date_time_string(record.time, &tz)?;
 		Ok(OhlcRecordWeb {
-			ticker: record.ticker.clone(),
+			symbol: record.symbol.clone(),
 			time: time,
 			open: record.open,
 			high: record.high,
@@ -144,8 +144,8 @@ async fn get_correlation(
 }
 
 fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
-	let resolved_tickers = resolve_tickers(&request.tickers, &state)?;
-	let archives = get_ticker_archives(&resolved_tickers, &state)?;
+	let resolved_symbols = resolve_symbols(&request.symbols, &state)?;
+	let archives = get_ticker_archives(&resolved_symbols, &state)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
 	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = archives
@@ -154,44 +154,44 @@ fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Resu
 		.collect();
 	match result {
 		Ok(ticker_records) => {
-			let tuples = resolved_tickers.into_iter().zip(ticker_records.into_iter()).collect();
+			let tuples = resolved_symbols.into_iter().zip(ticker_records.into_iter()).collect();
 			Ok(tuples)
 		},
 		Err(error) => Err(error)
 	}
 }
 
-fn get_ticker_archives(tickers: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
-	tickers
+fn get_ticker_archives(symbols: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
+	symbols
 		.iter()
 		.map(|x| get_archive(&x, &state))
 		.collect()
 }
 
 fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>) -> Result<CorrelationData, Box<dyn Error>> {
-	let resolved_tickers = resolve_tickers(&request.tickers, &state)?;
-	let archives = get_ticker_archives(&resolved_tickers, &state)?;
+	let resolved_symbols = resolve_symbols(&request.symbols, &state)?;
+	let archives = get_ticker_archives(&resolved_symbols, &state)?;
 	let from = request.from.resolve(&request.to, &archives)?;
 	let to = request.to.resolve(&request.from, &archives)?;
-	get_correlation_matrix(resolved_tickers, from, to, archives)
+	get_correlation_matrix(resolved_symbols, from, to, archives)
 }
 
-fn get_archive(ticker: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
+fn get_archive(symbol: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
 	// Simple directory traversal check
 	let pattern = Regex::new("^[A-Z0-9]+$")?;
-	if !pattern.is_match(ticker) {
+	if !pattern.is_match(symbol) {
 		return Err("Invalid ticker".into());
 	}
-	if let Some(archive_ref) = state.ticker_cache.get(ticker) {
+	if let Some(archive_ref) = state.ticker_cache.get(symbol) {
 		Ok(Arc::clone(archive_ref.value()))
 	}
 	else {
-		let file_name = get_archive_file_name(ticker);
+		let file_name = get_archive_file_name(symbol);
 		let data_directory = &*state.data_directory;
 		let archive_path = Path::new(data_directory).join(file_name);
 		let archive = read_archive(&archive_path)?;
 		let archive_arc = Arc::new(archive);
-		state.ticker_cache.insert(ticker.to_string(), Arc::clone(&archive_arc));
+		state.ticker_cache.insert(symbol.to_string(), Arc::clone(&archive_arc));
 		Ok(archive_arc)
 	}
 }
@@ -222,7 +222,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		.map(|x| -> Result<OhlcRecordWeb, Box<dyn Error>> {
 			let first = x.first().unwrap();
 			let last = x.last().unwrap();
-			let ticker = first.ticker.clone();
+			let symbol = first.symbol.clone();
 			let time = get_date_time_string(first.time, &tz)?;
 			let open = first.open;
 			let high = x
@@ -239,7 +239,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 			let volume = x.iter().map(|x| x.volume).sum();
 			let open_interest = x.iter().map(|x| x.open_interest).sum();
 			Ok(OhlcRecordWeb {
-				ticker,
+				symbol,
 				time,
 				open,
 				high,
@@ -265,9 +265,9 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 		.collect()
 }
 
-fn resolve_tickers(tickers: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
+fn resolve_symbols(symbols: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
 	let all_keyword = "all";
-	if tickers.iter().any(|x| x == all_keyword) {
+	if symbols.iter().any(|x| x == all_keyword) {
 		let data_directory = &*state.data_directory;
 		let entries = fs::read_dir(data_directory)
 			.expect("Unable to get list of archives");
@@ -284,6 +284,6 @@ fn resolve_tickers(tickers: &Vec<String>, state: &Arc<ServerState>) -> Result<Ve
 		Ok(result)
 	}
 	else {
-		Ok(tickers.clone())
+		Ok(symbols.clone())
 	}
 }

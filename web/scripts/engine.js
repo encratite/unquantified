@@ -107,8 +107,8 @@ export class Offset extends Value {
 	}
 }
 
-// Either a ticker like "ES", "NQ" or the special keyword "all" 
-export class Ticker extends BasicValue {
+// Either a symbol like "ES", "NQ" or the special keyword "all" 
+export class Symbol extends BasicValue {
 	constructor(value) {
 		super(value);
 		this.separator = false;
@@ -199,8 +199,8 @@ export class ScriptingEngine {
 				const array = new Array(elements);
 				return array;
 			},
-			SeparatedTicker: (separator, ticker) => {
-				const output = ticker.eval();
+			SeparatedSymbol: (separator, symbol) => {
+				const output = symbol.eval();
 				if (separator.sourceString === "|") {
 					output.separator = true;
 				}
@@ -263,8 +263,8 @@ export class ScriptingEngine {
 				const timeFrame = new TimeFrame(timeFrameInt);
 				return timeFrame;
 			},
-			ticker: chars => {
-				return new Ticker(chars.sourceString);
+			symbol: chars => {
+				return new Symbol(chars.sourceString);
 			},
 			string: (_, content, __) => {
 				const fileName = new String(content.sourceString);
@@ -284,7 +284,7 @@ export class ScriptingEngine {
 					case Keyword.Daily:
 						return new TimeFrame(SecondsPerDay);
 					case Keyword.All:
-						return new Ticker(string);
+						return new Symbol(string);
 				}
 				throw new Error(`Unknown keyword: ${keyword.sourceString}`);
 			},

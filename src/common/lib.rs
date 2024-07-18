@@ -23,14 +23,14 @@ pub struct OhlcArchive {
 
 #[derive(Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcRecord {
-	pub ticker: Option<String>,
+	pub symbol: String,
 	pub time: NaiveDateTime,
 	pub open: f64,
 	pub high: f64,
 	pub low: f64,
 	pub close: f64,
-	pub volume: i32,
-	pub open_interest: Option<i32>
+	pub volume: u32,
+	pub open_interest: Option<u32>
 }
 
 pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
@@ -56,8 +56,8 @@ pub fn get_config(path: &str) -> Result<Ini, Box<dyn Error>> {
 	}
 }
 
-pub fn get_archive_file_name(ticker: &String) -> String {
-	format!("{ticker}.zrk")
+pub fn get_archive_file_name(symbol: &String) -> String {
+	format!("{symbol}.zrk")
 }
 
 impl OhlcArchive {

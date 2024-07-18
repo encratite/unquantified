@@ -4,7 +4,7 @@ import {
 	DateTime,
 	Offset,
 	TimeFrame,
-	Ticker,
+	Symbol,
 	Array,
 	SecondsPerDay,
 	Keyword,
@@ -53,14 +53,21 @@ export class WebUi {
 		return new Promise((resolve, reject) => {
 			fetch(url, options)
 				.then(response => response.json())
-				.then(resolve)
+				.then(json => {
+					if (json.error == null) {
+						resolve(json);
+					}
+					else {
+						reject(json.error);
+					}
+				})
 				.catch(reject);
 		});
 	}
 
-	async getHistory(tickers, from, to, timeFrame) {
+	async getHistory(symbols, from, to, timeFrame) {
 		const request = {
-			tickers: tickers,
+			symbols: symbols,
 			from: from,
 			to: to,
 			timeFrame: timeFrame
@@ -69,9 +76,9 @@ export class WebUi {
 		return response;
 	}
 
-	async getCorrelation(tickers, from, to) {
+	async getCorrelation(symbols, from, to) {
 		const request = {
-			tickers: tickers,
+			symbols: symbols,
 			from: from,
 			to: to
 		};
@@ -233,8 +240,8 @@ export class WebUi {
 		const tickers = Object.keys(history.tickers);
 		const multiMode = tickers.length > 1;
 		const datasets = tickers
-			.map(ticker => {
-				const records = history.tickers[ticker];
+			.map(symbol => {
+				const records = history.tickers[symbol];
 				let firstClose = null;
 				if (records.length > 0) {
 					firstClose = records[0].close;
@@ -256,7 +263,7 @@ export class WebUi {
 					};
 				});
 				return {
-					label: ticker,
+					label: symbol,
 					data: data
 				};
 			});
@@ -364,27 +371,27 @@ export class WebUi {
 		};
 		const firstRow = createRow();
 		createCell(null, firstRow);
-		const tickers = correlation.tickers;
+		const symbols = correlation.symbols;
 		const setSeparatorStyle = (cell, i, top) => {
 			if (separators != null && separators[i] === true) {
 				cell.className = top ? "separator-top" : "separator-left";
 			}
 		};
-		for (let i = 0; i < tickers.length; i++) {
-			const ticker = tickers[i];
-			const cell = createCell(ticker, firstRow);
+		for (let i = 0; i < symbols.length; i++) {
+			const symbol = symbols[i];
+			const cell = createCell(symbol, firstRow);
 			setSeparatorStyle(cell, i, true);
 		}
 		const chromaScale = chroma.scale("RdYlBu").padding([0, 0.07]);
 		const correlationMin = -1;
 		const correlationMax = 1;
-		for (let i = 0; i < tickers.length; i++) {
-			const ticker = tickers[i];
+		for (let i = 0; i < symbols.length; i++) {
+			const symbol = symbols[i];
 			const data = correlation.correlation[i];
 			const row = createRow();
-			const cell = createCell(ticker, row);
+			const cell = createCell(symbol, row);
 			setSeparatorStyle(cell, i, false);
-			for (let j = 0; j < tickers.length; j++) {
+			for (let j = 0; j < symbols.length; j++) {
 				const coefficient = data[j];
 				const cell = createCell(coefficient.toFixed(2), row);
 				const scale = (coefficient - correlationMin) / (correlationMax - correlationMin);
@@ -411,32 +418,32 @@ export class WebUi {
 
 	async plot(callArguments, isCandlestick) {
 		this.validateArgumentCount(callArguments, 3, 4);
-		const tickerArgument = callArguments[0];
+		const symbolArgument = callArguments[0];
 		const from = callArguments[1];
 		const to = callArguments[2];
 		const timeFrame = callArguments[3] || new TimeFrame(SecondsPerDay);
-		let tickers;
+		let symbols;
 		if (isCandlestick) {
-			if (!(tickerArgument instanceof Ticker)) {
-				throw new Error("Invalid ticker data type");
+			if (!(symbolArgument instanceof Symbol)) {
+				throw new Error("Invalid symbol data type");
 			}
-			tickers = [tickerArgument.getJsonValue()];
+			symbols = [symbolArgument.getJsonValue()];
 		}
 		else {
-			if (tickerArgument instanceof Ticker) {
-				tickers = [tickerArgument.getJsonValue()];
+			if (symbolArgument instanceof Symbol) {
+				symbols = [symbolArgument.getJsonValue()];
 			}
-			else if (tickerArgument instanceof Array) {
-				this.validateTickers(tickerArgument);
-				tickers = tickerArgument.getJsonValue();
+			else if (symbolArgument instanceof Array) {
+				this.validateSymbols(symbolArgument);
+				symbols = symbolArgument.getJsonValue();
 			}
 			else {
-				throw new Error("Invalid ticker data type");
+				throw new Error("Invalid symbol data type");
 			}
 		}
 		this.validateFromTo(from, to);
 		this.validateTimeFrame(timeFrame);
-		const history = await this.getHistory(tickers, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
+		const history = await this.getHistory(symbols, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
 		this.createChart(history, isCandlestick, timeFrame);
 	}
 
@@ -453,7 +460,7 @@ export class WebUi {
 		const tickers = callArguments[0];
 		const from = callArguments[1] || new DateTime(Keyword.First);
 		const to = callArguments[2] || new DateTime(Keyword.Last);
-		this.validateTickers(tickers);
+		this.validateSymbols(tickers);
 		this.validateFromTo(from, to);
 		const response = await this.getCorrelation(tickers.getJsonValue(), from.getJsonValue(), to.getJsonValue());
 		let separators = null;
@@ -481,15 +488,15 @@ export class WebUi {
 		}
 	}
 
-	validateTickers(tickers) {
+	validateSymbols(tickers) {
 		if (tickers instanceof Array) {
 			for (const t of tickers.value) {
-				if (!(t instanceof Ticker)) {
+				if (!(t instanceof Symbol)) {
 					throw new Error("Encountered an invalid data type in a ticker array");
 				}
 			}
 		}
-		else if (!(tickers instanceof Ticker)) {
+		else if (!(tickers instanceof Symbol)) {
 			throw new Error("Invalid ticker data type");
 		}
 	}

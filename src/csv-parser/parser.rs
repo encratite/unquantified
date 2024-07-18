@@ -1,5 +1,5 @@
 use std::{	
-	error::Error, ffi::OsStr, fs, path::{Component, Path, PathBuf}
+	error::Error, fs, path::{Path, PathBuf}
 };
 use std::collections::BTreeMap;
 use regex::Regex;
@@ -15,36 +15,35 @@ use common::*;
 type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
 
 #[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "PascalCase")]
 struct CsvRecord<'a> {
-	ticker: Option<&'a str>,
+	symbol: &'a str,
 	time: &'a str,
 	open: f64,
 	high: f64,
 	low: f64,
-	#[serde(rename = "Last")]
 	close: f64,
-	volume: i32,
-	#[serde(rename = "Open Int", default)]
-	open_interest: &'a str
+	volume: u32,
+	open_interest: Option<u32>
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct OhlcKey {
-	ticker: Option<String>,
+	symbol: String,
 	time: NaiveDateTime
 }
 
 pub struct CsvParser<'a> {
 	time_zone: &'a Tz,
+	intraday_time_frame: u16,
 	input_directory: &'a PathBuf,
 	output_directory: &'a PathBuf
 }
 
 impl<'a> CsvParser<'a> {
-	pub fn new(time_zone: &'a Tz, input_directory: &'a PathBuf, output_directory: &'a PathBuf) -> CsvParser<'a> {
+	pub fn new(time_zone: &'a Tz, intraday_time_frame: u16, input_directory: &'a PathBuf, output_directory: &'a PathBuf) -> CsvParser<'a> {
 		CsvParser {
 			time_zone,
+			intraday_time_frame,
 			input_directory,
 			output_directory
 		}
@@ -69,52 +68,26 @@ impl<'a> CsvParser<'a> {
 			.filter(|x| x.is_dir())
 	}
 
-	fn get_csv_paths(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
+	fn get_csv_paths(path: &PathBuf, filter: Regex) -> impl Iterator<Item = PathBuf> {
 		fs::read_dir(path.clone())
 			.expect("Unable to get list of .csv files")
 			.filter_map(|x| x.ok())
 			.map(|x| x.path())
-			.filter(|x|
+			.filter(move |x|
 				x.is_file() &&
-				x.extension().and_then(|x| x.to_str()) == Some("csv")
-			)
+				x.file_name()
+					.and_then(|x| x.to_str())
+					.map_or(false, |x| filter.is_match(x)))
 	}
 
 	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime, Box<dyn Error>>  {
-		match NaiveDateTime::parse_from_str(time_string, "%m/%d/%Y %H:%M") {
+		match NaiveDateTime::parse_from_str(time_string, "%Y-%m-%d %H:%M") {
 			Ok(datetime) => Ok(datetime),
-			Err(_) => match NaiveDate::parse_from_str(time_string, "%m/%d/%Y") {
+			Err(_) => match NaiveDate::parse_from_str(time_string, "%Y-%m-%d") {
 				Ok(date) => Ok(date.and_hms_opt(0, 0, 0).unwrap()),
 				Err(_) => Err("Failed to parse datetime".into())
 			}
 		}
-	}
-
-	fn get_time_frame_directory<'b>(prefix: &str, time_frame_directories: &'b Vec<PathBuf>) -> Option<(&'b PathBuf, u16)> {
-		for directory in time_frame_directories.iter() {
-			if let Some(Component::Normal(last_component)) = directory.components().last() {
-				if let Some(tuple) = Self::get_time_frame_captures(last_component, prefix, directory) {
-					return Some(tuple);
-				}
-			}
-		}
-		None
-	}
-
-	fn get_time_frame_captures<'b>(last_component: &'b OsStr, prefix: &str, directory: &'b PathBuf) -> Option<(&'b PathBuf, u16)> {
-		let pattern = Regex::new("^([A-Z])(\\d+)$").unwrap();
-		if let Some(captures) = pattern.captures(last_component.to_str().unwrap()) {
-			if captures.get(1).unwrap().as_str() == prefix {
-				let time_frame: u16 = captures
-					.get(2)
-					.unwrap()
-					.as_str()
-					.parse()
-					.unwrap();
-				return Some((directory, time_frame))
-			}
-		}
-		None
 	}
 
 	pub fn run(&self) {
@@ -130,23 +103,18 @@ impl<'a> CsvParser<'a> {
 
 	fn process_ticker_directory(&self, ticker_directory: &PathBuf) {
 		let stopwatch = Stopwatch::start_new();
-		let time_frame_directories: Vec<PathBuf> = Self::get_directories(ticker_directory).collect();
-		let directory_count = time_frame_directories.len();
-		if directory_count != 2 {
-			panic!("Unexpected sub directory count ({}) in path \"{}\"", directory_count, ticker_directory.to_str().unwrap());
-		}
-		let (daily_path, _) = Self::get_time_frame_directory("D", &time_frame_directories)
-			.expect("Unable to find daily path");
-		let (intraday_path, intraday_time_frame) = Self::get_time_frame_directory("M", &time_frame_directories)
-			.expect("Unable to find intraday path");
-		let daily = self.parse_csv_files(daily_path);
-		let intraday = self.parse_csv_files(intraday_path);
+		let get_regex = |x| Regex::new(x)
+			.expect("Invalid regex"); 
+		let daily_filter = get_regex(r"D1\.csv$");
+		let intraday_filter = get_regex(r"(H1|M\d+)\.csv$");
+		let daily = self.parse_csv_files(ticker_directory, daily_filter, false);
+		let intraday = self.parse_csv_files(ticker_directory, intraday_filter, true);
 		let archive_path = self.get_archive_path(ticker_directory);
 		let time_zone = self.time_zone.to_string();
 		let archive = OhlcArchive {
 			daily,
 			intraday,
-			intraday_time_frame,
+			intraday_time_frame: self.intraday_time_frame,
 			time_zone
 		};
 		match write_archive(&archive_path, &archive) {
@@ -165,8 +133,8 @@ impl<'a> CsvParser<'a> {
 		);
 	}
 
-	fn parse_csv_files(&self, path: &PathBuf) -> Vec<OhlcRecord> {
-		let csv_paths = Self::get_csv_paths(path);
+	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> Vec<OhlcRecord> {
+		let csv_paths = Self::get_csv_paths(path, filter);
 		let mut ohlc_map = OhlcTreeMap::new();
 		for csv_path in csv_paths {
 			let mut reader = csv::Reader::from_path(csv_path)
@@ -175,13 +143,22 @@ impl<'a> CsvParser<'a> {
 				.expect("Unable to parse headers")
 				.clone();
 			let mut string_record = csv::StringRecord::new();
-			while reader.read_record(&mut string_record).is_ok() {
+			while reader.read_record(&mut string_record).is_ok() && string_record.len() > 0 {
 				let record: CsvRecord = string_record.deserialize(Some(&headers))
 					.expect("Failed to deserialize record");
 				self.add_ohlc_record(&record, &mut ohlc_map);
 			}
 		}
-		ohlc_map.into_values().collect()
+		let mut records: Vec<OhlcRecord> = ohlc_map.into_values().collect();
+		records.sort_by(|a, b| {
+			if sort_by_symbol {
+				a.symbol.cmp(&b.symbol).then_with(|| a.time.cmp(&b.time))
+			}
+			else {
+				a.time.cmp(&b.time)
+			}
+		});
+		return records;
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
@@ -189,28 +166,27 @@ impl<'a> CsvParser<'a> {
 		else {
 			return;
 		};
-		let ticker = record.ticker.map(|x| x.to_string());
+		let symbol = record.symbol.to_string();
 		let key = OhlcKey {
-			ticker: ticker.clone(),
+			symbol: symbol.clone(),
 			time: time
 		};
-		let open_interest = record.open_interest.parse::<i32>().ok();
 		let value = OhlcRecord {
-			ticker,
+			symbol,
 			time: time,
 			open: record.open,
 			high: record.high,
 			low: record.low,
 			close: record.close,
 			volume: record.volume,
-			open_interest: open_interest
+			open_interest: record.open_interest
 		};
 		ohlc_map.insert(key, value);
 	}
 
 	fn get_archive_path(&self, time_frame_directory: &PathBuf) -> PathBuf {
-		let ticker = Self::get_last_token(time_frame_directory);
-		let file_name = get_archive_file_name(&ticker);
+		let symbol = Self::get_last_token(time_frame_directory);
+		let file_name = get_archive_file_name(&symbol);
 		return Path::new(self.output_directory).join(file_name);
 	}
 }
