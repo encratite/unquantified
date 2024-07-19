@@ -124,7 +124,7 @@ export class Symbol extends BasicValue {
 	}
 }
 
-export class Array extends BasicValue {
+export class SymbolArray extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
@@ -194,9 +194,9 @@ export class ScriptingEngine {
 				const parameter = new Parameter(identifier.eval(), from.eval(), to.eval(), step.eval());
 				return parameter;
 			},
-			Array: (_, first, others, __) => {
+			SymbolArray: (_, first, others, __) => {
 				const elements = [first.eval()].concat(others.eval());
-				const array = new Array(elements);
+				const array = new SymbolArray(elements);
 				return array;
 			},
 			SeparatedSymbol: (separator, symbol) => {
@@ -299,6 +299,31 @@ export class ScriptingEngine {
 				return children.map(item => item.eval());
 			}
 		});
+		this.initializeSerialijise();
+	}
+
+	initializeSerialijise() {
+		serialijse.declarePersistable(luxon.DateTime, {
+			serialize: dateTime => dateTime.toISO(),
+			deserialize: isoString => luxon.DateTime.fromISO(isoString)
+		});
+		const persistables = [
+			Variable,
+			Value,
+			Numeric,
+			Bool,
+			DateTime,
+			TimeFrame,
+			Offset,
+			Symbol,
+			SymbolArray,
+			String,
+			Parameters
+		];
+		for (const key in persistables) {
+			const type = persistables[key];
+			serialijse.declarePersistable(type);
+		}
 	}
 
 	async run(script) {
@@ -325,6 +350,14 @@ export class ScriptingEngine {
 				throw new Error("Unknown statement");
 			}
 		}
+	}
+
+	serializeVariables() {
+		return serialijse.serialize(this.variables);
+	}
+
+	deserializeVariables(data) {
+		this.variables = serialijse.deserialize(data);
 	}
 
 	setTimezone(timezone) {

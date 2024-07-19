@@ -1,14 +1,14 @@
 import { UnquantifiedMode } from "./highlight-rules.js";
 import {
 	ScriptingEngine,
-	DateTime,
-	Offset,
-	TimeFrame,
-	Symbol,
-	Array,
 	SecondsPerDay,
-	Keyword,
-	String
+	DateTime,
+	TimeFrame,
+	Offset,
+	Symbol,
+	SymbolArray,
+	String,
+	Keyword
 } from "./engine.js";
 
 const LocalStorageKey = "unquantified";
@@ -38,6 +38,9 @@ export class WebUi {
 		}
 		if (data.timezone != null) {
 			this.engine.setTimezone(data.timezone);
+		}
+		if (data.variables != null) {
+			this.engine.deserializeVariables(data.variables);
 		}
 	}
 
@@ -311,6 +314,7 @@ export class WebUi {
 				await this.engine.run(script);
 				const data = this.getLocalStorageData();
 				data.lastScript = script;
+				data.variables = this.engine.serializeVariables();
 				this.setLocalStorageData(data);
 				this.disableHighlight();
 				this.editorContainer.classList.add("read-only");
@@ -433,7 +437,7 @@ export class WebUi {
 			if (symbolArgument instanceof Symbol) {
 				symbols = [symbolArgument.getJsonValue()];
 			}
-			else if (symbolArgument instanceof Array) {
+			else if (symbolArgument instanceof SymbolArray) {
 				this.validateSymbols(symbolArgument);
 				symbols = symbolArgument.getJsonValue();
 			}
@@ -464,7 +468,7 @@ export class WebUi {
 		this.validateFromTo(from, to);
 		const response = await this.getCorrelation(tickers.getJsonValue(), from.getJsonValue(), to.getJsonValue());
 		let separators = null;
-		if (tickers instanceof Array) {
+		if (tickers instanceof SymbolArray) {
 			separators = tickers.value.map(x => x.separator);
 		}
 		this.renderCorrelationMatrix(response.correlation, separators);
@@ -489,7 +493,7 @@ export class WebUi {
 	}
 
 	validateSymbols(tickers) {
-		if (tickers instanceof Array) {
+		if (tickers instanceof SymbolArray) {
 			for (const t of tickers.value) {
 				if (!(t instanceof Symbol)) {
 					throw new Error("Encountered an invalid data type in a ticker array");

@@ -2,11 +2,11 @@ Unquantified {
 	Program = Statement*
 	Statement = (Assignment | Call) (eol | end)
 	Assignment = variable "=" (Value | Parameters)
-	Value = variable | dateTime | date | offset | timeFrame | numeric | symbol | keyword | string | Array | Parameters
+	Value = variable | dateTime | date | offset | timeFrame | numeric | symbol | keyword | string | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
 	Parameter = identifier ":" numeric ("to" numeric ("step" numeric)?)?
 	Call = identifier Value ("," Value)*
-	Array = "[" symbol SeparatedSymbol* "]"
+	SymbolArray = "[" symbol SeparatedSymbol* "]"
 	SeparatedSymbol = ("," | "|") symbol
 	identifier = lower (alnum | "_") *
 	variable = "$" identifier
