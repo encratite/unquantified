@@ -76,7 +76,6 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 				.and_then(add_tz);
 			match (first, last) {
 				(Some(first_time), Some(last_time)) => {
-					dbg!(first_time, last_time);
 					from = from.max(first_time);
 					to = to.min(last_time);
 				}

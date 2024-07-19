@@ -29,8 +29,8 @@ const UnquantifiedHighlightRules = function() {
 				token : "variable",
 				regex : /\$[A-Za-z_][A-Za-z0-9_]*/
 			}, {
-				token : "ticker",
-				regex : /[A-Z]{2,}/
+				token : "symbol",
+				regex : /[A-Z][A-Z0-9]+/
 			}, {
 				token : "command",
 				regex : /^[A-Za-z]+\b/

@@ -16,7 +16,7 @@ Unquantified {
 	dateTime = date space+ digit digit ":" digit digit (":" digit digit)?
 	offset = ("+" | "-") nonZeroDigit digit* ("mo" | "m" | "h" | "d" | "w" | "y")
 	timeFrame = nonZeroDigit digit* ("m" | "h")
-	symbol = upper+
+	symbol = upper (upper | digit)+
 	stringDelimiter = "\""
 	string = stringDelimiter (~stringDelimiter any)* stringDelimiter
 	keyword = "true" | "false" | "first" | "last" | "now" | "daily" | "all"

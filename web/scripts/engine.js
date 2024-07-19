@@ -263,8 +263,9 @@ export class ScriptingEngine {
 				const timeFrame = new TimeFrame(timeFrameInt);
 				return timeFrame;
 			},
-			symbol: chars => {
-				return new Symbol(chars.sourceString);
+			symbol: (first, others) => {
+				const symbol = first.sourceString + others.sourceString;
+				return new Symbol(symbol);
 			},
 			string: (_, content, __) => {
 				const fileName = new String(content.sourceString);

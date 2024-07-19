@@ -149,6 +149,9 @@ impl<'a> CsvParser<'a> {
 				self.add_ohlc_record(&record, &mut ohlc_map);
 			}
 		}
+		if ohlc_map.values().len() < 250 {
+			panic!("Missing data in {}", path.to_str().unwrap());
+		}
 		let mut records: Vec<OhlcRecord> = ohlc_map.into_values().collect();
 		records.sort_by(|a, b| {
 			if sort_by_symbol {
