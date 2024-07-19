@@ -2,7 +2,7 @@ import { UnquantifiedMode } from "./highlight-rules.js";
 import {
 	ScriptingEngine,
 	SecondsPerDay,
-	DateTime,
+	TimeParameter,
 	TimeFrame,
 	Offset,
 	Symbol,
@@ -423,8 +423,8 @@ export class WebUi {
 	async plot(callArguments, isCandlestick) {
 		this.validateArgumentCount(callArguments, 1, 4);
 		const symbolArgument = callArguments[0];
-		const from = callArguments[1] || new DateTime(Keyword.First);
-		const to = callArguments[2] || new DateTime(Keyword.Last);
+		const from = callArguments[1] || new TimeParameter(Keyword.First);
+		const to = callArguments[2] || new TimeParameter(Keyword.Last);
 		const timeFrame = callArguments[3] || new TimeFrame(SecondsPerDay);
 		let symbols;
 		if (isCandlestick) {
@@ -462,8 +462,8 @@ export class WebUi {
 	async correlation(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 3);
 		const tickers = callArguments[0];
-		const from = callArguments[1] || new DateTime(Keyword.First);
-		const to = callArguments[2] || new DateTime(Keyword.Last);
+		const from = callArguments[1] || new TimeParameter(Keyword.First);
+		const to = callArguments[2] || new TimeParameter(Keyword.Last);
 		this.validateSymbols(tickers);
 		this.validateFromTo(from, to);
 		const response = await this.getCorrelation(tickers.getJsonValue(), from.getJsonValue(), to.getJsonValue());
@@ -509,7 +509,7 @@ export class WebUi {
 		let dateTimeCount = 0;
 		let offsetCount = 0;
 		const validateDateTime = x => {
-			if (x instanceof DateTime) {
+			if (x instanceof TimeParameter) {
 				dateTimeCount++;
 			}
 		};

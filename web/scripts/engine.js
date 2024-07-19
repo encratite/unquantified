@@ -59,7 +59,7 @@ export class Bool extends BasicValue {
 }
 
 // Either a Date object or one of the special keywords "first", "last", "now"
-export class DateTime extends BasicValue {
+export class TimeParameter extends BasicValue {
 	constructor(value) {
 		super(value);
 	}
@@ -229,7 +229,7 @@ export class ScriptingEngine {
 				const monthInt = parseInt(monthString);
 				const dayInt = parseInt(dayString);
 				const date = this.createDate(yearInt, monthInt, dayInt);
-				const dateTime = new DateTime(date);
+				const dateTime = new TimeParameter(date);
 				return dateTime;
 			},
 			dateTime: (date, _, hour1, hour2, __, minute1, minute2, ___, second1, second2) => {
@@ -281,7 +281,7 @@ export class ScriptingEngine {
 					case Keyword.First:
 					case Keyword.Last:
 					case Keyword.Now:
-						return new DateTime(string);
+						return new TimeParameter(string);
 					case Keyword.Daily:
 						return new TimeFrame(SecondsPerDay);
 					case Keyword.All:
@@ -299,31 +299,33 @@ export class ScriptingEngine {
 				return children.map(item => item.eval());
 			}
 		});
-		this.initializeSerialijise();
+		this.initializeSerialization();
 	}
 
-	initializeSerialijise() {
-		serialijse.declarePersistable(luxon.DateTime, {
-			serialize: dateTime => dateTime.toISO(),
-			deserialize: isoString => luxon.DateTime.fromISO(isoString)
-		});
-		const persistables = [
+	initializeSerialization() {
+		luxon.DateTime.prototype.toKVIN = (o, kvin) => {
+			return {args: [o.toISO()]};
+		};
+		const types = [
 			Variable,
-			Value,
 			Numeric,
 			Bool,
-			DateTime,
+			TimeParameter,
 			TimeFrame,
 			Offset,
 			Symbol,
 			SymbolArray,
 			String,
-			Parameters
+			Parameter
 		];
-		for (const key in persistables) {
-			const type = persistables[key];
-			serialijse.declarePersistable(type);
+		for (const i in types) {
+			const type = types[i];
+			KVIN.userCtors[type.name] = type;
 		}
+		KVIN.userCtors.DateTime = (isoString) => {
+			const dateTime = luxon.DateTime.fromISO(isoString);
+			return dateTime;
+		};
 	}
 
 	async run(script) {
@@ -353,11 +355,11 @@ export class ScriptingEngine {
 	}
 
 	serializeVariables() {
-		return serialijse.serialize(this.variables);
+		return KVIN.serialize(this.variables);
 	}
 
 	deserializeVariables(data) {
-		this.variables = serialijse.deserialize(data);
+		this.variables = KVIN.deserialize(data);
 	}
 
 	setTimezone(timezone) {
