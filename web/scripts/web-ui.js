@@ -421,10 +421,10 @@ export class WebUi {
 	}
 
 	async plot(callArguments, isCandlestick) {
-		this.validateArgumentCount(callArguments, 3, 4);
+		this.validateArgumentCount(callArguments, 1, 4);
 		const symbolArgument = callArguments[0];
-		const from = callArguments[1];
-		const to = callArguments[2];
+		const from = callArguments[1] || new DateTime(Keyword.First);
+		const to = callArguments[2] || new DateTime(Keyword.Last);
 		const timeFrame = callArguments[3] || new TimeFrame(SecondsPerDay);
 		let symbols;
 		if (isCandlestick) {
