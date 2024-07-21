@@ -12,6 +12,7 @@ use rkyv::{
 	Serialize
 };
 use configparser::ini::Ini;
+use serde::de::DeserializeOwned;
 
 #[derive(Archive, Serialize, Deserialize, Clone)]
 pub struct OhlcArchive {
@@ -58,6 +59,23 @@ pub fn get_config(path: &str) -> Result<Ini, Box<dyn Error>> {
 
 pub fn get_archive_file_name(symbol: &String) -> String {
 	format!("{symbol}.zrk")
+}
+
+pub fn read_csv<T>(path: PathBuf, mut on_record: impl FnMut(T))
+where
+	T: DeserializeOwned
+{
+	let mut reader = csv::Reader::from_path(path)
+		.expect("Unable to read .csv file");
+	let headers = reader.headers()
+		.expect("Unable to parse headers")
+		.clone();
+	let mut string_record = csv::StringRecord::new();
+	while reader.read_record(&mut string_record).is_ok() && string_record.len() > 0 {
+		let record: T = string_record.deserialize(Some(&headers))
+			.expect("Failed to deserialize record");
+		on_record(record);
+	}
 }
 
 impl OhlcArchive {

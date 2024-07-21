@@ -15,9 +15,9 @@ use common::*;
 type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
 
 #[derive(Debug, serde::Deserialize)]
-struct CsvRecord<'a> {
-	symbol: &'a str,
-	time: &'a str,
+struct CsvRecord {
+	symbol: String,
+	time: String,
 	open: f64,
 	high: f64,
 	low: f64,
@@ -137,17 +137,9 @@ impl<'a> CsvParser<'a> {
 		let csv_paths = Self::get_csv_paths(path, filter);
 		let mut ohlc_map = OhlcTreeMap::new();
 		for csv_path in csv_paths {
-			let mut reader = csv::Reader::from_path(csv_path)
-				.expect("Unable to read .csv file");
-			let headers = reader.headers()
-				.expect("Unable to parse headers")
-				.clone();
-			let mut string_record = csv::StringRecord::new();
-			while reader.read_record(&mut string_record).is_ok() && string_record.len() > 0 {
-				let record: CsvRecord = string_record.deserialize(Some(&headers))
-					.expect("Failed to deserialize record");
+			read_csv::<CsvRecord>(csv_path, |record| {
 				self.add_ohlc_record(&record, &mut ohlc_map);
-			}
+			});
 		}
 		if ohlc_map.values().len() < 250 {
 			panic!("Missing data in {}", path.to_str().unwrap());
@@ -165,7 +157,7 @@ impl<'a> CsvParser<'a> {
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
-		let Ok(time) = Self::parse_date_time(record.time)
+		let Ok(time) = Self::parse_date_time(record.time.as_str())
 		else {
 			return;
 		};

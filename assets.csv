@@ -1,41 +1,38 @@
-symbol,name,type,data_symbol,tick_size,tick_value,margin
-6B,British Pound,Future,B6,0.0001,6.25,2447.34
-MBT,Micro Bitcoin,Future,BT,5,0.5,3302.07
-MCL,Micro WTI Crude Oil,Future,CL,0.01,1.0,1755
-CT,Cotton No. 2,Future,CT,0.01,5.0,3259.02
-V2TX,VSTOXX,Future,DV,0.05,5.0,905.01
-FDXM,Mini-DAX,Future,DY,1.0,5.0,5694.73
-FDXS,Micro-DAX,Future,DY,1.0,1.0,1138.95
-6E,Euro FX,Future,E6,0.000050,6.25,3414.70
-M6E,Micro Euro FX,Future,E6,0.0001,1.25,341.47
-MET,Micro Ether,Future,ER,0.5,0.05,223.776
-MES,S&P 500 E-Mini,Future,ES,0.25,1.25,1112.22
-MGC,Micro Gold,Future,GC,0.1,1.0,1770.77
-HE,Lean Hogs,Future,HE,0.00025,10.0,4032.37
-MHG,High Grade Copper,Future,HG,0.0005,1.25,1080.20
-MHO,Heating Oil,Future,HO,0.0001,0.42,3615.73
-6J,Japanese Yen,Future,J6,0.0000005,6.25,3360
-J7,E-Mini Japanese Yen,Future,J6,0.000001,6.25,1680
-LE,Live Cattle,Future,LE,0.00025,10.0,3864.31
-NG,Natural Gas,Future,NG,0.001,10,5914.34
-MNG,Micro Natural Gas,Future,NG,0.00025,0.25,591.434
-MNQ,Micro Nasdaq 100 E-Mini,Future,NQ,0.25,0.5,2236.69
-PL,Platinum,Future,PL,0.1,5.0,5457.42
-M2K,Russell 2000 E-Mini,Future,QR,0.1,0.5,652.289
-MRB,Micro Gasoline,Future,RB,0.0001,0.42,3609.28
-6S,Swiss Francs,Future,S6,0.0001,12.5,5107.275
-MSF,Micro Swiss Francs,Future,S6,0.0001,1.25,510.758
-SB,Sugar No. 11,Future,SB,0.01,11.20,1999.55
-SIL,Silver,Future,SI,0.005,5.0,4533.60
-VXM,Mini VIX,Future,VI,0.05,50.00,890.076
-MYM,E-Mini Dow Jones Industrial Average,Future,YM,1.0,0.5,824.28
-ZB,30-Year T-Bond,Future,ZB,0.03125,31.25,6767.83
-S30Y,Small 30-Year T-Bond,Future,ZB,0.01,1.0,680.794
-ZF,5-Year T-Note,Future,ZF,0.03125,7.8125,2274.79
-ZL,Soybean Oil,Future,ZL,0.01,6.0,3115.64
-ZM,Soybean Meal,Future,ZM,0.1,10,3110.55
-ZN,10-Year T-Note,Future,ZN,0.03125,15.625,3393.45
-ZQ,30-Day Fed Funds Rate,Future,ZQ,0.0025,10.4175,531.115
-ZS,Soybean,Future,ZS,0.25,12.50,3841.77
-ZT,2-Year T-Note,Future,ZT,0.03125,7.8125,1484.87
-ZW,Wheat,Future,ZW,0.25,12.50,4263.84
+symbol,name,type,data_symbol,currency,tick_size,tick_value,margin
+MES,S&P 500 E-Mini,Future,ES,USD,0.25,1.25,1112.22
+MNQ,Micro Nasdaq 100 E-Mini,Future,NQ,USD,0.25,0.5,2236.69
+MYM,E-Mini Dow Jones Industrial Average,Future,YM,USD,1.0,0.5,824.28
+M2K,Russell 2000 E-Mini,Future,QR,USD,0.1,0.5,652.289
+ENY,E-Mini Nikkei 225,Future,MC,JPY,10,1000,213214.15
+FDXM,Mini-DAX,Future,DY,EUR,1.0,5.0,5694.73
+FDXS,Micro-DAX,Future,DY,EUR,1.0,1.0,1138.95
+6E,Euro FX,Future,E6,USD,0.000050,6.25,3414.70
+M6E,Micro Euro FX,Future,E6,USD,0.0001,1.25,341.47
+6J,Japanese Yen,Future,J6,USD,0.0000005,6.25,3360
+6B,British Pound,Future,B6,USD,0.0001,6.25,2447.34
+6S,Swiss Francs,Future,S6,USD,0.0001,12.5,5107.275
+MSF,Micro Swiss Francs,Future,S6,USD,0.0001,1.25,510.758
+MGC,Micro Gold,Future,GC,USD,0.1,1.0,1770.77
+SIL,Silver,Future,SI,USD,0.005,5.0,4533.60
+MHG,Micro High Grade Copper,Future,HG,USD,0.0005,1.25,1080.20
+PL,Platinum,Future,PL,USD,0.1,5.0,5457.42
+MCL,Micro WTI Crude Oil,Future,CL,USD,0.01,1.0,1755
+NG,Natural Gas,Future,NG,USD,0.001,10,5914.34
+MNG,Micro Natural Gas,Future,NG,USD,0.00025,0.25,591.434
+ZS,Soybean,Future,ZS,USD,0.25,12.50,3841.77
+ZL,Soybean Oil,Future,ZL,USD,0.01,6.0,3115.64
+ZM,Soybean Meal,Future,ZM,USD,0.1,10,3110.55
+ZW,Wheat,Future,ZW,USD,0.25,12.50,4263.84
+CT,Cotton No. 2,Future,CT,USD,0.01,5.0,3259.02
+SB,Sugar No. 11,Future,SB,USD,0.01,11.20,1999.55
+HE,Lean Hogs,Future,HE,USD,0.00025,10.0,4032.37
+LE,Live Cattle,Future,LE,USD,0.00025,10.0,3864.31
+ZB,30-Year T-Bond,Future,ZB,USD,0.03125,31.25,6767.83
+ZN,10-Year T-Note,Future,ZN,USD,0.03125,15.625,3393.45
+ZF,5-Year T-Note,Future,ZF,USD,0.03125,7.8125,2274.79
+ZT,2-Year T-Note,Future,ZT,USD,0.03125,7.8125,1484.87
+ZQ,30-Day Fed Funds Rate,Future,ZQ,USD,0.0025,10.4175,531.115
+MBT,Micro Bitcoin,Future,BT,USD,5,0.5,3302.07
+MET,Micro Ether,Future,ER,USD,0.5,0.05,223.776
+VXM,Mini S&P 500 VIX,Future,VI,USD,0.05,50.00,890.076
+V2TX,VSTOXX,Future,DV,EUR,0.05,5.0,905.01

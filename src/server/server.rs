@@ -22,9 +22,15 @@ use common::*;
 use crate::correlation::*;
 use crate::datetime::*;
 
+#[derive(Deserialize)]
+enum AssetType {
+	Future
+}
+
 struct ServerState {
-	data_directory: Arc<String>,
-	ticker_cache: Arc<DashMap<String, Arc<OhlcArchive>>>
+	ticker_directory: Arc<String>,
+	ticker_cache: Arc<DashMap<String, Arc<OhlcArchive>>>,
+	assets: Arc<HashMap<String, Asset>>
 }
 
 #[derive(Deserialize)]
@@ -69,11 +75,24 @@ struct OhlcRecordWeb {
 	pub open_interest: Option<u32>
 }
 
+#[derive(Deserialize)]
+struct Asset {
+	pub symbol: String,
+	pub name: String,
+	pub asset_type: AssetType,
+	pub data_symbol: String,
+	pub currency: String,
+	pub tick_size: f64,
+	pub tick_value: f64,
+	pub margin: f64
+}
+
 impl ServerState {
-	pub fn new(data_directory: String) -> ServerState {
+	pub fn new(data_directory: String, assets: HashMap<String, Asset>) -> ServerState {
 		ServerState {
-			data_directory: Arc::new(data_directory),
-			ticker_cache: Arc::new(DashMap::new())
+			ticker_directory: Arc::new(data_directory),
+			ticker_cache: Arc::new(DashMap::new()),
+			assets: Arc::new(assets)
 		}
 	}
 }
@@ -95,9 +114,10 @@ impl OhlcRecordWeb {
 	}
 }
 
-pub async fn run(address: SocketAddr, data_directory: String) {
+pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String) {
 	println!("Running server on {}", address);
-	let state = ServerState::new(data_directory);
+	let assets = load_assets(assets_path);
+	let mut state = ServerState::new(ticker_directory, assets);
 	let state_arc = Arc::new(state);
 	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
@@ -107,6 +127,14 @@ pub async fn run(address: SocketAddr, data_directory: String) {
 		.fallback_service(serve_dir);
 	let listener = TcpListener::bind(address).await.unwrap();
 	axum::serve(listener, app).await.unwrap();
+}
+
+fn load_assets(csv_path: String) -> HashMap<String, Asset> {
+	let mut assets = HashMap::new();
+	read_csv::<Asset>(csv_path.into(), |record| {
+		assets.insert(record.symbol.clone(), record);
+	});
+	return assets;
 }
 
 async fn get_history(
@@ -187,7 +215,7 @@ fn get_archive(symbol: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArch
 	}
 	else {
 		let file_name = get_archive_file_name(symbol);
-		let data_directory = &*state.data_directory;
+		let data_directory = &*state.ticker_directory;
 		let archive_path = Path::new(data_directory).join(file_name);
 		let archive = read_archive(&archive_path)?;
 		let archive_arc = Arc::new(archive);
@@ -268,7 +296,7 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 fn resolve_symbols(symbols: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
 	let all_keyword = "all";
 	if symbols.iter().any(|x| x == all_keyword) {
-		let data_directory = &*state.data_directory;
+		let data_directory = &*state.ticker_directory;
 		let entries = fs::read_dir(data_directory)
 			.expect("Unable to get list of archives");
 		let result = entries
