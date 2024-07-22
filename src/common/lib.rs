@@ -14,7 +14,7 @@ use rkyv::{
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
 
-#[derive(Archive, Serialize, Deserialize, Clone)]
+#[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct OhlcArchive {
 	pub daily: Vec<OhlcRecord>,
 	pub intraday: Vec<OhlcRecord>,
@@ -22,7 +22,7 @@ pub struct OhlcArchive {
 	pub time_zone: String
 }
 
-#[derive(Archive, Serialize, Deserialize, Clone)]
+#[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct OhlcRecord {
 	pub symbol: String,
 	pub time: NaiveDateTime,

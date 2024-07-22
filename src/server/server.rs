@@ -19,18 +19,14 @@ use tower_http::services::ServeDir;
 use dashmap::DashMap;
 
 use common::*;
+use crate::backtest::Asset;
 use crate::correlation::*;
 use crate::datetime::*;
 
-#[derive(Deserialize)]
-enum AssetType {
-	Future
-}
-
 struct ServerState {
-	ticker_directory: Arc<String>,
-	ticker_cache: Arc<DashMap<String, Arc<OhlcArchive>>>,
-	assets: Arc<HashMap<String, Asset>>
+	ticker_directory: String,
+	ticker_cache: DashMap<String, Arc<OhlcArchive>>,
+	assets: HashMap<String, Asset>
 }
 
 #[derive(Deserialize)]
@@ -75,24 +71,12 @@ struct OhlcRecordWeb {
 	pub open_interest: Option<u32>
 }
 
-#[derive(Deserialize)]
-struct Asset {
-	pub symbol: String,
-	pub name: String,
-	pub asset_type: AssetType,
-	pub data_symbol: String,
-	pub currency: String,
-	pub tick_size: f64,
-	pub tick_value: f64,
-	pub margin: f64
-}
-
 impl ServerState {
 	pub fn new(data_directory: String, assets: HashMap<String, Asset>) -> ServerState {
 		ServerState {
-			ticker_directory: Arc::new(data_directory),
-			ticker_cache: Arc::new(DashMap::new()),
-			assets: Arc::new(assets)
+			ticker_directory: data_directory,
+			ticker_cache: DashMap::new(),
+			assets: assets
 		}
 	}
 }

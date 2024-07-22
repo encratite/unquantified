@@ -1,6 +1,7 @@
 mod server;
 mod datetime;
 mod correlation;
+mod backtest;
 
 use std::error::Error;
 use std::net::SocketAddr;
