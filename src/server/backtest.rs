@@ -1,17 +1,19 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use common::OhlcArchive;
-use serde::Deserialize;
 
-#[derive(Debug, Deserialize, Clone)]
-pub enum AssetType {
-	Future
-}
+use crate::manager::Asset;
 
 #[derive(Debug)]
 pub enum PositionSide {
 	Long,
 	Short
+}
+
+#[derive(Debug, Clone)]
+pub enum TimeFrame {
+	Daily,
+	Intraday
 }
 
 pub struct Backtest {
@@ -23,22 +25,16 @@ pub struct Backtest {
 	positions: Vec<Position>
 }
 
+#[derive(Debug, Clone)]
 pub struct BacktestConfiguration {
-	starting_cash: f64
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct Asset {
-	pub symbol: String,
-	pub name: String,
-	pub asset_type: AssetType,
-	pub data_symbol: String,
-	pub currency: String,
-	pub tick_size: f64,
-	pub tick_value: f64,
-	pub margin: f64,
-	pub broker_fee: f64,
-	pub exchange_fee: f64
+	// Initial cash the backtest starts with, in USD
+	starting_cash: f64,
+	// Determines how frequently the strategy's next method is invoked by the backtest.
+	time_frame: TimeFrame,
+	// Bid/ask spread on all assets, in ticks
+	// Since OHLC records only contain bid prices, ask prices are simulated like this:
+	// ask = bid + spread * asset.tick_value
+	spread: u8
 }
 
 #[derive(Debug)]
@@ -48,6 +44,9 @@ pub struct Position {
 	pub count: u32,
 	// Long or short side
 	pub side: PositionSide,
+	// The price the contracts were originally purchased at
+	// Per contract, in the currency of the asset
+	pub price: f64,
 	// Initial margin that was subtracted from the account's cash value, in USD, per contract.
 	// The simulation does not differentiate between initial margin, maintenance margin and overnight margin.
 	// This amount is later re-added to the account when the position is closed.
@@ -57,4 +56,15 @@ pub struct Position {
 }
 
 impl Backtest {
+	pub fn new(&self, configuration: BacktestConfiguration) -> Backtest {
+		Backtest {
+			configuration: configuration.clone(),
+			cash: configuration.starting_cash,
+			positions: Vec::new()
+		}
+	}
+
+	pub fn open_position(&self, symbol: String, count: u32, side: PositionSide) -> Result<(), Box<dyn Error>> {
+		panic!("Not implemented");
+	}
 }

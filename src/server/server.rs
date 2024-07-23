@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -12,22 +10,14 @@ use axum::routing::post;
 use axum::Router;
 use chrono::{DateTime, FixedOffset};
 use chrono_tz::Tz;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use dashmap::DashMap;
 
 use common::*;
-use crate::backtest::Asset;
 use crate::correlation::*;
 use crate::datetime::*;
-
-struct ServerState {
-	ticker_directory: String,
-	ticker_cache: DashMap<String, Arc<OhlcArchive>>,
-	assets: HashMap<String, Asset>
-}
+use crate::manager::AssetManager;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,16 +61,6 @@ struct OhlcRecordWeb {
 	pub open_interest: Option<u32>
 }
 
-impl ServerState {
-	pub fn new(data_directory: String, assets: HashMap<String, Asset>) -> ServerState {
-		ServerState {
-			ticker_directory: data_directory,
-			ticker_cache: DashMap::new(),
-			assets: assets
-		}
-	}
-}
-
 impl OhlcRecordWeb {
 	pub fn new(record: &OhlcRecord, archive: &OhlcArchive) -> Result<OhlcRecordWeb, Box<dyn Error>> {
 		let tz = Tz::from_str(&archive.time_zone)?;
@@ -100,9 +80,8 @@ impl OhlcRecordWeb {
 
 pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String) {
 	println!("Running server on {}", address);
-	let assets = load_assets(assets_path);
-	let mut state = ServerState::new(ticker_directory, assets);
-	let state_arc = Arc::new(state);
+	let mut manager = AssetManager::new(ticker_directory, assets_path);
+	let state_arc = Arc::new(manager);
 	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
 		.route("/history", post(get_history))
@@ -113,19 +92,11 @@ pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: Str
 	axum::serve(listener, app).await.unwrap();
 }
 
-fn load_assets(csv_path: String) -> HashMap<String, Asset> {
-	let mut assets = HashMap::new();
-	read_csv::<Asset>(csv_path.into(), |record| {
-		assets.insert(record.symbol.clone(), record);
-	});
-	return assets;
-}
-
 async fn get_history(
-	State(state): State<Arc<ServerState>>,
+	State(manager): State<Arc<AssetManager>>,
 	Json(request): Json<GetHistoryRequest>
 ) -> impl IntoResponse {
-	let response = match get_history_data(request, state) {
+	let response = match get_history_data(request, manager) {
 		Ok(data) => GetHistoryResponse {
 			tickers: Some(data),
 			error: None
@@ -139,10 +110,10 @@ async fn get_history(
 }
 
 async fn get_correlation(
-	State(state): State<Arc<ServerState>>,
+	State(manager): State<Arc<AssetManager>>,
 	Json(request): Json<GetCorrelationRequest>
 ) -> impl IntoResponse {
-	let response = match get_correlation_data(request, state) {
+	let response = match get_correlation_data(request, manager) {
 		Ok(data) => GetCorrelationResponse {
 			correlation: Some(data),
 			error: None
@@ -155,9 +126,9 @@ async fn get_correlation(
 	Json(response)
 }
 
-fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
-	let resolved_symbols = resolve_symbols(&request.symbols, &state)?;
-	let archives = get_ticker_archives(&resolved_symbols, &state)?;
+fn get_history_data(request: GetHistoryRequest, manager: Arc<AssetManager>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
+	let resolved_symbols = manager.resolve_symbols(&request.symbols)?;
+	let archives = get_ticker_archives(&resolved_symbols, &manager)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
 	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = archives
@@ -173,39 +144,19 @@ fn get_history_data(request: GetHistoryRequest, state: Arc<ServerState>) -> Resu
 	}
 }
 
-fn get_ticker_archives(symbols: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
+fn get_ticker_archives(symbols: &Vec<String>, manager: &Arc<AssetManager>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
 	symbols
 		.iter()
-		.map(|x| get_archive(&x, &state))
+		.map(|x| manager.get_archive(&x))
 		.collect()
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, state: Arc<ServerState>) -> Result<CorrelationData, Box<dyn Error>> {
-	let resolved_symbols = resolve_symbols(&request.symbols, &state)?;
-	let archives = get_ticker_archives(&resolved_symbols, &state)?;
+fn get_correlation_data(request: GetCorrelationRequest, manager: Arc<AssetManager>) -> Result<CorrelationData, Box<dyn Error>> {
+	let resolved_symbols = manager.resolve_symbols(&request.symbols)?;
+	let archives = get_ticker_archives(&resolved_symbols, &manager)?;
 	let from = request.from.resolve(&request.to, &archives)?;
 	let to = request.to.resolve(&request.from, &archives)?;
 	get_correlation_matrix(resolved_symbols, from, to, archives)
-}
-
-fn get_archive(symbol: &String, state: &Arc<ServerState>) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
-	// Simple directory traversal check
-	let pattern = Regex::new("^[A-Z0-9]+$")?;
-	if !pattern.is_match(symbol) {
-		return Err("Invalid ticker".into());
-	}
-	if let Some(archive_ref) = state.ticker_cache.get(symbol) {
-		Ok(Arc::clone(archive_ref.value()))
-	}
-	else {
-		let file_name = get_archive_file_name(symbol);
-		let data_directory = &*state.ticker_directory;
-		let archive_path = Path::new(data_directory).join(file_name);
-		let archive = read_archive(&archive_path)?;
-		let archive_arc = Arc::new(archive);
-		state.ticker_cache.insert(symbol.to_string(), Arc::clone(&archive_arc));
-		Ok(archive_arc)
-	}
 }
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
@@ -275,27 +226,4 @@ fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<Fixe
 		.filter(|x| matches_from_to(from, to, tz, x))
 		.map(|x| OhlcRecordWeb::new(&x, archive))
 		.collect()
-}
-
-fn resolve_symbols(symbols: &Vec<String>, state: &Arc<ServerState>) -> Result<Vec<String>, Box<dyn Error>> {
-	let all_keyword = "all";
-	if symbols.iter().any(|x| x == all_keyword) {
-		let data_directory = &*state.ticker_directory;
-		let entries = fs::read_dir(data_directory)
-			.expect("Unable to get list of archives");
-		let result = entries
-			.filter_map(|x| x.ok())
-			.map(|x| x.path())
-			.filter(|x| x.is_file())
-			.filter(|x| x.extension()
-				.and_then(|x| x.to_str()) == Some("zrk"))
-			.filter_map(|x| x.file_stem()
-				.and_then(|x| x.to_str())
-				.map(|x| x.to_string()))
-			.collect();
-		Ok(result)
-	}
-	else {
-		Ok(symbols.clone())
-	}
 }
