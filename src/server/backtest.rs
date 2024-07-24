@@ -1,8 +1,10 @@
-use std::{error::Error, sync::Arc};
+use std::{collections::BTreeSet, error::Error, sync::Arc};
 
+use chrono::DateTime;
+use chrono_tz::Tz;
 use common::OhlcArchive;
 
-use crate::manager::Asset;
+use crate::manager::{Asset, AssetManager};
 
 #[derive(Debug)]
 pub enum PositionSide {
@@ -10,26 +12,41 @@ pub enum PositionSide {
 	Short
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TimeFrame {
 	Daily,
 	Intraday
 }
 
+pub trait Strategy {
+	fn next(&self);
+}
+
 pub struct Backtest {
+	// The strategy that is being executed.
+	// Only one strategy can be executed at a time.
+	strategy: Box<dyn Strategy>,
 	configuration: BacktestConfiguration,
+	// The asset manager is used to access asset definitions and OHLC records
+	asset_manager: Arc<AssetManager>,
 	// All cash is kept in USD. There are no separate currency accounts.
 	// Buying or selling securities that are traded in other currencies cause implicit conversion.
 	cash: f64,
 	// Long and short positions held by the account
-	positions: Vec<Position>
+	positions: Vec<Position>,
+	// The current point in time
+	now: DateTime<Tz>
 }
 
 #[derive(Debug, Clone)]
 pub struct BacktestConfiguration {
+	// At which point in time to start the backtest
+	from: DateTime<Tz>,
+	// And when to stop
+	to: DateTime<Tz>,
 	// Initial cash the backtest starts with, in USD
 	starting_cash: f64,
-	// Determines how frequently the strategy's next method is invoked by the backtest.
+	// Determines how frequently the strategy's next method is invoked by the backtest
 	time_frame: TimeFrame,
 	// Bid/ask spread on all assets, in ticks
 	// Since OHLC records only contain bid prices, ask prices are simulated like this:
@@ -52,16 +69,49 @@ pub struct Position {
 	// This amount is later re-added to the account when the position is closed.
 	pub margin: f64,
 	// Underlying OHLC archive of the asset
-	pub archive: Arc<OhlcArchive>
+	pub archive: Arc<OhlcArchive>,
+	// Time the position was created
+	pub time: DateTime<Tz>
 }
 
 impl Backtest {
-	pub fn new(&self, configuration: BacktestConfiguration) -> Backtest {
-		Backtest {
-			configuration: configuration.clone(),
-			cash: configuration.starting_cash,
-			positions: Vec::new()
+	pub fn new(&self, strategy: Box<dyn Strategy>, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest, Box<dyn Error>> {
+		if configuration.from >= configuration.to {
+			return Err("Invalid from/to parameters".into());
 		}
+		Ok(Backtest {
+			strategy,
+			configuration: configuration.clone(),
+			asset_manager,
+			cash: configuration.starting_cash,
+			positions: Vec::new(),
+			now: configuration.from
+		})
+	}
+
+	pub fn run(&self) -> Result<(), Box<dyn Error>> {
+		// Use ES timestamps as a timestamp reference for the core loop
+		// This only makes sense because the backtest currently targets futures
+		let time_reference_symbol = "ES".to_string();
+		let time_reference = self.asset_manager.get_archive(&time_reference_symbol)?;
+		// Skip samples outside the configured time range
+		let is_daily = self.configuration.time_frame == TimeFrame::Daily;
+		let time_archive = if is_daily {
+			&time_reference.daily
+		}
+		else {
+			&time_reference.intraday
+		};
+		let in_range = time_archive
+			.iter()
+			.map(|x| x.time)
+			.filter(|x|
+				*x >= self.configuration.from &&
+				*x < self.configuration.to);
+		// Reduce points in time using a B-tree set
+		// This is necessary because intraday OHLC archives contain overlapping ranges of contracts
+		let points_in_time: BTreeSet<DateTime<Tz>> = BTreeSet::from_iter(in_range);
+		Ok(())
 	}
 
 	pub fn open_position(&self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {
