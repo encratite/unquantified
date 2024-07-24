@@ -6,6 +6,8 @@ mod manager;
 
 use std::error::Error;
 use std::net::SocketAddr;
+use chrono::DateTime;
+use chrono_tz::Tz;
 use common::*;
 
 #[tokio::main]
@@ -22,4 +24,8 @@ async fn main() -> Result<(), Box<dyn Error>>{
 		.expect("Unable to parse server address");
 	server::run(address, ticker_directory, assets_path).await;
 	Ok(())
+}
+
+fn test(x: DateTime<Tz>) {
+	let test = rmp_serde::to_vec(&x);
 }
