@@ -1,4 +1,4 @@
-use std::{error::Error, str::FromStr, sync::Arc};
+use std::{error::Error, sync::Arc};
 use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, TimeZone};
 use chrono_tz::Tz;
 use common::OhlcArchive;
@@ -94,23 +94,12 @@ pub fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
 		.unwrap()
 }
 
-pub fn get_date_time_string(time: NaiveDateTime, tz: &Tz) -> Result<String, Box<dyn Error>> {
-	let time_tz = get_date_time_tz(time, tz);
-	Ok(time_tz.to_rfc3339())
-}
-
-fn get_date_time_fixed(time: NaiveDateTime, tz: &Tz) -> DateTime<FixedOffset> {
-	let time_tz = get_date_time_tz(time, tz);
-	time_tz.fixed_offset()
-}
-
 fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
-	let tz = Tz::from_str(archive.time_zone.as_str())?;
 	let mut time_values = archive.intraday
 		.iter()
 		.map(|x| x.time);
-	let get_some_time = |time| match time {
-		Some(x) => Ok(get_date_time_fixed(x, &tz)),
+	let get_some_time = |time: Option<DateTime<Tz>>| match time {
+		Some(x) => Ok(x.fixed_offset()),
 		None => Err("No records available".into())
 	};
 	if is_first {

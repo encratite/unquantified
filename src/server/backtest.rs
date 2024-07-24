@@ -64,7 +64,11 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_position(&self, symbol: String, count: u32, side: PositionSide) -> Result<(), Box<dyn Error>> {
+	pub fn open_position(&self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {
+		panic!("Not implemented");
+	}
+
+	pub fn close_position(&self, position: Position, count: u32) -> Result<(), Box<dyn Error>> {
 		panic!("Not implemented");
 	}
 }

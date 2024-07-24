@@ -62,19 +62,17 @@ struct OhlcRecordWeb {
 }
 
 impl OhlcRecordWeb {
-	pub fn new(record: &OhlcRecord, archive: &OhlcArchive) -> Result<OhlcRecordWeb, Box<dyn Error>> {
-		let tz = Tz::from_str(&archive.time_zone)?;
-		let time = get_date_time_string(record.time, &tz)?;
-		Ok(OhlcRecordWeb {
+	pub fn new(record: &OhlcRecord) -> OhlcRecordWeb {
+		OhlcRecordWeb {
 			symbol: record.symbol.clone(),
-			time: time,
+			time: record.time.to_rfc3339(),
 			open: record.open,
 			high: record.high,
 			low: record.low,
 			close: record.close,
 			volume: record.volume,
 			open_interest: record.open_interest
-		})
+		}
 	}
 }
 
@@ -160,12 +158,11 @@ fn get_correlation_data(request: GetCorrelationRequest, manager: Arc<AssetManage
 }
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
-	let tz = Tz::from_str(archive.time_zone.as_str())?;
 	if time_frame >= 1440 {
-		return get_raw_records_from_archive(from, to, &tz, &archive.daily, &archive)
+		return Ok(get_raw_records_from_archive(from, to, &archive.daily));
 	}
 	else if time_frame == archive.intraday_time_frame {
-		return get_raw_records_from_archive(from, to, &tz, &archive.intraday, &archive);
+		return Ok(get_raw_records_from_archive(from, to, &archive.intraday));
 	}
 	else if time_frame < archive.intraday_time_frame {
 		return Err("Requested time frame too small for intraday data in archive".into());
@@ -178,7 +175,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 	// This doesn't merge continuous contracts correctly
 	archive.intraday
 		.iter()
-		.filter(|x| matches_from_to(from, to, &tz, x))
+		.filter(|x| matches_from_to(from, to, x))
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
@@ -186,7 +183,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 			let first = x.first().unwrap();
 			let last = x.last().unwrap();
 			let symbol = first.symbol.clone();
-			let time = get_date_time_string(first.time, &tz)?;
+			let time = first.time.to_rfc3339();
 			let open = first.open;
 			let high = x
 				.iter()
@@ -215,15 +212,14 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		.collect()
 }
 
-fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, tz: &Tz, record: &OhlcRecord) -> bool {
-	let time = get_date_time_tz(record.time, tz);
-	time >= *from && time < *to
+fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, record: &OhlcRecord) -> bool {
+	record.time >= *from && record.time < *to
 }
 
-fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, tz: &Tz, records: &Vec<OhlcRecord>, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
+fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, records: &Vec<OhlcRecord>) -> Vec<OhlcRecordWeb> {
 	records
 		.iter()
-		.filter(|x| matches_from_to(from, to, tz, x))
-		.map(|x| OhlcRecordWeb::new(&x, archive))
+		.filter(|x| matches_from_to(from, to, x))
+		.map(|x| OhlcRecordWeb::new(&x))
 		.collect()
 }

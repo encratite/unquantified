@@ -1,18 +1,18 @@
 use std::{	
-	error::Error, fs, path::{Path, PathBuf}, str::FromStr
+	error::Error, fs, path::{Path, PathBuf}
 };
 use std::collections::BTreeMap;
 use regex::Regex;
 use serde;
 use chrono::{
-	DateTime, NaiveDate, NaiveDateTime
+	NaiveDate, NaiveDateTime
 };
 use chrono_tz::Tz;
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
 use common::*;
 
-type OhlcTreeMap = BTreeMap<OhlcKey, OhlcRecord>;
+type OhlcTreeMap = BTreeMap<OhlcKey, RawOhlcRecord>;
 
 #[derive(Debug, serde::Deserialize)]
 struct CsvRecord {
@@ -111,7 +111,7 @@ impl<'a> CsvParser<'a> {
 		let intraday = self.parse_csv_files(ticker_directory, intraday_filter, true);
 		let archive_path = self.get_archive_path(ticker_directory);
 		let time_zone = self.time_zone.to_string();
-		let archive = OhlcArchive {
+		let archive = RawOhlcArchive {
 			daily,
 			intraday,
 			intraday_time_frame: self.intraday_time_frame,
@@ -133,7 +133,7 @@ impl<'a> CsvParser<'a> {
 		);
 	}
 
-	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> Vec<OhlcRecord> {
+	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> Vec<RawOhlcRecord> {
 		let csv_paths = Self::get_csv_paths(path, filter);
 		let mut ohlc_map = OhlcTreeMap::new();
 		for csv_path in csv_paths {
@@ -144,7 +144,7 @@ impl<'a> CsvParser<'a> {
 		if ohlc_map.values().len() < 250 {
 			panic!("Missing data in {}", path.to_str().unwrap());
 		}
-		let mut records: Vec<OhlcRecord> = ohlc_map.into_values().collect();
+		let mut records: Vec<RawOhlcRecord> = ohlc_map.into_values().collect();
 		records.sort_by(|a, b| {
 			if sort_by_symbol {
 				a.symbol.cmp(&b.symbol).then_with(|| a.time.cmp(&b.time))
@@ -166,7 +166,7 @@ impl<'a> CsvParser<'a> {
 			symbol: symbol.clone(),
 			time: time
 		};
-		let value = OhlcRecord {
+		let value = RawOhlcRecord {
 			symbol,
 			time: time,
 			open: record.open,
@@ -174,8 +174,7 @@ impl<'a> CsvParser<'a> {
 			low: record.low,
 			close: record.close,
 			volume: record.volume,
-			open_interest: record.open_interest,
-			test: DateTime::parse_from_rfc3339("2022-01-01T00:00:00+00:00").unwrap().with_timezone(&Tz::from_str("US/Arizona").unwrap())
+			open_interest: record.open_interest
 		};
 		ohlc_map.insert(key, value);
 	}
