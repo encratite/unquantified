@@ -1,11 +1,11 @@
 use std::{	
-	error::Error, fs, path::{Path, PathBuf}
+	error::Error, fs, path::{Path, PathBuf}, str::FromStr
 };
 use std::collections::BTreeMap;
 use regex::Regex;
 use serde;
 use chrono::{
-	NaiveDate, NaiveDateTime
+	DateTime, NaiveDate, NaiveDateTime
 };
 use chrono_tz::Tz;
 use stopwatch::Stopwatch;
@@ -174,7 +174,8 @@ impl<'a> CsvParser<'a> {
 			low: record.low,
 			close: record.close,
 			volume: record.volume,
-			open_interest: record.open_interest
+			open_interest: record.open_interest,
+			test: DateTime::parse_from_rfc3339("2022-01-01T00:00:00+00:00").unwrap().with_timezone(&Tz::from_str("US/Arizona").unwrap())
 		};
 		ohlc_map.insert(key, value);
 	}
