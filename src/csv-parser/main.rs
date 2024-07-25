@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let intraday_time_frame = intraday_time_frame_string.parse::<u16>()?;
 	let input_directory = PathBuf::from(get_value("input_directory")?);
 	let output_directory = PathBuf::from(get_value("output_directory")?);
-	let parser = CsvParser::new(&time_zone, intraday_time_frame, &input_directory, &output_directory);
+	let parser = CsvParser::new(time_zone, intraday_time_frame, input_directory, output_directory);
 	parser.run();
 	Ok(())
 }

@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, error::Error, sync::Arc};
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use common::OhlcArchive;
 
@@ -35,7 +35,7 @@ pub struct Backtest {
 	// Long and short positions held by the account
 	positions: Vec<Position>,
 	// The current point in time
-	now: DateTime<Tz>
+	now: DateTime<Utc>
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +74,11 @@ pub struct Position {
 	pub time: DateTime<Tz>
 }
 
+#[derive(Debug)]
+pub struct BacktestResult {
+	// Just a placeholder for now
+}
+
 impl Backtest {
 	pub fn new(&self, strategy: Box<dyn Strategy>, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest, Box<dyn Error>> {
 		if configuration.from >= configuration.to {
@@ -85,33 +90,39 @@ impl Backtest {
 			asset_manager,
 			cash: configuration.starting_cash,
 			positions: Vec::new(),
-			now: configuration.from
+			now: configuration.from.to_utc()
 		})
 	}
 
-	pub fn run(&self) -> Result<(), Box<dyn Error>> {
+	pub fn run(&mut self) -> Result<BacktestResult, Box<dyn Error>> {
 		// Use ES timestamps as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();
 		let time_reference = self.asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
 		let is_daily = self.configuration.time_frame == TimeFrame::Daily;
-		let time_archive = if is_daily {
-			&time_reference.daily
+		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = if is_daily {
+			Box::new(time_reference.daily.keys())
 		}
 		else {
-			&time_reference.intraday
+			Box::new(time_reference.intraday
+				.keys()
+				.map(|x| &x.time))
 		};
-		let in_range = time_archive
-			.iter()
-			.map(|x| x.time)
-			.filter(|x|
-				*x >= self.configuration.from &&
-				*x < self.configuration.to);
+		let in_range = time_keys
+			.filter(|&&x|
+				x >= self.configuration.from &&
+				x < self.configuration.to);
 		// Reduce points in time using a B-tree set
 		// This is necessary because intraday OHLC archives contain overlapping ranges of contracts
-		let points_in_time: BTreeSet<DateTime<Tz>> = BTreeSet::from_iter(in_range);
-		Ok(())
+		let points_in_time: BTreeSet<&DateTime<Utc>> = BTreeSet::from_iter(in_range);
+		// Core engine loop
+		for &&time in points_in_time.iter() {
+			self.now = time.clone();
+			self.strategy.next();
+		}
+		let result = BacktestResult { };
+		Ok(result)
 	}
 
 	pub fn open_position(&self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {

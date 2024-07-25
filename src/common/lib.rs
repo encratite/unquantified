@@ -1,8 +1,5 @@
 use std::{
-	error::Error,
-	fs::File,
-	path::PathBuf,
-	str::FromStr
+	collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
@@ -13,6 +10,9 @@ use rkyv::{
 };
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
+
+pub type OhlcDailyMap = BTreeMap<DateTime<Utc>, Box<OhlcRecord>>;
+pub type OhlcIntradayMap = BTreeMap<OhlcKey, Box<OhlcRecord>>;
 
 #[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct RawOhlcArchive {
@@ -34,14 +34,20 @@ pub struct RawOhlcRecord {
 	pub open_interest: Option<u32>
 }
 
-#[derive(Debug)]
-pub struct OhlcArchive {
-	pub daily: Vec<OhlcRecord>,
-	pub intraday: Vec<OhlcRecord>,
-	pub intraday_time_frame: u16
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OhlcKey {
+	pub symbol: String,
+	pub time: DateTime<Utc>
 }
 
 #[derive(Debug)]
+pub struct OhlcArchive {
+	pub daily: OhlcDailyMap,
+	pub intraday: OhlcIntradayMap,
+	pub intraday_time_frame: u16
+}
+
+#[derive(Debug, Clone)]
 pub struct OhlcRecord {
 	pub symbol: String,
 	pub time: DateTime<Tz>,
@@ -50,7 +56,11 @@ pub struct OhlcRecord {
 	pub low: f64,
 	pub close: f64,
 	pub volume: u32,
-	pub open_interest: Option<u32>
+	pub open_interest: Option<u32>,
+	// The records within each archive form multiple reverse singly linked lists
+	// This is relevant for efficiently calculating moving averages without having to repeatedly look up DateTime keys in the BTreeMap
+	// In the case of the intraday archive each list stops where the symbol of the contract changes
+	pub previous: Option<Box<OhlcRecord>>
 }
 
 pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
@@ -102,18 +112,46 @@ impl RawOhlcArchive {
 	pub fn to_archive(&self) -> OhlcArchive {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
-		let get_records = |records: &Vec<RawOhlcRecord>| records
-			.iter()
-			.map(|record| record
-				.to_archive(&time_zone))
-			.collect();
-		let daily = get_records(&self.daily);
-		let intraday = get_records(&self.intraday);
+		let daily = self.get_daily_archive(&time_zone);
+		let intraday = self.get_intraday_archive(&time_zone);
 		OhlcArchive {
 			daily,
 			intraday,
 			intraday_time_frame: self.intraday_time_frame
 		}
+	}
+
+	fn get_daily_archive(&self, time_zone: &Tz) -> OhlcDailyMap {
+		let mut daily = OhlcDailyMap::new();
+		let mut previous: Option<Box<OhlcRecord>> = None;
+		self.daily.iter().for_each(|x| {
+			let key = x.time.and_utc();
+			let mut value = Box::new(x.to_archive(&time_zone));
+			value.previous = previous.clone();
+			daily.insert(key, value.clone());
+			previous = Some(value);
+		});
+		daily
+	}
+
+	fn get_intraday_archive(&self, time_zone: &Tz) -> OhlcIntradayMap {
+		let mut intraday = OhlcIntradayMap::new();
+		let mut previous: Option<Box<OhlcRecord>> = None;
+		self.intraday.iter().for_each(|x| {
+			let key = OhlcKey {
+				symbol: x.symbol.clone(),
+				time: x.time.and_utc()
+			};
+			let mut value = Box::new(x.to_archive(&time_zone));
+			if let Some(previous_value) = previous.clone() {
+				if value.symbol == previous_value.symbol {
+					value.previous = previous.clone();
+				}
+			}
+			intraday.insert(key, value.clone());
+			previous = Some(value);
+		});
+		intraday
 	}
 }
 
@@ -129,7 +167,8 @@ impl RawOhlcRecord {
 			low: self.low,
 			close: self.close,
 			volume: self.volume,
-			open_interest: self.open_interest
+			open_interest: self.open_interest,
+			previous: None
 		}
 	}
 }

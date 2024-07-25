@@ -1,4 +1,4 @@
-symbol,name,type,data_symbol,currency,tick_size,tick_value,margin,broker_fee,exchange_fee
+symbol,name,asset_type,data_symbol,currency,tick_size,tick_value,margin,broker_fee,exchange_fee
 MES,S&P 500 E-Mini,Future,ES,USD,0.25,1.25,1112.22,0.25,0.37
 MNQ,Micro Nasdaq 100 E-Mini,Future,NQ,USD,0.25,0.5,2236.69,0.25,0.37
 MYM,E-Mini Dow Jones Industrial Average,Future,YM,USD,1.0,0.5,824.28,0.25,0.37

@@ -32,15 +32,15 @@ struct OhlcKey {
 	time: NaiveDateTime
 }
 
-pub struct CsvParser<'a> {
-	time_zone: &'a Tz,
+pub struct CsvParser {
+	time_zone: Tz,
 	intraday_time_frame: u16,
-	input_directory: &'a PathBuf,
-	output_directory: &'a PathBuf
+	input_directory: PathBuf,
+	output_directory: PathBuf
 }
 
-impl<'a> CsvParser<'a> {
-	pub fn new(time_zone: &'a Tz, intraday_time_frame: u16, input_directory: &'a PathBuf, output_directory: &'a PathBuf) -> CsvParser<'a> {
+impl CsvParser {
+	pub fn new(time_zone: Tz, intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf) -> CsvParser {
 		CsvParser {
 			time_zone,
 			intraday_time_frame,
@@ -92,7 +92,7 @@ impl<'a> CsvParser<'a> {
 
 	pub fn run(&self) {
 		let stopwatch = Stopwatch::start_new();
-		Self::get_directories(self.input_directory)
+		Self::get_directories(&self.input_directory)
 			.collect::<Vec<PathBuf>>()
 			.par_iter()
 			.for_each(|ticker_directory| {
@@ -182,6 +182,6 @@ impl<'a> CsvParser<'a> {
 	fn get_archive_path(&self, time_frame_directory: &PathBuf) -> PathBuf {
 		let symbol = Self::get_last_token(time_frame_directory);
 		let file_name = get_archive_file_name(&symbol);
-		return Path::new(self.output_directory).join(file_name);
+		return Path::new(&self.output_directory).join(file_name);
 	}
 }
