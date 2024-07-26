@@ -42,22 +42,22 @@ pub struct Backtest {
 #[derive(Debug, Clone)]
 pub struct BacktestConfiguration {
 	// Initial cash the backtest starts with, in USD
-	starting_cash: f64,
+	pub starting_cash: f64,
 	// Commission charged by broker on each currency order, in USD
-	forex_order_fee: f64,
+	pub forex_order_fee: f64,
 	// Bid/ask spread on currencies
 	// Since OHLC records only contain bid prices, ask prices for currencies are simulated like this:
 	// ask = forex_spread * bid
-	forex_spread: f64,
+	pub forex_spread: f64,
 	// Bid/ask spread on all futures, in ticks:
 	// ask = bid + futures_spread_ticks * asset.tick_value
-	futures_spread_ticks: u8,
+	pub futures_spread_ticks: u8,
 	// Initial margin of futures contracts:
 	// initial_margin = initial_margin_ratio * asset.margin
-	initial_margin_ratio: f64,
+	pub initial_margin_ratio: f64,
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
-	overnight_margin_ratio: f64
+	pub overnight_margin_ratio: f64
 }
 
 #[derive(Debug)]

@@ -13,9 +13,15 @@ use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 
 use common::*;
+use crate::backtest::BacktestConfiguration;
 use crate::correlation::*;
 use crate::datetime::*;
 use crate::manager::AssetManager;
+
+struct ServerState {
+	asset_manager: AssetManager,
+	backtest_configuration: BacktestConfiguration
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,10 +80,14 @@ impl OhlcRecordWeb {
 	}
 }
 
-pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String) {
+pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) {
 	println!("Running server on {}", address);
-	let manager = AssetManager::new(ticker_directory, assets_path);
-	let state_arc = Arc::new(manager);
+	let asset_manager = AssetManager::new(ticker_directory, assets_path);
+	let server_state = ServerState {
+		asset_manager,
+		backtest_configuration
+	};
+	let state_arc = Arc::new(server_state);
 	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
 		.route("/history", post(get_history))
@@ -89,10 +99,10 @@ pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: Str
 }
 
 async fn get_history(
-	State(manager): State<Arc<AssetManager>>,
+	State(state): State<Arc<ServerState>>,
 	Json(request): Json<GetHistoryRequest>
 ) -> impl IntoResponse {
-	let response = match get_history_data(request, manager) {
+	let response = match get_history_data(request, &state.asset_manager) {
 		Ok(data) => GetHistoryResponse {
 			tickers: Some(data),
 			error: None
@@ -106,10 +116,10 @@ async fn get_history(
 }
 
 async fn get_correlation(
-	State(manager): State<Arc<AssetManager>>,
+	State(state): State<Arc<ServerState>>,
 	Json(request): Json<GetCorrelationRequest>
 ) -> impl IntoResponse {
-	let response = match get_correlation_data(request, manager) {
+	let response = match get_correlation_data(request, &state.asset_manager) {
 		Ok(data) => GetCorrelationResponse {
 			correlation: Some(data),
 			error: None
@@ -122,9 +132,9 @@ async fn get_correlation(
 	Json(response)
 }
 
-fn get_history_data(request: GetHistoryRequest, manager: Arc<AssetManager>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
-	let resolved_symbols = manager.resolve_symbols(&request.symbols)?;
-	let archives = get_ticker_archives(&resolved_symbols, &manager)?;
+fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
+	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
+	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
 	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = archives
@@ -140,16 +150,16 @@ fn get_history_data(request: GetHistoryRequest, manager: Arc<AssetManager>) -> R
 	}
 }
 
-fn get_ticker_archives(symbols: &Vec<String>, manager: &Arc<AssetManager>) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
+fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
 	symbols
 		.iter()
-		.map(|x| manager.get_archive(&x))
+		.map(|x| asset_manager.get_archive(&x))
 		.collect()
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, manager: Arc<AssetManager>) -> Result<CorrelationData, Box<dyn Error>> {
-	let resolved_symbols = manager.resolve_symbols(&request.symbols)?;
-	let archives = get_ticker_archives(&resolved_symbols, &manager)?;
+fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData, Box<dyn Error>> {
+	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
+	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &archives)?;
 	let to = request.to.resolve(&request.from, &archives)?;
 	get_correlation_matrix(resolved_symbols, from, to, archives)
