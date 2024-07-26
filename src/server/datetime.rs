@@ -96,7 +96,7 @@ pub fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
 
 fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
 	let mut time_values = archive.intraday
-		.iter()
+		.values()
 		.map(|x| x.time);
 	let get_some_time = |time: Option<DateTime<Tz>>| match time {
 		Some(x) => Ok(x.fixed_offset()),

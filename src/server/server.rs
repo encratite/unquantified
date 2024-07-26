@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
@@ -9,7 +8,6 @@ use axum::extract::{Json, State};
 use axum::routing::post;
 use axum::Router;
 use chrono::{DateTime, FixedOffset};
-use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
@@ -78,7 +76,7 @@ impl OhlcRecordWeb {
 
 pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String) {
 	println!("Running server on {}", address);
-	let mut manager = AssetManager::new(ticker_directory, assets_path);
+	let manager = AssetManager::new(ticker_directory, assets_path);
 	let state_arc = Arc::new(manager);
 	let serve_dir = ServeDir::new("web");
 	let app = Router::new()
@@ -159,10 +157,10 @@ fn get_correlation_data(request: GetCorrelationRequest, manager: Arc<AssetManage
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
 	if time_frame >= 1440 {
-		return Ok(get_raw_records_from_archive(from, to, &archive.daily));
+		return Ok(get_raw_records_from_archive(from, to, archive.daily.values()));
 	}
 	else if time_frame == archive.intraday_time_frame {
-		return Ok(get_raw_records_from_archive(from, to, &archive.intraday));
+		return Ok(get_raw_records_from_archive(from, to, archive.intraday.values()));
 	}
 	else if time_frame < archive.intraday_time_frame {
 		return Err("Requested time frame too small for intraday data in archive".into());
@@ -174,7 +172,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
 	// This doesn't merge continuous contracts correctly
 	archive.intraday
-		.iter()
+		.values()
 		.filter(|x| matches_from_to(from, to, x))
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
@@ -216,10 +214,13 @@ fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, rec
 	record.time >= *from && record.time < *to
 }
 
-fn get_raw_records_from_archive(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, records: &Vec<OhlcRecord>) -> Vec<OhlcRecordWeb> {
+fn get_raw_records_from_archive<'a, T>(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, records: T) -> Vec<OhlcRecordWeb>
+where
+	T: IntoIterator<Item = &'a Box<OhlcRecord>>,
+{
 	records
-		.iter()
+		.into_iter()
 		.filter(|x| matches_from_to(from, to, x))
-		.map(|x| OhlcRecordWeb::new(&x))
+		.map(|x| OhlcRecordWeb::new(&**x))  // Dereference twice to get the OhlcRecord
 		.collect()
 }

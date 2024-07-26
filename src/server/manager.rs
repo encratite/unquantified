@@ -21,6 +21,7 @@ pub struct Asset {
 	pub tick_size: f64,
 	pub tick_value: f64,
 	pub margin: f64,
+	pub overnight_margin: bool,
 	pub broker_fee: f64,
 	pub exchange_fee: f64
 }
