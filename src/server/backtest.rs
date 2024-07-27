@@ -1,12 +1,29 @@
-use std::{collections::{BTreeSet, VecDeque}, error::Error, sync::Arc};
+use std::{collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
-use common::OhlcArchive;
+use lazy_static::lazy_static;
+
+use common::{OhlcArchive, OhlcKey, OhlcRecord};
 
 use crate::manager::{Asset, AssetManager};
 
-#[derive(Debug)]
+const FOREX_USD: &str = "USD";
+const FOREX_EUR: &str = "EUR";
+const FOREX_GBP: &str = "GBP";
+const FOREX_JPY: &str = "JPY";
+
+lazy_static! {
+	static ref FOREX_MAP: HashMap<String, String> = {
+		let mut map: HashMap<String, String> = HashMap::new();
+		map.insert(FOREX_EUR.to_string(), "^EURUSD".to_string());
+		map.insert(FOREX_GBP.to_string(), "^GBPUSD".to_string());
+		map.insert(FOREX_JPY.to_string(), "^JPYUSD".to_string());
+		map
+	};
+}
+
+#[derive(Debug, Clone)]
 pub enum PositionSide {
 	Long,
 	Short
@@ -60,7 +77,7 @@ pub struct BacktestConfiguration {
 	pub overnight_margin_ratio: f64
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Position {
 	pub asset: Asset,
 	// Number of contracts
@@ -77,7 +94,7 @@ pub struct Position {
 	// Underlying OHLC archive of the asset
 	pub archive: Arc<OhlcArchive>,
 	// Time the position was created
-	pub time: DateTime<Tz>
+	pub time: DateTime<Utc>
 }
 
 #[derive(Debug)]
@@ -121,11 +138,89 @@ impl Backtest {
 	}
 
 	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {
-		panic!("Not implemented");
+		let (asset, archive) = self.asset_manager.get_asset(&symbol)?;
+		let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
+		let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
+		let maintenance_margin_usd = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
+		// Approximate initial margin with a static factor
+		let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
+		if initial_margin >= self.cash {
+			return Err(format!("Not enough cash to open a position with {} contract(s) of {} with an initial margin requirement of ${}", count, symbol, initial_margin).into());
+		}
+		self.cash -= initial_margin;
+		let position = Position {
+			asset: asset.clone(),
+			count,
+			side,
+			price: current_record.close,
+			margin: maintenance_margin_usd,
+			archive: archive,
+			time: self.now.clone()
+		};
+		self.positions.push(position.clone());
+		Ok(position)
 	}
 
 	pub fn close_position(&mut self, position: Position, count: u32) -> Result<(), Box<dyn Error>> {
 		panic!("Not implemented");
+	}
+
+	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, Box<OhlcRecord>), Box<dyn Error>> {
+		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
+			.ok_or_else(|| "Date conversion failed")?;
+		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
+		let current_record = archive.daily.get(&date_utc)
+			.ok_or_else(|| format!("Unable to find current record for symbol {} at {}", asset.data_symbol, date))?;
+		let last_record = archive.daily.values().last()
+			.ok_or_else(|| "Last record missing")?;
+		// Attempt to reconstruct historical maintenance margin using price ratio
+		let margin = current_record.close / last_record.close * asset.margin;
+		Ok((margin, current_record.clone()))
+	}
+
+	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<f64, Box<dyn Error>> {
+		let get_record = |currency| -> Result<Box<OhlcRecord>, Box<dyn Error>> {
+			let symbol = FOREX_MAP.get(currency)
+					.ok_or_else(|| "Unable to find currency")?;
+			self.get_current_record(symbol)
+		};
+		if from == FOREX_USD {
+			if to == FOREX_USD {
+				Ok(amount)
+			}
+			else {
+				let record = get_record(to)?;
+				let converted_amount = amount / record.close;
+				Ok(converted_amount)
+			}
+		}
+		else if to == FOREX_USD {
+			let record = get_record(from)?;
+			let converted_amount = amount * record.close;
+			Ok(converted_amount)
+		}
+		else {
+			Err("Invalid currency pair".into())
+		}
+	}
+
+	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, Box<dyn Error>> {
+		let archive = self.asset_manager.get_archive(symbol)?;
+		let error = || format!("Unable to find a record for {} at {}", symbol, self.now);
+		if self.time_frame == TimeFrame::Daily {
+			let record = archive.daily.get(&self.now)
+				.ok_or_else(error)?;
+			Ok(record.clone())
+		}
+		else {
+			let key = OhlcKey {
+				symbol: symbol.clone(),
+				time: self.now
+			};
+			let record = archive.intraday.get(&key)
+				.ok_or_else(error)?;
+			Ok(record.clone())
+		}
 	}
 
 	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, Box<dyn Error>> {

@@ -46,7 +46,7 @@ impl AssetManager {
 		// Simple directory traversal check
 		let pattern = Regex::new("^[A-Z0-9]+$")?;
 		if !pattern.is_match(symbol) {
-			return Err("Invalid ticker".into());
+			return Err("Unable to find an OHLC archive with that symbol".into());
 		}
 		if let Some(archive_ref) = self.tickers.get(symbol) {
 			Ok(Arc::clone(archive_ref.value()))
@@ -82,6 +82,13 @@ impl AssetManager {
 		else {
 			Ok(symbols.clone())
 		}
+	}
+
+	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>), Box<dyn Error>> {
+		let asset = self.assets.get(symbol)
+			.ok_or_else(|| "Unable to find a matching asset definition")?;
+		let archive = self.get_archive(&asset.data_symbol)?;
+		Ok((asset.clone(), archive))
 	}
 
 	fn load_assets(csv_path: String) -> HashMap<String, Asset> {
