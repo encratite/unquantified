@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use common::*;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum AssetType {
 	Future
 }
@@ -23,7 +23,8 @@ pub struct Asset {
 	pub margin: f64,
 	pub overnight_margin: bool,
 	pub broker_fee: f64,
-	pub exchange_fee: f64
+	pub exchange_fee: f64,
+	pub physical_delivery: bool
 }
 
 pub struct AssetManager {

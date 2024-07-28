@@ -5,8 +5,9 @@ use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
 use common::{OhlcArchive, OhlcKey, OhlcRecord};
+use regex::Regex;
 
-use crate::manager::{Asset, AssetManager};
+use crate::manager::{Asset, AssetManager, AssetType};
 
 const FOREX_USD: &str = "USD";
 const FOREX_EUR: &str = "EUR";
@@ -53,7 +54,9 @@ pub struct Backtest {
 	// Controls the speed of the event loop, specified by the strategy
 	time_frame: TimeFrame,
 	// Fixed points in time the simulation will iterate over
-	time_sequence: VecDeque<DateTime<Utc>>
+	time_sequence: VecDeque<DateTime<Utc>>,
+	// Sequential position ID
+	next_position_id: u32
 }
 
 #[derive(Debug, Clone)]
@@ -74,11 +77,19 @@ pub struct BacktestConfiguration {
 	pub initial_margin_ratio: f64,
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
-	pub overnight_margin_ratio: f64
+	pub overnight_margin_ratio: f64,
+	// If asset.physical_delivery is true, then the contract features a close-out period of n days prior to expiration
+	// Usually the asset would be forcefully liquidated by that time but this backtest performs an automatic rollover instead
+	pub close_out_period: u8
 }
 
 #[derive(Debug, Clone)]
 pub struct Position {
+	// Positions are uniquely identified by a sequential ID
+	pub id: u32,
+	// In case of futures this is the full name, i.e. a Globex code such as "ESU24"
+	pub symbol: String,
+	// The underlying asset definition featuring a reference to the OHLC data symbol and contract specs
 	pub asset: Asset,
 	// Number of contracts
 	pub count: u32,
@@ -117,7 +128,8 @@ impl Backtest {
 			to: to.to_utc(),
 			now: from.to_utc(),
 			time_frame,
-			time_sequence
+			time_sequence,
+			next_position_id: 1
 		};
 		Ok(backtest)
 	}
@@ -129,6 +141,7 @@ impl Backtest {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				// To do: check for margin call
+				// To do: settle expired contracts
 				panic!("Not implemented");
 				self.now = now;
 				Ok(true)
@@ -138,30 +151,44 @@ impl Backtest {
 	}
 
 	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {
-		let (asset, archive) = self.asset_manager.get_asset(&symbol)?;
-		let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
-		let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
-		let maintenance_margin_usd = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
-		// Approximate initial margin with a static factor
-		let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
-		if initial_margin >= self.cash {
-			return Err(format!("Not enough cash to open a position with {} contract(s) of {} with an initial margin requirement of ${}", count, symbol, initial_margin).into());
+		let root = Self::get_contract_root(&symbol)
+			.ok_or_else(|| "Unable to parse Globex code")?;
+		let (asset, archive) = self.asset_manager.get_asset(&root)?;
+		if asset.asset_type == AssetType::Future {
+			let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
+			let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
+			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
+			// Approximate initial margin with a static factor
+			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
+			let cost = initial_margin + forex_fee + asset.broker_fee + asset.exchange_fee;
+			if cost >= self.cash {
+				return Err(format!("Not enough cash to open a position with {} contract(s) of \"{}\" with an initial margin requirement of ${}", count, symbol, initial_margin).into());
+			}
+			self.cash -= cost;
+			let price = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
+			let position = Position {
+				id: self.next_position_id,
+				symbol: current_record.symbol,
+				asset: asset.clone(),
+				count,
+				side,
+				price: price,
+				margin: maintenance_margin_usd,
+				archive: archive,
+				time: self.now.clone()
+			};
+			self.next_position_id += 1;
+			self.positions.push(position.clone());
+			Ok(position)
 		}
-		self.cash -= initial_margin;
-		let position = Position {
-			asset: asset.clone(),
-			count,
-			side,
-			price: current_record.close,
-			margin: maintenance_margin_usd,
-			archive: archive,
-			time: self.now.clone()
-		};
-		self.positions.push(position.clone());
-		Ok(position)
+		else {
+			panic!("Encountered an unknown asset type");
+		}
 	}
 
-	pub fn close_position(&mut self, position: Position, count: u32) -> Result<(), Box<dyn Error>> {
+	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), Box<dyn Error>> {
+		let mut position = self.positions.iter().find(|x| x.id == position_id)
+			.ok_or_else(|| format!("Unable to find a position with ID {}", position_id))?;
 		panic!("Not implemented");
 	}
 
@@ -170,7 +197,7 @@ impl Backtest {
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
 		let current_record = archive.daily.get(&date_utc)
-			.ok_or_else(|| format!("Unable to find current record for symbol {} at {}", asset.data_symbol, date))?;
+			.ok_or_else(|| format!("Unable to find current record for symbol \"{}\" at {}", asset.data_symbol, date))?;
 		let last_record = archive.daily.values().last()
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
@@ -178,26 +205,30 @@ impl Backtest {
 		Ok((margin, current_record.clone()))
 	}
 
-	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<f64, Box<dyn Error>> {
-		let get_record = |currency| -> Result<Box<OhlcRecord>, Box<dyn Error>> {
+	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), Box<dyn Error>> {
+		let get_record = |currency, reciprocal| -> Result<(f64, f64), Box<dyn Error>> {
 			let symbol = FOREX_MAP.get(currency)
 					.ok_or_else(|| "Unable to find currency")?;
-			self.get_current_record(symbol)
+			let record = self.get_current_record(symbol)?;
+			let value = if reciprocal {
+				amount / record.close
+			}
+			else {
+				amount * record.close
+			};
+			let converted_amount = value / self.configuration.forex_spread;
+			Ok((converted_amount, self.configuration.forex_order_fee))
 		};
 		if from == FOREX_USD {
 			if to == FOREX_USD {
-				Ok(amount)
+				Ok((amount, 0f64))
 			}
 			else {
-				let record = get_record(to)?;
-				let converted_amount = amount / record.close;
-				Ok(converted_amount)
+				get_record(to, true)
 			}
 		}
 		else if to == FOREX_USD {
-			let record = get_record(from)?;
-			let converted_amount = amount * record.close;
-			Ok(converted_amount)
+			get_record(from, false)
 		}
 		else {
 			Err("Invalid currency pair".into())
@@ -249,5 +280,16 @@ impl Backtest {
 			.into_iter()
 			.collect();
 		Ok(time_sequence)
+	}
+
+	fn get_contract_root(symbol: &String) -> Option<String> {
+		let regex = Regex::new(r"^([0-9A-Z][A-Z]{1,2})[F-Z]\d+$").unwrap();
+		if let Some(captures) = regex.captures(symbol) {
+			let root = captures[1].to_string();
+			Some(root)
+		}
+		else {
+			None
+		}
 	}
 }
