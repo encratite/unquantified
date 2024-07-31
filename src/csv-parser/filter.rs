@@ -34,10 +34,10 @@ impl ContractFilter {
 		let include_months = get_filter("include_months");
 		let exclude_months = get_filter("exclude_months");
 		let include_valid = include_months.is_some() != exclude_months.is_some();
-		let first_last_contract_valid = !first_contract.is_some() || last_contract.is_some();
+		let first_last_contract_valid = !last_contract.is_some() || first_contract.is_some();
 		if include_valid && first_last_contract_valid {
 			let mut filter = ContractFilter {
-				root: root.clone(),
+				root: root.to_uppercase(),
 				first_contract,
 				last_contract,
 				include_months,

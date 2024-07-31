@@ -5,7 +5,8 @@ use std::{error::Error, path::PathBuf};
 use std::str::FromStr;
 use chrono_tz::Tz;
 use common::*;
-use parser::{ContractFilter, CsvParser};
+use filter::ContractFilter;
+use parser::CsvParser;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let config = get_config("csv-parser.ini")?;

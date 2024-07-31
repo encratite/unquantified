@@ -1,5 +1,5 @@
 use std::{	
-	error::Error, fs, path::{Path, PathBuf}
+	collections::HashSet, error::Error, fs, path::{Path, PathBuf}
 };
 use std::collections::BTreeMap;
 use regex::Regex;
@@ -112,8 +112,8 @@ impl CsvParser {
 			.expect("Invalid regex"); 
 		let daily_filter = get_regex(r"D1\.csv$");
 		let intraday_filter = get_regex(r"(H1|M\d+)\.csv$");
-		let daily = self.parse_csv_files(ticker_directory, daily_filter, false);
-		let intraday = self.parse_csv_files(ticker_directory, intraday_filter, true);
+		let (daily, daily_excluded) = self.parse_csv_files(ticker_directory, daily_filter, false);
+		let (intraday, intraday_excluded) = self.parse_csv_files(ticker_directory, intraday_filter, true);
 		let archive_path = self.get_archive_path(ticker_directory);
 		let time_zone = self.time_zone.to_string();
 		let archive = RawOhlcArchive {
@@ -129,16 +129,29 @@ impl CsvParser {
 				return;
 			}
 		}
-		println!(
-			"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
-			archive.daily.len() + archive.intraday.len(),
-			ticker_directory.to_str().unwrap(),
-			archive_path.to_str().unwrap(),
-			stopwatch.elapsed_ms()
-		);
+		if daily_excluded + intraday_excluded > 0 {
+			println!(
+				"Loaded {} records from \"{}\", excluded {} daily contracts, {} intraday contracts and wrote them to \"{}\" in {} ms",
+				archive.daily.len() + archive.intraday.len(),
+				ticker_directory.to_str().unwrap(),
+				daily_excluded,
+				intraday_excluded,
+				archive_path.to_str().unwrap(),
+				stopwatch.elapsed_ms()
+			);
+		}
+		else {
+			println!(
+				"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
+				archive.daily.len() + archive.intraday.len(),
+				ticker_directory.to_str().unwrap(),
+				archive_path.to_str().unwrap(),
+				stopwatch.elapsed_ms()
+			);
+		}
 	}
 
-	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> Vec<RawOhlcRecord> {
+	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> (Vec<RawOhlcRecord>, usize) {
 		let csv_paths = Self::get_csv_paths(path, filter);
 		let mut ohlc_map = OhlcTreeMap::new();
 		let symbol_path = Path::new(path);
@@ -149,10 +162,12 @@ impl CsvParser {
 				current_filter = Some(filter.clone());
 			}
 		}
+		let mut excluded_contracts = HashSet::new();
 		for csv_path in csv_paths {
 			read_csv::<CsvRecord>(csv_path, |record| {
 				if let Some(filter) = current_filter.as_mut() {
 					if !filter.is_included(&record.symbol) {
+						excluded_contracts.insert(record.symbol.clone());
 						return;
 					}
 				}
@@ -174,7 +189,7 @@ impl CsvParser {
 				a.time.cmp(&b.time)
 			}
 		});
-		return records;
+		return (records, excluded_contracts.len());
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
