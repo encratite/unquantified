@@ -1,4 +1,5 @@
 mod parser;
+mod filter;
 
 use std::{error::Error, path::PathBuf};
 use std::str::FromStr;
