@@ -4,7 +4,7 @@ use std::{error::Error, path::PathBuf};
 use std::str::FromStr;
 use chrono_tz::Tz;
 use common::*;
-use parser::CsvParser;
+use parser::{ContractFilter, CsvParser};
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let config = get_config("csv-parser.ini")?;
@@ -21,7 +21,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let intraday_time_frame = intraday_time_frame_string.parse::<u16>()?;
 	let input_directory = PathBuf::from(get_value("input_directory")?);
 	let output_directory = PathBuf::from(get_value("output_directory")?);
-	let parser = CsvParser::new(time_zone, intraday_time_frame, input_directory, output_directory);
+	let filters = ContractFilter::from_ini(&config)?;
+	let parser = CsvParser::new(time_zone, intraday_time_frame, input_directory, output_directory, filters);
 	parser.run();
 	Ok(())
 }
