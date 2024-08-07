@@ -1,8 +1,11 @@
+mod panama;
+
 use std::{
 	collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
+use panama::PanamaChannel;
 use rkyv::{
 	Archive,
 	Deserialize,
@@ -11,8 +14,10 @@ use rkyv::{
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
 
-pub type OhlcDailyMap = BTreeMap<DateTime<Utc>, Box<OhlcRecord>>;
-pub type OhlcIntradayMap = BTreeMap<OhlcKey, Box<OhlcRecord>>;
+pub type OhlcBox = Box<OhlcRecord>;
+pub type OhlcVec = Vec<OhlcBox>;
+pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcBox>;
+pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
 
 #[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct RawOhlcArchive {
@@ -34,17 +39,37 @@ pub struct RawOhlcRecord {
 	pub open_interest: Option<u32>
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OhlcKey {
-	pub symbol: String,
-	pub time: DateTime<Utc>
-}
-
 #[derive(Debug)]
 pub struct OhlcArchive {
-	pub daily: OhlcDailyMap,
-	pub intraday: OhlcIntradayMap,
+	pub daily: OhlcData,
+	pub intraday: OhlcData,
 	pub intraday_time_frame: u16
+}
+
+/*
+General container for the actual OHLC records, both as a map for time-based lookups and as a vector for efficiently selecting ranges.
+The post-processed records feature an additional index into the vector that can be used to accelerate lookups of all records between t_1 and t_2.
+The underlying OHLC type is boxed to reduce memory usage. The contents of vector and map depend on the type of asset:
+
+Currency pair:
+- "unadjusted" contains the original records in ascending order
+- "adjusted" is None
+- "time_map" maps timestamps to records
+- "contract_map" is None
+
+Futures:
+- Both "unadjusted"/"adjusted" contains a continuous contract with new records generated from multiple overlapping contracts
+- In the case of "unadjusted" it is the original values with automatic roll-overs based on volume and open interest
+- "adjusted" features new records generated using the Panama channel method for use with indicators, same roll-over criteria
+- "time_map" maps timestamps to continuous contract data in "adjusted"
+- Each vector in "contract_map" contains the full set of active contracts for that particular point in time
+ */
+#[derive(Debug)]
+pub struct OhlcData {
+	pub unadjusted: OhlcVec,
+	pub adjusted: Option<OhlcVec>,
+	pub time_map: OhlcTimeMap,
+	pub contract_map: Option<OhlcContractMap>
 }
 
 #[derive(Debug, Clone)]
@@ -56,11 +81,7 @@ pub struct OhlcRecord {
 	pub low: f64,
 	pub close: f64,
 	pub volume: u32,
-	pub open_interest: Option<u32>,
-	// The records within each archive form multiple reverse singly linked lists
-	// This is relevant for efficiently calculating moving averages without having to repeatedly look up DateTime keys in the BTreeMap
-	// In the case of the intraday archive each list stops where the symbol of the contract changes
-	pub previous: Option<Box<OhlcRecord>>
+	pub open_interest: Option<u32>
 }
 
 pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
@@ -68,7 +89,7 @@ pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
 	let mut buffer = Vec::<u8>::new();
 	zstd::stream::copy_decode(file, &mut buffer)?;
 	let raw_archive: RawOhlcArchive = unsafe { rkyv::from_bytes_unchecked(&buffer)? };
-	let archive = raw_archive.to_archive();
+	let archive = raw_archive.to_archive()?;
 	return Ok(archive);
 }
 
@@ -109,56 +130,129 @@ where
 }
 
 impl RawOhlcArchive {
-	pub fn to_archive(&self) -> OhlcArchive {
+	pub fn to_archive(&self) -> Result<OhlcArchive, Box<dyn Error>> {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
-		let daily = self.get_daily_archive(&time_zone);
-		let intraday = self.get_intraday_archive(&time_zone);
-		OhlcArchive {
+		let daily = Self::get_data(&self.daily, &time_zone)?;
+		let intraday = Self::get_data(&self.intraday, &time_zone)?;
+		let archive = OhlcArchive {
 			daily,
 			intraday,
 			intraday_time_frame: self.intraday_time_frame
+		};
+		Ok(archive)
+	}
+
+	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> Result<OhlcData, Box<dyn Error>> {
+		let Some(last) = records.last() else {
+			return Err("Encountered an OHLC archive without any records".into());
+		};
+		let is_contract = last.open_interest.is_some();
+		if is_contract {
+			// Futures contract
+			let contract_map = Self::get_contract_map(records, time_zone);
+			let unadjusted = Self::get_unadjusted_data_from_map(&contract_map);
+			let adjusted = Self::get_adjusted_data_from_map(&contract_map)?;
+			let time_map = Self::get_time_map(&unadjusted, &adjusted);
+			let data = OhlcData {
+				unadjusted,
+				adjusted,
+				time_map,
+				contract_map: Some(contract_map)
+			};
+			Ok(data)
+		}
+		else {
+			// Currency
+			let contract_map = None;
+			let unadjusted = Self::get_unadjusted_data(records, time_zone);
+			let adjusted = None;
+			let time_map = Self::get_time_map(&unadjusted, &adjusted);
+			let data = OhlcData {
+				unadjusted,
+				adjusted,
+				time_map,
+				contract_map
+			};
+			Ok(data)
 		}
 	}
 
-	fn get_daily_archive(&self, time_zone: &Tz) -> OhlcDailyMap {
-		let mut daily = OhlcDailyMap::new();
-		let mut previous: Option<Box<OhlcRecord>> = None;
-		self.daily.iter().for_each(|x| {
-			let key = x.time.and_utc();
-			let mut value = Box::new(x.to_archive(&time_zone));
-			value.previous = previous.clone();
-			daily.insert(key, value.clone());
-			previous = Some(value);
-		});
-		daily
+	fn get_most_popular_record(records: &Vec<Box<OhlcRecord>>) -> Box<OhlcRecord> {
+		if let Some(first) = records.first() {
+			return Box::clone(first);
+		}
+		let open_interest: Vec<u32> = records
+			.into_iter()
+			.filter_map(|x| x.open_interest)
+			.collect();
+		let open_interest_available = open_interest.len() == records.len();
+		let non_zero_open_interest = open_interest.iter().all(|x| *x > 0);
+		let max = if open_interest_available && non_zero_open_interest {
+			records.iter().max_by_key(|x| x.open_interest.unwrap())
+		}
+		else {
+			records.iter().max_by_key(|x| x.volume)
+		};
+		Box::clone(max.unwrap())
 	}
 
-	fn get_intraday_archive(&self, time_zone: &Tz) -> OhlcIntradayMap {
-		let mut intraday = OhlcIntradayMap::new();
-		let mut previous: Option<Box<OhlcRecord>> = None;
-		self.intraday.iter().for_each(|x| {
-			let key = OhlcKey {
-				symbol: x.symbol.clone(),
-				time: x.time.and_utc()
-			};
-			let mut value = Box::new(x.to_archive(&time_zone));
-			if let Some(previous_value) = previous.clone() {
-				if value.symbol == previous_value.symbol {
-					value.previous = previous.clone();
-				}
+	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcVec {
+		records.iter().map(|x| {
+			let record = x.to_archive(&time_zone);
+			Box::new(record)
+		}).collect()
+	}
+
+	fn get_unadjusted_data_from_map(map: &OhlcContractMap) -> OhlcVec {
+		map.values().map(|records| {
+			Self::get_most_popular_record(records)
+		}).collect()
+	}
+
+	fn get_adjusted_data_from_map(map: &OhlcContractMap) -> Result<Option<OhlcVec>, Box<dyn Error>> {
+		let Some(mut panama) = PanamaChannel::new(map) else {
+			return Ok(None);
+		};
+		let adjusted = panama.get_adjusted_data()?;
+		Ok(Some(adjusted))
+	}
+
+	fn get_contract_map(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcContractMap {
+		let mut map = OhlcContractMap::new();
+		records.iter().for_each(|x| {
+			let time = x.get_time_utc(time_zone);
+			let record = x.to_archive(&time_zone);
+			let value = Box::new(record);
+			if let Some(records) = map.get_mut(&time) {
+				records.push(value);
 			}
-			intraday.insert(key, value.clone());
-			previous = Some(value);
+			else {
+				let records = vec![value];
+				map.insert(time, records);
+			}
 		});
-		intraday
+		map
+	}
+
+	fn get_time_map(unadjusted: &OhlcVec, adjusted: &Option<OhlcVec>) -> OhlcTimeMap {
+		let source = match adjusted {
+			Some(adjusted_vec) => adjusted_vec,
+			None => unadjusted
+		};
+		let mut map = OhlcTimeMap::new();
+		for record in source {
+			let key = record.time.to_utc();
+			let value = Box::clone(record);
+			map.insert(key, value);
+		}
+		map
 	}
 }
 
 impl RawOhlcRecord {
 	pub fn to_archive(&self, time_zone: &Tz) -> OhlcRecord {
-		let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(self.time, Utc);
-		let time_tz = time_utc.with_timezone(time_zone);
+		let time_tz = self.get_time_tz(time_zone);
 		OhlcRecord {
 			symbol: self.symbol.clone(),
 			time: time_tz,
@@ -167,8 +261,41 @@ impl RawOhlcRecord {
 			low: self.low,
 			close: self.close,
 			volume: self.volume,
-			open_interest: self.open_interest,
-			previous: None
+			open_interest: self.open_interest
+		}
+	}
+
+	pub fn get_time_tz(&self, time_zone: &Tz) -> DateTime<Tz> {
+		let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(self.time, Utc);
+		time_utc.with_timezone(time_zone)
+	}
+
+	pub fn get_time_utc(&self, time_zone: &Tz) -> DateTime<Utc> {
+		let time_tz = self.get_time_tz(time_zone);
+		time_tz.to_utc()
+	}
+}
+
+impl OhlcRecord {
+	pub fn apply_offset(&self, offset: f64) -> OhlcRecord {
+		OhlcRecord {
+			symbol: self.symbol.clone(),
+			time: self.time.clone(),
+			open: self.open + offset,
+			high: self.high + offset,
+			low: self.low + offset,
+			close: self.close + offset,
+			volume: self.volume,
+			open_interest: self.open_interest
+		}
+	}
+}
+
+impl OhlcData {
+	pub fn get_adjusted_fallback(&self) -> &OhlcVec {
+		match &self.adjusted {
+			Some(ref x) => x,
+			None => &self.unadjusted
 		}
 	}
 }

@@ -167,10 +167,10 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
 	if time_frame >= 1440 {
-		return Ok(get_raw_records_from_archive(from, to, archive.daily.values()));
+		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
 	}
 	else if time_frame == archive.intraday_time_frame {
-		return Ok(get_raw_records_from_archive(from, to, archive.intraday.values()));
+		return Ok(get_raw_records_from_archive(from, to, &archive.intraday.unadjusted));
 	}
 	else if time_frame < archive.intraday_time_frame {
 		return Err("Requested time frame too small for intraday data in archive".into());
@@ -180,9 +180,8 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		return Err(message.into());
 	}
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
-	// This doesn't merge continuous contracts correctly
-	archive.intraday
-		.values()
+	archive.intraday.unadjusted
+		.iter()
 		.filter(|x| matches_from_to(from, to, x))
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)

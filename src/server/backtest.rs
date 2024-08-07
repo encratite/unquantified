@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
-use common::{OhlcArchive, OhlcKey, OhlcRecord};
+use common::{OhlcArchive, OhlcRecord};
 use regex::Regex;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -196,9 +196,9 @@ impl Backtest {
 		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
-		let current_record = archive.daily.get(&date_utc)
+		let current_record = archive.daily.time_map.get(&date_utc)
 			.ok_or_else(|| format!("Unable to find current record for symbol \"{}\" at {}", asset.data_symbol, date))?;
-		let last_record = archive.daily.values().last()
+		let last_record = archive.daily.unadjusted.last()
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
 		let margin = current_record.close / last_record.close * asset.margin;
@@ -238,20 +238,15 @@ impl Backtest {
 	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, Box<dyn Error>> {
 		let archive = self.asset_manager.get_archive(symbol)?;
 		let error = || format!("Unable to find a record for {} at {}", symbol, self.now);
-		if self.time_frame == TimeFrame::Daily {
-			let record = archive.daily.get(&self.now)
-				.ok_or_else(error)?;
-			Ok(record.clone())
+		let source = if self.time_frame == TimeFrame::Daily {
+			&archive.daily
 		}
 		else {
-			let key = OhlcKey {
-				symbol: symbol.clone(),
-				time: self.now
-			};
-			let record = archive.intraday.get(&key)
-				.ok_or_else(error)?;
-			Ok(record.clone())
-		}
+			&archive.intraday
+		};
+		let record = source.time_map.get(&self.now)
+			.ok_or_else(error)?;
+		Ok(record.clone())
 	}
 
 	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, Box<dyn Error>> {
@@ -261,14 +256,13 @@ impl Backtest {
 		let time_reference = asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
 		let is_daily = *time_frame == TimeFrame::Daily;
-		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = if is_daily {
-			Box::new(time_reference.daily.keys())
+		let source = if is_daily {
+			&time_reference.daily
 		}
 		else {
-			Box::new(time_reference.intraday
-				.keys()
-				.map(|x| &x.time))
+			&time_reference.intraday
 		};
+		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = Box::new(source.time_map.keys());
 		let time_keys_in_range = time_keys
 			.filter(|&&x|
 				x >= *from &&

@@ -65,13 +65,11 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 	let mut to = request_to;
 	for archive in archives {
 			let get_time = |x: &Box<OhlcRecord>| Some(x.time.fixed_offset());
-			let records = &archive.daily;
+			let records = get_records(archive);
 			let first = records
-				.values()
-				.next()
+				.first()
 				.and_then(get_time);
 			let last = records
-				.values()
 				.last()
 				.and_then(get_time);
 			match (first, last) {
@@ -92,7 +90,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 	let first_archive = &archives.iter().next()
 		.ok_or_else(|| "No archives specified")?;
 	let mut i: usize = 0;
-	for x in first_archive.daily.values() {
+	let records = get_records(first_archive);
+	for x in records {
 		let fixed_time = x.time.fixed_offset();
 		if in_range(fixed_time) {
 			indexes.insert(fixed_time, i);
@@ -108,7 +107,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 		let initial_value = 0f64;
 		let mut samples = vec![initial_value; count];
 		// Get close samples for the dynamic time range
-		for record in archive.daily.values() {
+		let records = get_records(archive);
+		for record in records {
 			let fixed_time = record.time.fixed_offset();
 			if in_range(fixed_time) {
 				if let Some(index) = indexes.get(&fixed_time) {
@@ -135,4 +135,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 		(samples, sqrt)
 	}).collect();
 	Ok(delta_samples)
+}
+
+fn get_records(archive: &Arc<OhlcArchive>) -> &OhlcVec {
+	archive.daily.get_adjusted_fallback()
 }
