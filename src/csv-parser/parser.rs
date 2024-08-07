@@ -85,7 +85,7 @@ impl CsvParser {
 					.map_or(false, |x| filter.is_match(x)))
 	}
 
-	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime, Box<dyn Error>>  {
+	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime, ErrorBox>  {
 		match NaiveDateTime::parse_from_str(time_string, "%Y-%m-%d %H:%M") {
 			Ok(datetime) => Ok(datetime),
 			Err(_) => match NaiveDate::parse_from_str(time_string, "%Y-%m-%d") {

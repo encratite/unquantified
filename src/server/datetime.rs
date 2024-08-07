@@ -1,7 +1,7 @@
 use std::{error::Error, sync::Arc};
 use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, TimeZone};
 use chrono_tz::Tz;
-use common::OhlcArchive;
+use common::{ErrorBox, OhlcArchive};
 use serde::Deserialize;
 
 #[derive(Deserialize, Clone)]
@@ -59,7 +59,7 @@ pub struct RelativeDateTime {
 }
 
 impl RelativeDateTime {
-	pub fn resolve(&self, other: &RelativeDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
+	pub fn resolve(&self, other: &RelativeDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, ErrorBox> {
 		match (self.date.is_some(), self.offset.is_some(), self.offset_unit.is_some(), self.special_keyword.is_some()) {
 			(true, false, false, false) => Ok(self.date.unwrap()),
 			(false, true, true, false) => {
@@ -76,7 +76,7 @@ impl RelativeDateTime {
 		}
 	}
 
-	fn to_fixed(&self, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
+	fn to_fixed(&self, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, ErrorBox> {
 		match (self.date.is_some(), self.special_keyword.is_some()) {
 			(true, false) => Ok(self.date.unwrap()),
 			(false, true) => {
@@ -94,7 +94,7 @@ pub fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
 		.unwrap()
 }
 
-fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
+fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>, ErrorBox> {
 	let mut time_values = archive.intraday
 		.unadjusted
 		.iter()
@@ -111,7 +111,7 @@ fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<Date
 	}
 }
 
-fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
+fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>, ErrorBox> {
 	if special_keyword == SpecialDateTime::Now {
 		let now: DateTime<Local> = Local::now();
 		let now_with_timezone: DateTime<FixedOffset> = now.with_timezone(now.offset());
@@ -122,7 +122,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArch
 		let times = archives
 			.iter()
 			.map(|x| resolve_first_last(is_first, x))
-			.collect::<Result<Vec<DateTime<FixedOffset>>, Box<dyn Error>>>()?;
+			.collect::<Result<Vec<DateTime<FixedOffset>>, ErrorBox>>()?;
 		let time = if is_first {
 			times.iter().min()
 		}

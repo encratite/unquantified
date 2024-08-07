@@ -132,12 +132,12 @@ async fn get_correlation(
 	Json(response)
 }
 
-fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, Box<dyn Error>> {
+fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, ErrorBox> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
-	let result: Result<Vec<Vec<OhlcRecordWeb>>, Box<dyn Error>> = archives
+	let result: Result<Vec<Vec<OhlcRecordWeb>>, ErrorBox> = archives
 		.iter()
 		.map(|archive| get_ohlc_records(&from_resolved, &to_resolved, request.time_frame, archive))
 		.collect();
@@ -150,14 +150,14 @@ fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) ->
 	}
 }
 
-fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>, Box<dyn Error>> {
+fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>, ErrorBox> {
 	symbols
 		.iter()
 		.map(|x| asset_manager.get_archive(&x))
 		.collect()
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData, Box<dyn Error>> {
+fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData, ErrorBox> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &archives)?;
@@ -165,7 +165,7 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 	get_correlation_matrix(resolved_symbols, from, to, archives)
 }
 
-fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, Box<dyn Error>> {
+fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, ErrorBox> {
 	if time_frame >= 1440 {
 		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
 	}
@@ -186,7 +186,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
-		.map(|x| -> Result<OhlcRecordWeb, Box<dyn Error>> {
+		.map(|x| -> Result<OhlcRecordWeb, ErrorBox> {
 			let first = x.first().unwrap();
 			let last = x.last().unwrap();
 			let symbol = first.symbol.clone();

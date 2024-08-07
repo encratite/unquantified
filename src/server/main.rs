@@ -10,19 +10,19 @@ use backtest::BacktestConfiguration;
 use common::*;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), ErrorBox> {
 	let config = get_config("server.ini")?;
-	let get_string = |section, key| -> Result<String, Box<dyn Error>> {
+	let get_string = |section, key| -> Result<String, ErrorBox> {
 		config.get(section, key)
 			.ok_or_else(|| format!("Failed to find key \"{}\" in section \"{}\" in configuration file", key, section).into())
 	};
 	let parse_error = |key: &str, section: &str| format!("Failed to parse value for key \"{}\" in section \"{}\" in configuration file", key, section);
-	let get_f64 = |section, key| -> Result<f64, Box<dyn Error>> {
+	let get_f64 = |section, key| -> Result<f64, ErrorBox> {
 		let value = get_string(section, key)?;
 		value.parse()
 			.map_err(|_| parse_error(key, section).into())
 	};
-	let get_u8 = |section, key| -> Result<u8, Box<dyn Error>> {
+	let get_u8 = |section, key| -> Result<u8, ErrorBox> {
 		let value = get_string(section, key)?;
 		value.parse()
 		.map_err(|_| parse_error(key, section).into())

@@ -14,6 +14,8 @@ use rkyv::{
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
 
+pub type ErrorBox = Box<dyn Error>;
+
 pub type OhlcBox = Box<OhlcRecord>;
 pub type OhlcVec = Vec<OhlcBox>;
 pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcBox>;
@@ -84,7 +86,7 @@ pub struct OhlcRecord {
 	pub open_interest: Option<u32>
 }
 
-pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
+pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, ErrorBox> {
 	let file = File::open(path)?;
 	let mut buffer = Vec::<u8>::new();
 	zstd::stream::copy_decode(file, &mut buffer)?;
@@ -93,14 +95,14 @@ pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, Box<dyn Error>> {
 	return Ok(archive);
 }
 
-pub fn write_archive(path: &PathBuf, archive: &RawOhlcArchive) -> Result<(), Box<dyn Error>> {
+pub fn write_archive(path: &PathBuf, archive: &RawOhlcArchive) -> Result<(), ErrorBox> {
 	let binary_data = rkyv::to_bytes::<_, 1024>(archive)?;
 	let file = File::create(path.clone())?;
 	zstd::stream::copy_encode(binary_data.as_slice(), file, 1)?;
 	Ok(())
 }
 
-pub fn get_config(path: &str) -> Result<Ini, Box<dyn Error>> {
+pub fn get_config(path: &str) -> Result<Ini, ErrorBox> {
 	let mut config = Ini::new();
 	match config.load(path) {
 		Ok(_) => Ok(config),
@@ -130,7 +132,7 @@ where
 }
 
 impl RawOhlcArchive {
-	pub fn to_archive(&self) -> Result<OhlcArchive, Box<dyn Error>> {
+	pub fn to_archive(&self) -> Result<OhlcArchive, ErrorBox> {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
 		let daily = Self::get_data(&self.daily, &time_zone)?;
@@ -143,7 +145,7 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> Result<OhlcData, Box<dyn Error>> {
+	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> Result<OhlcData, ErrorBox> {
 		let Some(last) = records.last() else {
 			return Err("Encountered an OHLC archive without any records".into());
 		};
@@ -210,7 +212,7 @@ impl RawOhlcArchive {
 		}).collect()
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap) -> Result<Option<OhlcVec>, Box<dyn Error>> {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap) -> Result<Option<OhlcVec>, ErrorBox> {
 		let Some(mut panama) = PanamaChannel::new(map) else {
 			return Ok(None);
 		};

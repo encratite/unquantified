@@ -14,7 +14,7 @@ pub struct CorrelationData {
 	pub correlation: Vec<Vec<f64>>,
 }
 
-pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData, Box<dyn Error>> {
+pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData, ErrorBox> {
 	// Determine smallest overlapping time range across all OHLC records
 	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
@@ -60,7 +60,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<Fixed
 }
 
 fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>)
-	-> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), Box<dyn Error>> {
+	-> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), ErrorBox> {
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
@@ -83,7 +83,7 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 	Ok((from, to))
 }
 
-fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>, Box<dyn Error>> {
+fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>, ErrorBox> {
 	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
 	let in_range = |fixed_time| fixed_time >= *from && fixed_time <= *to;
 	let mut indexes = HashMap::new();

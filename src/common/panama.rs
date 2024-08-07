@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet, VecDeque}, error::Error};
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
-use crate::{OhlcBox, OhlcContractMap, OhlcVec, RawOhlcArchive};
+use crate::{ErrorBox, OhlcBox, OhlcContractMap, OhlcVec, RawOhlcArchive};
 
 pub struct PanamaChannel<'a> {
 	map: &'a OhlcContractMap,
@@ -36,7 +36,7 @@ impl<'a> PanamaChannel<'a> {
 		Some(channel)
 	}
 
-	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec, Box<dyn Error>> {
+	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec, ErrorBox> {
 		let mut output = VecDeque::new();
 		for (time, records) in self.map.iter().rev() {
 			let next_record = self.get_next_record(time, records)?;
@@ -69,7 +69,7 @@ impl<'a> PanamaChannel<'a> {
 		expiration_map
 	}
 
-	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcBox, Box<dyn Error>> {
+	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcBox, ErrorBox> {
 		let new_record = RawOhlcArchive::get_most_popular_record(records);
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
@@ -106,7 +106,7 @@ impl<'a> PanamaChannel<'a> {
 		}
 	}
 
-	fn get_expiration_date(&self, symbol: &String) -> Result<&DateTime<Tz>, Box<dyn Error>> {
+	fn get_expiration_date(&self, symbol: &String) -> Result<&DateTime<Tz>, ErrorBox> {
 		match self.expiration_map.get(symbol) {
 			Some(time) => Ok(time),
 			None => Err(format!("Failed to determine contract expiration date of {}", symbol).into())

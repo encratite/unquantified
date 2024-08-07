@@ -8,10 +8,10 @@ use common::*;
 use filter::ContractFilter;
 use parser::CsvParser;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), ErrorBox> {
 	let config = get_config("csv-parser.ini")?;
 	let section = "data";
-	let get_value = |key| -> Result<String, Box<dyn Error>> {
+	let get_value = |key| -> Result<String, ErrorBox> {
 		match config.get(section, key) {
 			Some(value) => Ok(value),
 			None => Err(format!("Missing value \"{}\" in configuration file", key).into())

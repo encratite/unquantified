@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
-use common::{OhlcArchive, OhlcRecord};
+use common::{ErrorBox, OhlcArchive, OhlcRecord};
 use regex::Regex;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -114,7 +114,7 @@ pub struct BacktestResult {
 }
 
 impl Backtest {
-	pub fn new(&self, from: DateTime<Tz>, to: DateTime<Tz>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest, Box<dyn Error>> {
+	pub fn new(&self, from: DateTime<Tz>, to: DateTime<Tz>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest, ErrorBox> {
 		if from >= to {
 			return Err("Invalid from/to parameters".into());
 		}
@@ -137,7 +137,7 @@ impl Backtest {
 	// Advances the simulation to the next point in time
 	// This sequence is pre-filtered and excludes days on which there was no trading due to holidays etc.
 	// Returns true if the time was successfully advanced or false if the end of the simulation has been reached
-	pub fn next(&mut self) -> Result<bool, Box<dyn Error>> {
+	pub fn next(&mut self) -> Result<bool, ErrorBox> {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				// To do: check for margin call
@@ -150,7 +150,7 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position, Box<dyn Error>> {
+	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position, ErrorBox> {
 		let root = Self::get_contract_root(&symbol)
 			.ok_or_else(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
@@ -186,13 +186,13 @@ impl Backtest {
 		}
 	}
 
-	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), Box<dyn Error>> {
+	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), ErrorBox> {
 		let mut position = self.positions.iter().find(|x| x.id == position_id)
 			.ok_or_else(|| format!("Unable to find a position with ID {}", position_id))?;
 		panic!("Not implemented");
 	}
 
-	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, Box<OhlcRecord>), Box<dyn Error>> {
+	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, Box<OhlcRecord>), ErrorBox> {
 		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
@@ -205,8 +205,8 @@ impl Backtest {
 		Ok((margin, current_record.clone()))
 	}
 
-	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), Box<dyn Error>> {
-		let get_record = |currency, reciprocal| -> Result<(f64, f64), Box<dyn Error>> {
+	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), ErrorBox> {
+		let get_record = |currency, reciprocal| -> Result<(f64, f64), ErrorBox> {
 			let symbol = FOREX_MAP.get(currency)
 					.ok_or_else(|| "Unable to find currency")?;
 			let record = self.get_current_record(symbol)?;
@@ -235,7 +235,7 @@ impl Backtest {
 		}
 	}
 
-	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, Box<dyn Error>> {
+	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, ErrorBox> {
 		let archive = self.asset_manager.get_archive(symbol)?;
 		let error = || format!("Unable to find a record for {} at {}", symbol, self.now);
 		let source = if self.time_frame == TimeFrame::Daily {
@@ -249,7 +249,7 @@ impl Backtest {
 		Ok(record.clone())
 	}
 
-	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, Box<dyn Error>> {
+	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, ErrorBox> {
 		// Use S&P 500 futures as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();

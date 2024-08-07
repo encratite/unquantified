@@ -43,7 +43,7 @@ impl AssetManager {
 		}
 	}
 
-	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>, Box<dyn Error>> {
+	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>, ErrorBox> {
 		// Simple directory traversal check
 		let pattern = Regex::new("^[A-Z0-9]+$")?;
 		if !pattern.is_match(symbol) {
@@ -62,7 +62,7 @@ impl AssetManager {
 		}
 	}
 
-	pub fn resolve_symbols(&self, symbols: &Vec<String>) -> Result<Vec<String>, Box<dyn Error>> {
+	pub fn resolve_symbols(&self, symbols: &Vec<String>) -> Result<Vec<String>, ErrorBox> {
 		let all_keyword = "all";
 		if symbols.iter().any(|x| x == all_keyword) {
 			let data_directory = &self.ticker_directory;
@@ -85,7 +85,7 @@ impl AssetManager {
 		}
 	}
 
-	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>), Box<dyn Error>> {
+	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>), ErrorBox> {
 		let asset = self.assets.get(symbol)
 			.ok_or_else(|| "Unable to find a matching asset definition")?;
 		let archive = self.get_archive(&asset.data_symbol)?;

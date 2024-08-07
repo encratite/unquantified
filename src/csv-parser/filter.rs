@@ -1,5 +1,6 @@
 use std::error::Error;
 
+use common::ErrorBox;
 use configparser::ini::Ini;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -20,7 +21,7 @@ pub struct ContractFilter {
 }
 
 impl ContractFilter {
-	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter, Box<dyn Error>> {
+	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter, ErrorBox> {
 		let get_filter = |key| -> Option<Vec<String>> {
 			ini.get(root, key)
 				.map(move |x|
@@ -53,7 +54,7 @@ impl ContractFilter {
 		}
 	}
 
-	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>, Box<dyn Error>> {
+	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>, ErrorBox> {
 		let config_map = ini.get_map()
 			.ok_or_else(|| "Unable to read configuration file")?;
 		config_map.keys()
