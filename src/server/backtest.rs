@@ -4,8 +4,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
-use common::{ErrorBox, OhlcArchive, OhlcRecord};
-use regex::Regex;
+use common::{parse_globex_code, ErrorBox, OhlcArchive, OhlcRecord};
 
 use crate::manager::{Asset, AssetManager, AssetType};
 
@@ -24,7 +23,7 @@ lazy_static! {
 	};
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PositionSide {
 	Long,
 	Short
@@ -87,7 +86,7 @@ pub struct BacktestConfiguration {
 pub struct Position {
 	// Positions are uniquely identified by a sequential ID
 	pub id: u32,
-	// In case of futures this is the full name, i.e. a Globex code such as "ESU24"
+	// In case of futures this is the full name of the contract, i.e. a Globex code such as "ESU24"
 	pub symbol: String,
 	// The underlying asset definition featuring a reference to the OHLC data symbol and contract specs
 	pub asset: Asset,
@@ -187,9 +186,39 @@ impl Backtest {
 	}
 
 	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), ErrorBox> {
-		let mut position = self.positions.iter().find(|x| x.id == position_id)
+		let position = self.positions.iter().find(|x| x.id == position_id)
 			.ok_or_else(|| format!("Unable to find a position with ID {}", position_id))?;
-		panic!("Not implemented");
+		if count > position.count {
+			let message = format!("Unable to close position with ID {}, {} contracts specified but only {} available", position_id, count, position.count);
+			return Err(message.into())
+		}
+		let asset = &position.asset;
+		if asset.asset_type == AssetType::Future {
+			let record = self.get_current_record(&position.symbol)?;
+			let ticks = (count as f64) * (record.close - position.price) / asset.tick_size;
+			let mut gain = ticks * asset.tick_value;
+			if position.side == PositionSide::Short {
+				gain = - gain;
+			}
+			let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
+			let cost = forex_fee + asset.broker_fee + asset.exchange_fee;
+			let margin_released = (count as f64) * asset.margin;
+			let total = margin_released + gain_usd - cost;
+			self.cash += total;
+			let new_count = position.count - count;
+			if new_count == 0 {
+				// The entire position has been sold, remove it
+				self.positions.retain(|x| x.id != position_id);
+			}
+			else {
+				// Awkward workaround for multiple mutable borrows
+				self.positions.iter_mut().for_each(|x| x.count = new_count);
+			}
+		}
+		else {
+			panic!("Encountered an unknown asset type");
+		}
+		Ok(())
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, Box<OhlcRecord>), ErrorBox> {
@@ -202,7 +231,7 @@ impl Backtest {
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
 		let margin = current_record.close / last_record.close * asset.margin;
-		Ok((margin, current_record.clone()))
+		Ok((margin, Box::clone(current_record)))
 	}
 
 	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), ErrorBox> {
@@ -246,7 +275,7 @@ impl Backtest {
 		};
 		let record = source.time_map.get(&self.now)
 			.ok_or_else(error)?;
-		Ok(record.clone())
+		Ok(Box::clone(record))
 	}
 
 	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, ErrorBox> {
@@ -277,13 +306,9 @@ impl Backtest {
 	}
 
 	fn get_contract_root(symbol: &String) -> Option<String> {
-		let regex = Regex::new(r"^([0-9A-Z][A-Z]{1,2})[F-Z]\d+$").unwrap();
-		if let Some(captures) = regex.captures(symbol) {
-			let root = captures[1].to_string();
-			Some(root)
-		}
-		else {
-			None
+		match parse_globex_code(symbol) {
+			Some((root, _, _)) => Some(root),
+			None => None
 		}
 	}
 }

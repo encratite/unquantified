@@ -21,6 +21,13 @@ pub type OhlcVec = Vec<OhlcBox>;
 pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcBox>;
 pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
 
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+	static ref GLOBEX_REGEX: Regex = Regex::new("^([A-Z0-9]{3,})([FGHJKMNQUVXZ])([0-9]{2})$").unwrap();
+}
+
 #[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct RawOhlcArchive {
 	pub daily: Vec<RawOhlcRecord>,
@@ -84,6 +91,19 @@ pub struct OhlcRecord {
 	pub close: f64,
 	pub volume: u32,
 	pub open_interest: Option<u32>
+}
+
+pub fn parse_globex_code(symbol: &String) -> Option<(String, String, String)> {
+	match GLOBEX_REGEX.captures(symbol.as_str()) {
+		Some(captures) => {
+			let get_capture = |i: usize| captures[i].to_string();
+			let root = get_capture(1);
+			let month = get_capture(2);
+			let year = get_capture(3);
+			Some((root, month, year))
+		},
+		None => None
+	}
 }
 
 pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, ErrorBox> {

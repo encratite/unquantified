@@ -1,13 +1,7 @@
 use std::error::Error;
 
-use common::ErrorBox;
+use common::{parse_globex_code, ErrorBox};
 use configparser::ini::Ini;
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-	static ref GLOBEX_PATTERN: Regex = Regex::new("^[A-Z0-9]+([FGHJKMNQUVXZ])[0-9]{2}$").unwrap();
-}
 
 #[derive(Debug, Clone)]
 pub struct ContractFilter {
@@ -64,10 +58,9 @@ impl ContractFilter {
 	}
 
 	pub fn is_included(&mut self, symbol: &String) -> bool {
-		let Some(captures) = GLOBEX_PATTERN.captures(symbol.as_str()) else {
+		let Some((_, month, _)) = parse_globex_code(symbol) else {
 			return true;
 		};
-		let month = &captures[1].to_string();
 		if let Some(first_contract) = &self.first_contract {
 			if symbol == first_contract {
 				self.active = true;
@@ -84,10 +77,10 @@ impl ContractFilter {
 		self.previous_symbol = Some(symbol.clone());
 		if self.active {
 			if let Some(include_months) = &self.include_months {
-				include_months.contains(month)
+				include_months.contains(&month)
 			}
 			else if let Some(exclude_months) = &self.exclude_months {
-				!exclude_months.contains(month)
+				!exclude_months.contains(&month)
 			}
 			else {
 				false
