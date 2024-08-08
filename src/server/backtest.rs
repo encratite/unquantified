@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
-use common::{parse_globex_code, ErrorBox, OhlcArchive, OhlcRecord};
+use common::{parse_globex_code, ErrorBox, OhlcArchive, OhlcData, OhlcRecord};
 
 use crate::manager::{Asset, AssetManager, AssetType};
 
@@ -136,16 +136,16 @@ impl Backtest {
 	// Advances the simulation to the next point in time
 	// This sequence is pre-filtered and excludes days on which there was no trading due to holidays etc.
 	// Returns true if the time was successfully advanced or false if the end of the simulation has been reached
-	pub fn next(&mut self) -> Result<bool, ErrorBox> {
+	pub fn next(&mut self) -> bool {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
-				// To do: check for margin call
+				self.margin_call_check();
 				// To do: settle expired contracts
 				panic!("Not implemented");
 				self.now = now;
-				Ok(true)
+				true
 			}
-			None => Ok(false)
+			None => false
 		}
 	}
 
@@ -164,14 +164,14 @@ impl Backtest {
 				return Err(format!("Not enough cash to open a position with {} contract(s) of \"{}\" with an initial margin requirement of ${}", count, symbol, initial_margin).into());
 			}
 			self.cash -= cost;
-			let price = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
+			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
 			let position = Position {
 				id: self.next_position_id,
 				symbol: current_record.symbol,
 				asset: asset.clone(),
 				count,
 				side,
-				price: price,
+				price: ask,
 				margin: maintenance_margin_usd,
 				archive: archive,
 				time: self.now.clone()
@@ -194,25 +194,21 @@ impl Backtest {
 		}
 		let asset = &position.asset;
 		if asset.asset_type == AssetType::Future {
-			let record = self.get_current_record(&position.symbol)?;
-			let ticks = (count as f64) * (record.close - position.price) / asset.tick_size;
-			let mut gain = ticks * asset.tick_value;
-			if position.side == PositionSide::Short {
-				gain = - gain;
-			}
-			let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
-			let cost = forex_fee + asset.broker_fee + asset.exchange_fee;
-			let margin_released = (count as f64) * asset.margin;
-			let total = margin_released + gain_usd - cost;
-			self.cash += total;
+			let value = self.get_position_value(position, count)?;
+			self.cash += value;
 			let new_count = position.count - count;
 			if new_count == 0 {
 				// The entire position has been sold, remove it
 				self.positions.retain(|x| x.id != position_id);
 			}
 			else {
-				// Awkward workaround for multiple mutable borrows
-				self.positions.iter_mut().for_each(|x| x.count = new_count);
+				// Awkward workaround to avoid multiple mutable borrows
+				for x in self.positions.iter_mut() {
+					if x.id == position_id {
+						x.count = new_count;
+						break;
+					}
+				}
 			}
 		}
 		else {
@@ -267,12 +263,7 @@ impl Backtest {
 	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, ErrorBox> {
 		let archive = self.asset_manager.get_archive(symbol)?;
 		let error = || format!("Unable to find a record for {} at {}", symbol, self.now);
-		let source = if self.time_frame == TimeFrame::Daily {
-			&archive.daily
-		}
-		else {
-			&archive.intraday
-		};
+		let source = Self::get_archive_data(&archive, &self.time_frame);
 		let record = source.time_map.get(&self.now)
 			.ok_or_else(error)?;
 		Ok(Box::clone(record))
@@ -284,13 +275,7 @@ impl Backtest {
 		let time_reference_symbol = "ES".to_string();
 		let time_reference = asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
-		let is_daily = *time_frame == TimeFrame::Daily;
-		let source = if is_daily {
-			&time_reference.daily
-		}
-		else {
-			&time_reference.intraday
-		};
+		let source = Self::get_archive_data(&time_reference, time_frame);
 		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = Box::new(source.time_map.keys());
 		let time_keys_in_range = time_keys
 			.filter(|&&x|
@@ -309,6 +294,71 @@ impl Backtest {
 		match parse_globex_code(symbol) {
 			Some((root, _, _)) => Some(root),
 			None => None
+		}
+	}
+
+	fn get_archive_data<'a>(archive: &'a OhlcArchive, time_frame: &TimeFrame) -> &'a OhlcData {
+		if *time_frame == TimeFrame::Daily {
+			&archive.daily
+		}
+		else {
+			&archive.intraday
+		}
+	}
+
+	fn get_account_value(&self) -> f64 {
+		let position_value: f64 = self.positions
+			.iter()
+			.map(|position| self.get_position_value(position, position.count)
+				.unwrap_or(0f64))
+			.sum();
+		let account_value = self.cash + position_value;
+		account_value
+	}
+
+	fn get_position_value(&self, position: &Position, count: u32) -> Result<f64, ErrorBox> {
+		let asset = &position.asset;
+		let record = self.get_current_record(&position.symbol)?;
+		let bid = record.close;
+		let ticks = (count as f64) * (bid - position.price) / asset.tick_size;
+		let mut gain = ticks * asset.tick_value;
+		if position.side == PositionSide::Short {
+			gain = - gain;
+		}
+		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
+		let cost = forex_fee + asset.broker_fee + asset.exchange_fee;
+		let margin_released = (count as f64) * asset.margin;
+		let value = margin_released + gain_usd - cost;
+		Ok(value)
+	}
+
+	fn get_overnight_margin(&self) -> f64 {
+		self.positions
+			.iter()
+			.map(|x| {
+				let mut margin = (x.count as f64) * x.margin;
+				if x.asset.overnight_margin {
+					margin *= self.configuration.overnight_margin_ratio;
+				}
+				margin
+			})
+			.sum()
+	}
+
+	fn margin_call_check(&mut self) {
+		loop {
+			let Some(first_position) = self.positions.first() else {
+				break;
+			};
+			let account_value = self.get_account_value();
+			let overnight_margin = self.get_overnight_margin();
+			if overnight_margin > account_value {
+				// Keep on closing positions until there's enough collateral
+				self.close_position(first_position.id, first_position.count);
+			}
+			else {
+				break;
+			}
 		}
 	}
 }
