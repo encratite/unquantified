@@ -18,6 +18,8 @@ regex = "1.10.5"
 rkyv = "0.7.44"
 serde = { version = "1.0.203", features = ["derive"] }
 stopwatch = "0.0.7"
+strum = "0.26.3"
+strum_macros = "0.26.4"
 tokio = { version = "1.38.0", features = ["full"] }
 tower-http = { version = "0.5.2", features = ["fs"] }
 zstd = "0.13.1"

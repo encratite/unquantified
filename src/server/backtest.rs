@@ -1,10 +1,11 @@
-use std::{collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
+use std::{cmp::min, collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
 use common::{parse_globex_code, ErrorBox, OhlcArchive, OhlcData, OhlcRecord};
+use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
 
@@ -23,9 +24,11 @@ lazy_static! {
 	};
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Display)]
 pub enum PositionSide {
+	#[strum(serialize = "long")]
 	Long,
+	#[strum(serialize = "short")]
 	Short
 }
 
@@ -33,6 +36,14 @@ pub enum PositionSide {
 pub enum TimeFrame {
 	Daily,
 	Intraday
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventType {
+	OpenPosition,
+	ClosePosition,
+	MarginCall,
+	Error
 }
 
 pub struct Backtest {
@@ -54,8 +65,12 @@ pub struct Backtest {
 	time_frame: TimeFrame,
 	// Fixed points in time the simulation will iterate over
 	time_sequence: VecDeque<DateTime<Utc>>,
-	// Sequential position ID
-	next_position_id: u32
+	// Sequential ID used to uniquely identify positions
+	next_position_id: u32,
+	// Text-based event log, in ascending order
+	events: Vec<BacktestEvent>,
+	// Indicates whether the backtest is still running or not
+	terminated: bool
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +123,13 @@ pub struct Position {
 }
 
 #[derive(Debug)]
+pub struct BacktestEvent {
+	pub time: DateTime<Utc>,
+	pub event_type: EventType,
+	pub message: String
+}
+
+#[derive(Debug)]
 pub struct BacktestResult {
 	// Just a placeholder for now
 }
@@ -128,24 +150,37 @@ impl Backtest {
 			now: from.to_utc(),
 			time_frame,
 			time_sequence,
-			next_position_id: 1
+			next_position_id: 1,
+			events: Vec::new(),
+			terminated: false
 		};
 		Ok(backtest)
 	}
 
-	// Advances the simulation to the next point in time
-	// This sequence is pre-filtered and excludes days on which there was no trading due to holidays etc.
-	// Returns true if the time was successfully advanced or false if the end of the simulation has been reached
-	pub fn next(&mut self) -> bool {
+	/*
+	Advances the simulation to the next point in time.
+	This sequence is pre-filtered and excludes days on which there was no trading due to holidays etc.
+	Returns true if the time was successfully advanced or false if the end of the simulation has been reached.
+	An error indicates that a fatal occurred and that the simulation terminated prematurely.
+	This may happen due to one of the following reasons:
+	- An overnight margin call occurred and liquidating the positions failed due to missing OHLC data
+	*/
+	pub fn next(&mut self) -> Result<bool, ErrorBox> {
+		if self.terminated {
+			return Err("Backtest has been terminated".into());
+		}
 		match self.time_sequence.pop_front() {
 			Some(now) => {
-				self.margin_call_check();
+				self.margin_call_check()?;
 				// To do: settle expired contracts
 				panic!("Not implemented");
 				self.now = now;
-				true
+				Ok(true)
 			}
-			None => false
+			None => {
+				self.terminated = true;
+				Ok(false)
+			}
 		}
 	}
 
@@ -161,7 +196,7 @@ impl Backtest {
 			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
 			let cost = initial_margin + forex_fee + asset.broker_fee + asset.exchange_fee;
 			if cost >= self.cash {
-				return Err(format!("Not enough cash to open a position with {} contract(s) of \"{}\" with an initial margin requirement of ${}", count, symbol, initial_margin).into());
+				return Err(format!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}", ).into());
 			}
 			self.cash -= cost;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
@@ -170,7 +205,7 @@ impl Backtest {
 				symbol: current_record.symbol,
 				asset: asset.clone(),
 				count,
-				side,
+				side: side.clone(),
 				price: ask,
 				margin: maintenance_margin_usd,
 				archive: archive,
@@ -178,6 +213,8 @@ impl Backtest {
 			};
 			self.next_position_id += 1;
 			self.positions.push(position.clone());
+			let message = format!("Opened position: {count} x {symbol} @ {ask}, {side} (ID {})", position.id);
+			self.log_event(EventType::OpenPosition, message);
 			Ok(position)
 		}
 		else {
@@ -186,15 +223,20 @@ impl Backtest {
 	}
 
 	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), ErrorBox> {
-		let position = self.positions.iter().find(|x| x.id == position_id)
-			.ok_or_else(|| format!("Unable to find a position with ID {}", position_id))?;
+		let position = self.positions
+			.iter()
+			.find(|x| x.id == position_id)
+			.ok_or_else(|| format!("Unable to find a position with ID {position_id}"))?
+			.clone();
 		if count > position.count {
-			let message = format!("Unable to close position with ID {}, {} contracts specified but only {} available", position_id, count, position.count);
+			let message = format!("Unable to close position with ID {position_id}, {count} contracts specified but only {} available", position.count);
 			return Err(message.into())
 		}
 		let asset = &position.asset;
+		let bid;
 		if asset.asset_type == AssetType::Future {
-			let value = self.get_position_value(position, count)?;
+			let (value, position_bid) = self.get_position_value(&position, count)?;
+			bid = position_bid;
 			self.cash += value;
 			let new_count = position.count - count;
 			if new_count == 0 {
@@ -214,6 +256,8 @@ impl Backtest {
 		else {
 			panic!("Encountered an unknown asset type");
 		}
+		let message = format!("Closed position: {count} x {} @ {bid}, {} (ID {})", position.symbol, position.side, position.id);
+		self.log_event(EventType::ClosePosition, message);
 		Ok(())
 	}
 
@@ -222,11 +266,21 @@ impl Backtest {
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
 		let current_record = archive.daily.time_map.get(&date_utc)
-			.ok_or_else(|| format!("Unable to find current record for symbol \"{}\" at {}", asset.data_symbol, date))?;
+			.ok_or_else(|| format!("Unable to find current record for symbol \"{}\" at {date}", asset.data_symbol))?;
 		let last_record = archive.daily.unadjusted.last()
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
-		let margin = current_record.close / last_record.close * asset.margin;
+		let margin;
+		if current_record.close > 0f64 && last_record.close > 0f64 {
+			// Try to limit the ratio even though it may very well result in a margin call either way
+			let max_ratio = 10f64;
+			let price_ratio = f64::min(current_record.close / last_record.close, max_ratio);
+			margin = price_ratio * asset.margin;
+		}
+		else {
+			// Fallback for pathological cases like negative crude
+			margin = asset.margin;
+		}
 		Ok((margin, Box::clone(current_record)))
 	}
 
@@ -246,6 +300,7 @@ impl Backtest {
 		};
 		if from == FOREX_USD {
 			if to == FOREX_USD {
+				// No conversion required, fees are zero
 				Ok((amount, 0f64))
 			}
 			else {
@@ -262,7 +317,7 @@ impl Backtest {
 
 	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, ErrorBox> {
 		let archive = self.asset_manager.get_archive(symbol)?;
-		let error = || format!("Unable to find a record for {} at {}", symbol, self.now);
+		let error = || format!("Unable to find a record for {symbol} at {}", self.now);
 		let source = Self::get_archive_data(&archive, &self.time_frame);
 		let record = source.time_map.get(&self.now)
 			.ok_or_else(error)?;
@@ -310,13 +365,14 @@ impl Backtest {
 		let position_value: f64 = self.positions
 			.iter()
 			.map(|position| self.get_position_value(position, position.count)
+				.map(|(value, _)| value)
 				.unwrap_or(0f64))
 			.sum();
 		let account_value = self.cash + position_value;
 		account_value
 	}
 
-	fn get_position_value(&self, position: &Position, count: u32) -> Result<f64, ErrorBox> {
+	fn get_position_value(&self, position: &Position, count: u32) -> Result<(f64, f64), ErrorBox> {
 		let asset = &position.asset;
 		let record = self.get_current_record(&position.symbol)?;
 		let bid = record.close;
@@ -329,7 +385,7 @@ impl Backtest {
 		let cost = forex_fee + asset.broker_fee + asset.exchange_fee;
 		let margin_released = (count as f64) * asset.margin;
 		let value = margin_released + gain_usd - cost;
-		Ok(value)
+		Ok((value, bid))
 	}
 
 	fn get_overnight_margin(&self) -> f64 {
@@ -345,20 +401,49 @@ impl Backtest {
 			.sum()
 	}
 
-	fn margin_call_check(&mut self) {
+	fn margin_call_check(&mut self) -> Result<(), ErrorBox> {
+		let mut log_margin_call = true;
 		loop {
-			let Some(first_position) = self.positions.first() else {
+			let Some((position_id, position_count)) = self.get_first_position() else {
 				break;
 			};
 			let account_value = self.get_account_value();
 			let overnight_margin = self.get_overnight_margin();
 			if overnight_margin > account_value {
 				// Keep on closing positions until there's enough collateral
-				self.close_position(first_position.id, first_position.count);
+				if log_margin_call {
+					let message = format!("The overnight margin of ${overnight_margin} exceeds the account value of ${account_value}, closing positions");
+					self.log_event(EventType::MarginCall, message);
+				}
+				let close_result = self.close_position(position_id, position_count);
+				if close_result.is_err() {
+					let message = format!("Received a margin call with positions that cannot be liquidated");
+					self.log_event(EventType::Error, message);
+					self.terminated = true;
+					return close_result;
+				}
+				log_margin_call = false;
 			}
 			else {
 				break;
 			}
 		}
+		Ok(())
+	}
+
+	fn get_first_position(&self) -> Option<(u32, u32)> {
+		match self.positions.first() {
+			Some(first_position) => Some((first_position.id, first_position.count)),
+			None => None
+		}
+	}
+
+	fn log_event(&mut self, event_type: EventType, message: String) {
+		let event = BacktestEvent {
+			time: self.now,
+			event_type,
+			message
+		};
+		self.events.push(event);
 	}
 }
