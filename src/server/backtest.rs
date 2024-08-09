@@ -164,6 +164,8 @@ impl Backtest {
 	An error indicates that a fatal occurred and that the simulation terminated prematurely.
 	This may happen due to one of the following reasons:
 	- An overnight margin call occurred and liquidating the positions failed due to missing OHLC data
+	- An automatic rollover was triggered and the new contract cannot be determined due to missing data
+	- The end of the simulated period has been reached and positions cannot be closed
 	*/
 	pub fn next(&mut self) -> Result<bool, ErrorBox> {
 		if self.terminated {
@@ -178,6 +180,8 @@ impl Backtest {
 				Ok(true)
 			}
 			None => {
+				// Cash out
+				self.close_all_positions()?;
 				self.terminated = true;
 				Ok(false)
 			}
@@ -445,5 +449,14 @@ impl Backtest {
 			message
 		};
 		self.events.push(event);
+	}
+
+	fn close_all_positions(&mut self) -> Result<(), ErrorBox> {
+		let positions = self.positions.clone();
+		for position in positions {
+			self.close_position(position.id, position.count)
+				.map_err(|error| format!("Failed to close all positions at the end of the simulation: {error}"))?;
+		}
+		Ok(())
 	}
 }
