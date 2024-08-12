@@ -27,6 +27,11 @@ async fn main() -> Result<(), ErrorBox> {
 		value.parse()
 		.map_err(|_| parse_error(key, section).into())
 	};
+	let get_bool = |section, key| -> Result<bool, ErrorBox> {
+		let value = get_string(section, key)?;
+		value.parse()
+		.map_err(|_| parse_error(key, section).into())
+	};
 	let server_section = "server";
 	let address_string = get_string(server_section, "address")?;
 	let address: SocketAddr = address_string.parse()
@@ -40,13 +45,15 @@ async fn main() -> Result<(), ErrorBox> {
 	let futures_spread_ticks = get_u8(backtest_section, "futures_spread_ticks")?;
 	let initial_margin_ratio = get_f64(backtest_section, "initial_margin_ratio")?;
 	let overnight_margin_ratio = get_f64(backtest_section, "overnight_margin_ratio")?;
+	let automatic_rollover = get_bool(backtest_section, "automatic_rollover")?;
 	let backtest_configuration = BacktestConfiguration {
 		starting_cash,
 		forex_order_fee,
 		forex_spread,
 		futures_spread_ticks,
 		initial_margin_ratio,
-		overnight_margin_ratio
+		overnight_margin_ratio,
+		automatic_rollover
 	};
 	server::run(address, ticker_directory, assets_path, backtest_configuration).await;
 	Ok(())

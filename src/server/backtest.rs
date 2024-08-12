@@ -1,4 +1,4 @@
-use std::{cmp::min, collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
+use std::{any::Any, cmp::min, collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -70,7 +70,9 @@ pub struct Backtest {
 	// Text-based event log, in ascending order
 	events: Vec<BacktestEvent>,
 	// Indicates whether the backtest is still running or not
-	terminated: bool
+	terminated: bool,
+	// Internally enables/disables Forex/broker/exchange fees, as a temporary bypass for rolling over contracts
+	enable_fees: bool
 }
 
 #[derive(Debug, Clone)]
@@ -91,7 +93,9 @@ pub struct BacktestConfiguration {
 	pub initial_margin_ratio: f64,
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
-	pub overnight_margin_ratio: f64
+	pub overnight_margin_ratio: f64,
+	// If true, automatically roll over futures contracts
+	pub automatic_rollover: bool
 }
 
 #[derive(Debug, Clone)]
@@ -149,7 +153,8 @@ impl Backtest {
 			time_sequence,
 			next_position_id: 1,
 			events: Vec::new(),
-			terminated: false
+			terminated: false,
+			enable_fees: true
 		};
 		Ok(backtest)
 	}
@@ -171,7 +176,10 @@ impl Backtest {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				self.margin_call_check()?;
-				self.rollover_contracts()?;
+				let then = self.now;
+				if self.configuration.automatic_rollover {
+					self.rollover_contracts(now, then)?;
+				}
 				self.now = now;
 				Ok(true)
 			}
@@ -194,7 +202,13 @@ impl Backtest {
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
 			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
-			let cost = initial_margin + forex_fee + asset.broker_fee + asset.exchange_fee;
+			let fees = if self.enable_fees {
+				forex_fee + asset.broker_fee + asset.exchange_fee
+			}
+			else {
+				0f64
+			};
+			let cost = initial_margin + fees;
 			if cost >= self.cash {
 				return Err(format!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}", ).into());
 			}
@@ -266,7 +280,7 @@ impl Backtest {
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
 		let current_record = archive.daily.time_map.get(&date_utc)
-			.ok_or_else(|| format!("Unable to find current record for symbol \"{}\" at {date}", asset.data_symbol))?;
+			.ok_or_else(|| format!("Unable to find current record for symbol {} at {date}", asset.data_symbol))?;
 		let last_record = archive.daily.unadjusted.last()
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
@@ -316,6 +330,10 @@ impl Backtest {
 	}
 
 	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, ErrorBox> {
+		self.get_record(symbol, self.now)
+	}
+
+	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<Box<OhlcRecord>, ErrorBox> {
 		let archive = self.asset_manager.get_archive(symbol)?;
 		let error = || format!("Unable to find a record for {symbol} at {}", self.now);
 		let source = Self::get_archive_data(&archive, &self.time_frame);
@@ -382,7 +400,12 @@ impl Backtest {
 			gain = - gain;
 		}
 		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
-		let cost = forex_fee + asset.broker_fee + asset.exchange_fee;
+		let cost = if self.enable_fees {
+			forex_fee + asset.broker_fee + asset.exchange_fee
+		}
+		else {
+			0f64
+		};
 		let margin_released = (count as f64) * asset.margin;
 		let value = margin_released + gain_usd - cost;
 		Ok((value, bid))
@@ -461,7 +484,39 @@ impl Backtest {
 		Ok(())
 	}
 
-	fn rollover_contracts(&mut self) -> Result<(), ErrorBox> {
-		Err("Not implemented".into())
+	fn rollover_contracts(&mut self, now: DateTime<Utc>, then: DateTime<Utc>) -> Result<(), ErrorBox> {
+		let positions = self.positions.clone();
+		let futures = positions
+			.iter()
+			.filter(|position| position.asset.asset_type == AssetType::Futures);
+		for position in futures {
+			let symbol = &position.asset.data_symbol;
+			let (Ok(record_now), Ok(record_then)) = (self.get_record(symbol, now), self.get_record(symbol, then)) else {
+				let message = format!("Failed to roll over contract on asset {} at {}", position.symbol, now);
+				return Err(message.into());
+			};
+			if record_now.symbol != record_then.symbol {
+				// Roll over into new contract without even checking if the position matches the old one
+				// Temporarily disable fees to simulate the cost of a spread trade
+				self.enable_fees = false;
+				self.close_position(position.id, position.count)?;
+				self.enable_fees = true;
+				let new_symbol = Self::get_contract_name(&position.symbol, &record_now.symbol)?;
+				self.open_position(new_symbol, position.count, position.side.clone())?;
+			}
+		}
+		Ok(())
+	}
+
+	fn parse_globex_code(symbol: &String) -> Result<(String, String, String), ErrorBox> {
+		parse_globex_code(symbol)
+			.ok_or_else(|| "Invalid Globex code".into())
+	}
+
+	fn get_contract_name(root_symbol: &String, data_symbol: &String) -> Result<String, ErrorBox> {
+		let (root, _, _) = Self::parse_globex_code(root_symbol)?;
+		let (_, month, year) = Self::parse_globex_code(data_symbol)?;
+		let new_symbol = format!("{root}{month}{year}");
+		Ok(new_symbol)
 	}
 }
