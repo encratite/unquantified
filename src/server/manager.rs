@@ -8,7 +8,7 @@ use common::*;
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum AssetType {
-	Future
+	Futures
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -55,7 +55,8 @@ impl AssetManager {
 		else {
 			let file_name = get_archive_file_name(symbol);
 			let archive_path = Path::new(&self.ticker_directory).join(file_name);
-			let archive = read_archive(&archive_path)?;
+			let physical_delivery = self.physical_delivery(symbol);
+			let archive = read_archive(&archive_path, physical_delivery)?;
 			let archive_arc = Arc::new(archive);
 			self.tickers.insert(symbol.to_string(), Arc::clone(&archive_arc));
 			Ok(archive_arc)
@@ -98,5 +99,12 @@ impl AssetManager {
 			assets.insert(record.symbol.clone(), record);
 		});
 		return assets;
+	}
+
+	fn physical_delivery(&self, symbol: &String) -> bool {
+		self.assets.values().any(|x|
+			x.data_symbol == *symbol &&
+			x.asset_type == AssetType::Futures &&
+			x.physical_delivery)
 	}
 }

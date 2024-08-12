@@ -10,20 +10,21 @@ pub struct PanamaChannel<'a> {
 	expiration_map: HashMap<&'a String, DateTime<Tz>>,
 	offset: f64,
 	current_contract: String,
-	used_contracts: HashSet<String>
+	used_contracts: HashSet<String>,
+	skip_front_contract: bool
 }
 
 impl<'a> PanamaChannel<'a> {
-	pub fn new(map: &OhlcContractMap) -> Option<PanamaChannel> {
+	pub fn new(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<PanamaChannel>, ErrorBox> {
 		let Some(last_records) = map.values().last() else {
-			return None;
+			return Ok(None);
 		};
 		if !last_records.iter().any(|x| x.open_interest.is_some()) {
 			// If the most recent records feature no open interest, it's probably not a futures contract
-			return None;
+			return Ok(None);
 		}
 		let expiration_map = Self::get_expiration_map(map);
-		let last_record = RawOhlcArchive::get_most_popular_record(last_records);
+		let last_record = RawOhlcArchive::get_most_popular_record(last_records, skip_front_contract)?;
 		let current_contract = last_record.symbol;
 		let used_contracts = HashSet::from_iter([current_contract.clone()]);
 		let channel = PanamaChannel {
@@ -31,9 +32,10 @@ impl<'a> PanamaChannel<'a> {
 			expiration_map,
 			offset: 0f64,
 			current_contract,
-			used_contracts
+			used_contracts,
+			skip_front_contract
 		};
-		Some(channel)
+		Ok(Some(channel))
 	}
 
 	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec, ErrorBox> {
@@ -70,7 +72,7 @@ impl<'a> PanamaChannel<'a> {
 	}
 
 	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcBox, ErrorBox> {
-		let new_record = RawOhlcArchive::get_most_popular_record(records);
+		let new_record = RawOhlcArchive::get_most_popular_record(records, self.skip_front_contract)?;
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
 			// No rollover necessary yet

@@ -91,10 +91,7 @@ pub struct BacktestConfiguration {
 	pub initial_margin_ratio: f64,
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
-	pub overnight_margin_ratio: f64,
-	// If asset.physical_delivery is true, then the contract features a close-out period of n days prior to expiration
-	// Usually the asset would be forcefully liquidated by that time but this backtest performs an automatic rollover instead
-	pub close_out_period: u8
+	pub overnight_margin_ratio: f64
 }
 
 #[derive(Debug, Clone)]
@@ -174,8 +171,7 @@ impl Backtest {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				self.margin_call_check()?;
-				// To do: settle expired contracts
-				panic!("Not implemented");
+				self.rollover_contracts()?;
 				self.now = now;
 				Ok(true)
 			}
@@ -192,7 +188,7 @@ impl Backtest {
 		let root = Self::get_contract_root(&symbol)
 			.ok_or_else(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
-		if asset.asset_type == AssetType::Future {
+		if asset.asset_type == AssetType::Futures {
 			let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
 			let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
@@ -238,7 +234,7 @@ impl Backtest {
 		}
 		let asset = &position.asset;
 		let bid;
-		if asset.asset_type == AssetType::Future {
+		if asset.asset_type == AssetType::Futures {
 			let (value, position_bid) = self.get_position_value(&position, count)?;
 			bid = position_bid;
 			self.cash += value;
@@ -412,6 +408,11 @@ impl Backtest {
 				break;
 			};
 			let account_value = self.get_account_value();
+			/*
+			The current overnight margin check is wrong for two reasons:
+			1. It doesn't differentiate between different time zones (US session vs. European session vs. Asian session)
+			2. Positions are liquidated at the next close, which is particularly incorrect when using daily rather than intraday data
+			*/
 			let overnight_margin = self.get_overnight_margin();
 			if overnight_margin > account_value {
 				// Keep on closing positions until there's enough collateral
@@ -458,5 +459,9 @@ impl Backtest {
 				.map_err(|error| format!("Failed to close all positions at the end of the simulation: {error}"))?;
 		}
 		Ok(())
+	}
+
+	fn rollover_contracts(&mut self) -> Result<(), ErrorBox> {
+		Err("Not implemented".into())
 	}
 }

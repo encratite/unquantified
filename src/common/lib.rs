@@ -1,7 +1,7 @@
 mod panama;
 
 use std::{
-	collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr
+	cmp::Ordering, collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
@@ -13,6 +13,8 @@ use rkyv::{
 };
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
+use lazy_static::lazy_static;
+use regex::Regex;
 
 pub type ErrorBox = Box<dyn Error>;
 
@@ -21,11 +23,8 @@ pub type OhlcVec = Vec<OhlcBox>;
 pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcBox>;
 pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
 
-use lazy_static::lazy_static;
-use regex::Regex;
-
 lazy_static! {
-	static ref GLOBEX_REGEX: Regex = Regex::new("^([A-Z0-9]{3,})([FGHJKMNQUVXZ])([0-9]{2})$").unwrap();
+	static ref GLOBEX_REGEX: Regex = Regex::new("^([A-Z0-9]{2,})([FGHJKMNQUVXZ])([0-9]{2})$").unwrap();
 }
 
 #[derive(Debug, Archive, Serialize, Deserialize)]
@@ -93,6 +92,13 @@ pub struct OhlcRecord {
 	pub open_interest: Option<u32>
 }
 
+#[derive(Eq, PartialEq, PartialOrd)]
+struct GlobexCode {
+	pub symbol: String,
+	pub month: String,
+	pub year: u16
+}
+
 pub fn parse_globex_code(symbol: &String) -> Option<(String, String, String)> {
 	match GLOBEX_REGEX.captures(symbol.as_str()) {
 		Some(captures) => {
@@ -106,12 +112,12 @@ pub fn parse_globex_code(symbol: &String) -> Option<(String, String, String)> {
 	}
 }
 
-pub fn read_archive(path: &PathBuf) -> Result<OhlcArchive, ErrorBox> {
+pub fn read_archive(path: &PathBuf, skip_front_contract: bool) -> Result<OhlcArchive, ErrorBox> {
 	let file = File::open(path)?;
 	let mut buffer = Vec::<u8>::new();
 	zstd::stream::copy_decode(file, &mut buffer)?;
 	let raw_archive: RawOhlcArchive = unsafe { rkyv::from_bytes_unchecked(&buffer)? };
-	let archive = raw_archive.to_archive()?;
+	let archive = raw_archive.to_archive(skip_front_contract)?;
 	return Ok(archive);
 }
 
@@ -152,11 +158,11 @@ where
 }
 
 impl RawOhlcArchive {
-	pub fn to_archive(&self) -> Result<OhlcArchive, ErrorBox> {
+	pub fn to_archive(&self, skip_front_contract: bool) -> Result<OhlcArchive, ErrorBox> {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
-		let daily = Self::get_data(&self.daily, &time_zone)?;
-		let intraday = Self::get_data(&self.intraday, &time_zone)?;
+		let daily = Self::get_data(&self.daily, &time_zone, skip_front_contract)?;
+		let intraday = Self::get_data(&self.intraday, &time_zone, skip_front_contract)?;
 		let archive = OhlcArchive {
 			daily,
 			intraday,
@@ -165,7 +171,7 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> Result<OhlcData, ErrorBox> {
+	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz, skip_front_contract: bool) -> Result<OhlcData, ErrorBox> {
 		let Some(last) = records.last() else {
 			return Err("Encountered an OHLC archive without any records".into());
 		};
@@ -173,8 +179,8 @@ impl RawOhlcArchive {
 		if is_contract {
 			// Futures contract
 			let contract_map = Self::get_contract_map(records, time_zone);
-			let unadjusted = Self::get_unadjusted_data_from_map(&contract_map);
-			let adjusted = Self::get_adjusted_data_from_map(&contract_map)?;
+			let unadjusted = Self::get_unadjusted_data_from_map(&contract_map, skip_front_contract)?;
+			let adjusted = Self::get_adjusted_data_from_map(&contract_map, skip_front_contract)?;
 			let time_map = Self::get_time_map(&unadjusted, &adjusted);
 			let data = OhlcData {
 				unadjusted,
@@ -200,23 +206,52 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_most_popular_record(records: &Vec<Box<OhlcRecord>>) -> Box<OhlcRecord> {
-		if let Some(first) = records.first() {
-			return Box::clone(first);
-		}
-		let open_interest: Vec<u32> = records
-			.into_iter()
-			.filter_map(|x| x.open_interest)
-			.collect();
-		let open_interest_available = open_interest.len() == records.len();
-		let non_zero_open_interest = open_interest.iter().all(|x| *x > 0);
-		let max = if open_interest_available && non_zero_open_interest {
-			records.iter().max_by_key(|x| x.open_interest.unwrap())
+	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec, ErrorBox> {
+		if skip_front_contract && records.len() >= 2 {
+			let mut tuples: Vec<(GlobexCode, OhlcBox)> = records
+				.iter()
+				.map(|record| {
+					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
+						Ok((globex_code, Box::clone(record)))
+					}
+					else {
+						Err("Failed to parse Globex code while filtering records".into())
+					}
+				})
+				.collect::<Result<Vec<(GlobexCode, OhlcBox)>, ErrorBox>>()?;
+			tuples.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
+			let filtered_records: Vec<OhlcBox> = tuples
+				.iter()
+				.skip(1)
+				.map(|(_, record)| Box::clone(record))
+				.collect();
+			Ok(filtered_records)
 		}
 		else {
-			records.iter().max_by_key(|x| x.volume)
+			Ok(records.clone())
+		}
+	}
+
+	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcBox, ErrorBox> {
+		if records.len() == 1 {
+			if let Some(first) = records.first() {
+				return Ok(Box::clone(first));
+			}
+		}
+		let filtered_records = Self::filter_records_by_contract(records, skip_front_contract)?;
+		let open_interest: Vec<u32> = filtered_records
+			.iter()
+			.filter_map(|x| x.open_interest)
+			.collect();
+		let open_interest_available = open_interest.len() == filtered_records.len();
+		let non_zero_open_interest = open_interest.iter().all(|x| *x > 0);
+		let max = if open_interest_available && non_zero_open_interest {
+			filtered_records.iter().max_by_key(|x| x.open_interest.unwrap())
+		}
+		else {
+			filtered_records.iter().max_by_key(|x| x.volume)
 		};
-		Box::clone(max.unwrap())
+		Ok(Box::clone(max.unwrap()))
 	}
 
 	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcVec {
@@ -226,14 +261,14 @@ impl RawOhlcArchive {
 		}).collect()
 	}
 
-	fn get_unadjusted_data_from_map(map: &OhlcContractMap) -> OhlcVec {
+	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec, ErrorBox> {
 		map.values().map(|records| {
-			Self::get_most_popular_record(records)
+			Self::get_most_popular_record(records, skip_front_contract)
 		}).collect()
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap) -> Result<Option<OhlcVec>, ErrorBox> {
-		let Some(mut panama) = PanamaChannel::new(map) else {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>, ErrorBox> {
+		let Some(mut panama) = PanamaChannel::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};
 		let adjusted = panama.get_adjusted_data()?;
@@ -319,5 +354,36 @@ impl OhlcData {
 			Some(ref x) => x,
 			None => &self.unadjusted
 		}
+	}
+}
+
+impl GlobexCode {
+	fn new(symbol: &String) -> Option<GlobexCode> {
+		let Some((_, month, year_string)) = parse_globex_code(symbol) else {
+			return None;
+		};
+		let Ok(year) = str::parse::<u16>(year_string.as_str()) else {
+			return None;
+		};
+		let adjusted_year = if year < 70 {
+			year + 2000
+		}
+		else {
+			year + 1900
+		};
+		let globex_code = GlobexCode {
+			symbol: symbol.clone(),
+			month,
+			year: adjusted_year
+		};
+		Some(globex_code)
+	}
+}
+
+impl Ord for GlobexCode {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.year
+			.cmp(&other.year)
+			.then_with(|| self.month.cmp(&other.month))
 	}
 }
