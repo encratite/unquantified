@@ -124,8 +124,7 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 			if *x != initial_value {
 				// Store pre-calculated x_i - x_mean values
 				*x -= mean;
-			}
-			else {
+			} else {
 				// Fill out gaps in the data with the mean value
 				*x = mean;
 			}

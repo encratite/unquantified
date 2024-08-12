@@ -105,8 +105,7 @@ fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<Date
 	};
 	if is_first {
 		get_some_time(time_values.next())
-	}
-	else {
+	} else {
 		get_some_time(time_values.last())
 	}
 }
@@ -116,8 +115,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArch
 		let now: DateTime<Local> = Local::now();
 		let now_with_timezone: DateTime<FixedOffset> = now.with_timezone(now.offset());
 		Ok(now_with_timezone)
-	}
-	else {
+	} else {
 		let is_first = special_keyword == SpecialDateTime::First;
 		let times = archives
 			.iter()
@@ -125,8 +123,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArch
 			.collect::<Result<Vec<DateTime<FixedOffset>>, ErrorBox>>()?;
 		let time = if is_first {
 			times.iter().min()
-		}
-		else {
+		} else {
 			times.iter().max()
 		};
 		match time {
@@ -141,16 +138,14 @@ fn get_offset_date_time(time: &DateTime<FixedOffset>, offset: i16, offset_unit: 
 		time.checked_add_signed(duration(x as i64));
 	let get_months = |x: i16| if x >= 0 {
 		Months::new(x as u32)
-	}
-	else {
+	} else {
 		Months::new((- x) as u32)
 	};
 	let add_sub_months = |x| {
 		let months = get_months(x);
 		if offset >= 0 {
 			time.checked_add_months(months)
-		}
-		else {
+		} else {
 			time.checked_sub_months(months)
 		}
 	};

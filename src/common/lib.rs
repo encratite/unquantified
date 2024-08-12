@@ -189,8 +189,7 @@ impl RawOhlcArchive {
 				contract_map: Some(contract_map)
 			};
 			Ok(data)
-		}
-		else {
+		} else {
 			// Currency
 			let contract_map = None;
 			let unadjusted = Self::get_unadjusted_data(records, time_zone);
@@ -213,8 +212,7 @@ impl RawOhlcArchive {
 				.map(|record| {
 					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
 						Ok((globex_code, Box::clone(record)))
-					}
-					else {
+					} else {
 						Err("Failed to parse Globex code while filtering records".into())
 					}
 				})
@@ -226,8 +224,7 @@ impl RawOhlcArchive {
 				.map(|(_, record)| Box::clone(record))
 				.collect();
 			Ok(filtered_records)
-		}
-		else {
+		} else {
 			Ok(records.clone())
 		}
 	}
@@ -247,8 +244,7 @@ impl RawOhlcArchive {
 		let non_zero_open_interest = open_interest.iter().all(|x| *x > 0);
 		let max = if open_interest_available && non_zero_open_interest {
 			filtered_records.iter().max_by_key(|x| x.open_interest.unwrap())
-		}
-		else {
+		} else {
 			filtered_records.iter().max_by_key(|x| x.volume)
 		};
 		Ok(Box::clone(max.unwrap()))
@@ -283,8 +279,7 @@ impl RawOhlcArchive {
 			let value = Box::new(record);
 			if let Some(records) = map.get_mut(&time) {
 				records.push(value);
-			}
-			else {
+			} else {
 				let records = vec![value];
 				map.insert(time, records);
 			}
@@ -367,8 +362,7 @@ impl GlobexCode {
 		};
 		let adjusted_year = if year < 70 {
 			year + 2000
-		}
-		else {
+		} else {
 			year + 1900
 		};
 		let globex_code = GlobexCode {

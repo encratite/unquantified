@@ -42,8 +42,7 @@ impl ContractFilter {
 			};
 			filter.reset();
 			Ok(filter)
-		}
-		else {
+		} else {
 			Err(format!("Invalid contract filter for \"{}\"", root).into())
 		}
 	}
@@ -64,8 +63,7 @@ impl ContractFilter {
 		if let Some(first_contract) = &self.first_contract {
 			if symbol == first_contract {
 				self.active = true;
-			}
-			else if
+			} else if
 				let (Some(last_contract), Some(previous_symbol)) =
 				(&self.last_contract, &self.previous_symbol)
 			{
@@ -78,15 +76,12 @@ impl ContractFilter {
 		if self.active {
 			if let Some(include_months) = &self.include_months {
 				include_months.contains(&month)
-			}
-			else if let Some(exclude_months) = &self.exclude_months {
+			} else if let Some(exclude_months) = &self.exclude_months {
 				!exclude_months.contains(&month)
-			}
-			else {
+			} else {
 				false
 			}
-		}
-		else {
+		} else {
 			true
 		}
 	}

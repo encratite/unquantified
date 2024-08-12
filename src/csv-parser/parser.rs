@@ -139,8 +139,7 @@ impl CsvParser {
 				archive_path.to_str().unwrap(),
 				stopwatch.elapsed_ms()
 			);
-		}
-		else {
+		} else {
 			println!(
 				"Loaded {} records from \"{}\" and wrote them to \"{}\" in {} ms",
 				archive.daily.len() + archive.intraday.len(),
@@ -184,8 +183,7 @@ impl CsvParser {
 		records.sort_by(|a, b| {
 			if sort_by_symbol {
 				a.symbol.cmp(&b.symbol).then_with(|| a.time.cmp(&b.time))
-			}
-			else {
+			} else {
 				a.time.cmp(&b.time)
 			}
 		});
@@ -193,8 +191,7 @@ impl CsvParser {
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {
-		let Ok(time) = Self::parse_date_time(record.time.as_str())
-		else {
+		let Ok(time) = Self::parse_date_time(record.time.as_str()) else {
 			return;
 		};
 		let symbol = record.symbol.to_string();

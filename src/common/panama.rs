@@ -61,8 +61,7 @@ impl<'a> PanamaChannel<'a> {
 						// Increase expiration date
 						expiration_map.insert(key, value);
 					}
-				}
-				else {
+				} else {
 					// Initialize expiration date
 					expiration_map.insert(key, value);
 				}
@@ -77,8 +76,7 @@ impl<'a> PanamaChannel<'a> {
 		if *new_symbol == self.current_contract {
 			// No rollover necessary yet
 			Ok(Box::clone(&new_record))
-		}
-		else {
+		} else {
 			let Some(current_record) = records.iter().find(|x| x.symbol == self.current_contract) else {
 				let message = format!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
 				return Err(message.into());
@@ -94,13 +92,11 @@ impl<'a> PanamaChannel<'a> {
 					self.current_contract = new_symbol.clone();
 					self.used_contracts.insert(new_symbol);
 					Ok(Box::clone(&new_record))
-				}
-				else {
+				} else {
 					// We already switched to a contract with a more recent expiration date, ignore it
 					Ok(Box::clone(current_record))
 				}
-			}
-			else {
+			} else {
 				// Unusual scenario, the open interest scan resulted in a previously used contract being selected again
 				// Ignore it and stick to the current contract
 				Ok(Box::clone(current_record))

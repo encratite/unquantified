@@ -204,8 +204,7 @@ impl Backtest {
 			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
 			let fees = if self.enable_fees {
 				forex_fee + asset.broker_fee + asset.exchange_fee
-			}
-			else {
+			} else {
 				0f64
 			};
 			let cost = initial_margin + fees;
@@ -230,8 +229,7 @@ impl Backtest {
 			let message = format!("Opened position: {count} x {symbol} @ {ask}, {side} (ID {})", position.id);
 			self.log_event(EventType::OpenPosition, message);
 			Ok(position)
-		}
-		else {
+		} else {
 			panic!("Encountered an unknown asset type");
 		}
 	}
@@ -256,8 +254,7 @@ impl Backtest {
 			if new_count == 0 {
 				// The entire position has been sold, remove it
 				self.positions.retain(|x| x.id != position_id);
-			}
-			else {
+			} else {
 				// Awkward workaround to avoid multiple mutable borrows
 				for x in self.positions.iter_mut() {
 					if x.id == position_id {
@@ -266,8 +263,7 @@ impl Backtest {
 					}
 				}
 			}
-		}
-		else {
+		} else {
 			panic!("Encountered an unknown asset type");
 		}
 		let message = format!("Closed position: {count} x {} @ {bid}, {} (ID {})", position.symbol, position.side, position.id);
@@ -290,8 +286,7 @@ impl Backtest {
 			let max_ratio = 10f64;
 			let price_ratio = f64::min(current_record.close / last_record.close, max_ratio);
 			margin = price_ratio * asset.margin;
-		}
-		else {
+		} else {
 			// Fallback for pathological cases like negative crude
 			margin = asset.margin;
 		}
@@ -305,8 +300,7 @@ impl Backtest {
 			let record = self.get_current_record(symbol)?;
 			let value = if reciprocal {
 				amount / record.close
-			}
-			else {
+			} else {
 				amount * record.close
 			};
 			let converted_amount = value / self.configuration.forex_spread;
@@ -316,15 +310,12 @@ impl Backtest {
 			if to == FOREX_USD {
 				// No conversion required, fees are zero
 				Ok((amount, 0f64))
-			}
-			else {
+			} else {
 				get_record(to, true)
 			}
-		}
-		else if to == FOREX_USD {
+		} else if to == FOREX_USD {
 			get_record(from, false)
-		}
-		else {
+		} else {
 			Err("Invalid currency pair".into())
 		}
 	}
@@ -373,8 +364,7 @@ impl Backtest {
 	fn get_archive_data<'a>(archive: &'a OhlcArchive, time_frame: &TimeFrame) -> &'a OhlcData {
 		if *time_frame == TimeFrame::Daily {
 			&archive.daily
-		}
-		else {
+		} else {
 			&archive.intraday
 		}
 	}
@@ -402,8 +392,7 @@ impl Backtest {
 		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
 		let cost = if self.enable_fees {
 			forex_fee + asset.broker_fee + asset.exchange_fee
-		}
-		else {
+		} else {
 			0f64
 		};
 		let margin_released = (count as f64) * asset.margin;
@@ -451,8 +440,7 @@ impl Backtest {
 					return close_result;
 				}
 				log_margin_call = false;
-			}
-			else {
+			} else {
 				break;
 			}
 		}

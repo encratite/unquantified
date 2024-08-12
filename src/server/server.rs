@@ -168,14 +168,11 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, ErrorBox> {
 	if time_frame >= 1440 {
 		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
-	}
-	else if time_frame == archive.intraday_time_frame {
+	} else if time_frame == archive.intraday_time_frame {
 		return Ok(get_raw_records_from_archive(from, to, &archive.intraday.unadjusted));
-	}
-	else if time_frame < archive.intraday_time_frame {
+	} else if time_frame < archive.intraday_time_frame {
 		return Err("Requested time frame too small for intraday data in archive".into());
-	}
-	else if time_frame % archive.intraday_time_frame != 0 {
+	} else if time_frame % archive.intraday_time_frame != 0 {
 		let message = format!("Requested time frame must be a multiple of {}", archive.intraday_time_frame);
 		return Err(message.into());
 	}

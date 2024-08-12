@@ -51,8 +51,7 @@ impl AssetManager {
 		}
 		if let Some(archive_ref) = self.tickers.get(symbol) {
 			Ok(Arc::clone(archive_ref.value()))
-		}
-		else {
+		} else {
 			let file_name = get_archive_file_name(symbol);
 			let archive_path = Path::new(&self.ticker_directory).join(file_name);
 			let physical_delivery = self.physical_delivery(symbol);
@@ -80,8 +79,7 @@ impl AssetManager {
 					.map(|x| x.to_string()))
 				.collect();
 			Ok(result)
-		}
-		else {
+		} else {
 			Ok(symbols.clone())
 		}
 	}
