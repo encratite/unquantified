@@ -36,7 +36,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<Fixed
 		let (x_samples, x_sqrt) = &delta_samples[*i];
 		let (y_samples, y_sqrt) = &delta_samples[*j];
 		assert!(x_samples.len() == y_samples.len());
-		let mut sum = 0f64;
+		let mut sum = 0.0;
 		for k in 0..x_samples.len() {
 			let delta_x = x_samples[k];
 			let delta_y = y_samples[k];
@@ -103,8 +103,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 		return Err("Unable to finda any OHLC samples matching time constraints".into());
 	}
 	let delta_samples = archives.par_iter().map(|archive| {
-		let mut sum = 0f64;
-		let initial_value = 0f64;
+		let mut sum = 0.0;
+		let initial_value = 0.0;
 		let mut samples = vec![initial_value; count];
 		// Get close samples for the dynamic time range
 		let records = get_records(archive);
@@ -119,7 +119,7 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 			}
 		}
 		let mean = sum / (count as f64);
-		let mut square_sum = 0f64;
+		let mut square_sum = 0.0;
 		for x in &mut samples {
 			if *x != initial_value {
 				// Store pre-calculated x_i - x_mean values

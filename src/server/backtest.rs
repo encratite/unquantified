@@ -205,7 +205,7 @@ impl Backtest {
 			let fees = if self.enable_fees {
 				forex_fee + asset.broker_fee + asset.exchange_fee
 			} else {
-				0f64
+				0.0
 			};
 			let cost = initial_margin + fees;
 			if cost >= self.cash {
@@ -281,7 +281,7 @@ impl Backtest {
 			.ok_or_else(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
 		let margin;
-		if current_record.close > 0f64 && last_record.close > 0f64 {
+		if current_record.close > 0.0 && last_record.close > 0.0 {
 			// Try to limit the ratio even though it may very well result in a margin call either way
 			let max_ratio = 10f64;
 			let price_ratio = f64::min(current_record.close / last_record.close, max_ratio);
@@ -309,7 +309,7 @@ impl Backtest {
 		if from == FOREX_USD {
 			if to == FOREX_USD {
 				// No conversion required, fees are zero
-				Ok((amount, 0f64))
+				Ok((amount, 0.0))
 			} else {
 				get_record(to, true)
 			}
@@ -374,7 +374,7 @@ impl Backtest {
 			.iter()
 			.map(|position| self.get_position_value(position, position.count)
 				.map(|(value, _)| value)
-				.unwrap_or(0f64))
+				.unwrap_or(0.0))
 			.sum();
 		let account_value = self.cash + position_value;
 		account_value
@@ -393,7 +393,7 @@ impl Backtest {
 		let cost = if self.enable_fees {
 			forex_fee + asset.broker_fee + asset.exchange_fee
 		} else {
-			0f64
+			0.0
 		};
 		let margin_released = (count as f64) * asset.margin;
 		let value = margin_released + gain_usd - cost;

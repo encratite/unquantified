@@ -30,7 +30,7 @@ impl<'a> PanamaChannel<'a> {
 		let channel = PanamaChannel {
 			map,
 			expiration_map,
-			offset: 0f64,
+			offset: 0.0,
 			current_contract,
 			used_contracts,
 			skip_front_contract
