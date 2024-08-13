@@ -1,10 +1,10 @@
-use std::{any::Any, cmp::min, collections::{BTreeSet, HashMap, VecDeque}, error::Error, sync::Arc};
-
+use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
+use anyhow::{Context, Result, anyhow, bail};
 
-use common::{parse_globex_code, ErrorBox, OhlcArc, OhlcArchive, OhlcData, OhlcRecord};
+use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData};
 use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -136,9 +136,9 @@ pub struct BacktestResult {
 }
 
 impl Backtest {
-	pub fn new(&self, from: DateTime<Tz>, to: DateTime<Tz>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest, ErrorBox> {
+	pub fn new(&self, from: DateTime<Tz>, to: DateTime<Tz>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest> {
 		if from >= to {
-			return Err("Invalid from/to parameters".into());
+			bail!("Invalid from/to parameters");
 		}
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, &asset_manager)?;
 		let backtest = Backtest {
@@ -169,9 +169,9 @@ impl Backtest {
 	- An automatic rollover was triggered and the new contract cannot be determined due to missing data
 	- The end of the simulated period has been reached and positions cannot be closed
 	*/
-	pub fn next(&mut self) -> Result<bool, ErrorBox> {
+	pub fn next(&mut self) -> Result<bool> {
 		if self.terminated {
-			return Err("Backtest has been terminated".into());
+			bail!("Backtest has been terminated");
 		}
 		match self.time_sequence.pop_front() {
 			Some(now) => {
@@ -192,9 +192,9 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position, ErrorBox> {
+	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position> {
 		let root = Self::get_contract_root(&symbol)
-			.ok_or_else(|| "Unable to parse Globex code")?;
+			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
@@ -209,7 +209,7 @@ impl Backtest {
 			};
 			let cost = initial_margin + fees;
 			if cost >= self.cash {
-				return Err(format!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}", ).into());
+				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}");
 			}
 			self.cash -= cost;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
@@ -234,15 +234,14 @@ impl Backtest {
 		}
 	}
 
-	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<(), ErrorBox> {
+	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
 		let position = self.positions
 			.iter()
 			.find(|x| x.id == position_id)
-			.ok_or_else(|| format!("Unable to find a position with ID {position_id}"))?
+			.with_context(|| anyhow!("Unable to find a position with ID {position_id}"))?
 			.clone();
 		if count > position.count {
-			let message = format!("Unable to close position with ID {position_id}, {count} contracts specified but only {} available", position.count);
-			return Err(message.into())
+			bail!("Unable to close position with ID {position_id}, {count} contracts specified but only {} available", position.count);
 		}
 		let asset = &position.asset;
 		let bid;
@@ -271,14 +270,14 @@ impl Backtest {
 		Ok(())
 	}
 
-	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, OhlcArc), ErrorBox> {
+	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, OhlcArc)> {
 		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
-			.ok_or_else(|| "Date conversion failed")?;
+			.with_context(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
 		let current_record = archive.daily.time_map.get(&date_utc)
-			.ok_or_else(|| format!("Unable to find current record for symbol {} at {date}", asset.data_symbol))?;
+			.with_context(|| anyhow!("Unable to find current record for symbol {} at {date}", asset.data_symbol))?;
 		let last_record = archive.daily.unadjusted.last()
-			.ok_or_else(|| "Last record missing")?;
+			.with_context(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
 		let margin;
 		if current_record.close > 0.0 && last_record.close > 0.0 {
@@ -293,10 +292,10 @@ impl Backtest {
 		Ok((margin, current_record.clone()))
 	}
 
-	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), ErrorBox> {
-		let get_record = |currency, reciprocal| -> Result<(f64, f64), ErrorBox> {
+	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64)> {
+		let get_record = |currency, reciprocal| -> Result<(f64, f64)> {
 			let symbol = FOREX_MAP.get(currency)
-					.ok_or_else(|| "Unable to find currency")?;
+					.with_context(|| "Unable to find currency")?;
 			let record = self.get_current_record(symbol)?;
 			let value = if reciprocal {
 				amount / record.close
@@ -316,24 +315,23 @@ impl Backtest {
 		} else if to == FOREX_USD {
 			get_record(from, false)
 		} else {
-			Err("Invalid currency pair".into())
+			Err(anyhow!("Invalid currency pair"))
 		}
 	}
 
-	fn get_current_record(&self, symbol: &String) -> Result<OhlcArc, ErrorBox> {
+	fn get_current_record(&self, symbol: &String) -> Result<OhlcArc> {
 		self.get_record(symbol, self.now)
 	}
 
-	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<OhlcArc, ErrorBox> {
+	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<OhlcArc> {
 		let archive = self.asset_manager.get_archive(symbol)?;
-		let error = || format!("Unable to find a record for {symbol} at {}", self.now);
 		let source = Self::get_archive_data(&archive, &self.time_frame);
 		let record = source.time_map.get(&self.now)
-			.ok_or_else(error)?;
+			.with_context(|| anyhow!("Unable to find a record for {symbol} at {}", self.now))?;
 		Ok(record.clone())
 	}
 
-	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, ErrorBox> {
+	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>> {
 		// Use S&P 500 futures as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();
@@ -380,7 +378,7 @@ impl Backtest {
 		account_value
 	}
 
-	fn get_position_value(&self, position: &Position, count: u32) -> Result<(f64, f64), ErrorBox> {
+	fn get_position_value(&self, position: &Position, count: u32) -> Result<(f64, f64)> {
 		let asset = &position.asset;
 		let record = self.get_current_record(&position.symbol)?;
 		let bid = record.close;
@@ -413,7 +411,7 @@ impl Backtest {
 			.sum()
 	}
 
-	fn margin_call_check(&mut self) -> Result<(), ErrorBox> {
+	fn margin_call_check(&mut self) -> Result<()> {
 		let mut log_margin_call = true;
 		loop {
 			let Some((position_id, position_count)) = self.get_first_position() else {
@@ -463,16 +461,16 @@ impl Backtest {
 		self.events.push(event);
 	}
 
-	fn close_all_positions(&mut self) -> Result<(), ErrorBox> {
+	fn close_all_positions(&mut self) -> Result<()> {
 		let positions = self.positions.clone();
 		for position in positions {
 			self.close_position(position.id, position.count)
-				.map_err(|error| format!("Failed to close all positions at the end of the simulation: {error}"))?;
+				.with_context(|| "Failed to close all positions at the end of the simulation")?;
 		}
 		Ok(())
 	}
 
-	fn rollover_contracts(&mut self, now: DateTime<Utc>, then: DateTime<Utc>) -> Result<(), ErrorBox> {
+	fn rollover_contracts(&mut self, now: DateTime<Utc>, then: DateTime<Utc>) -> Result<()> {
 		let positions = self.positions.clone();
 		let futures = positions
 			.iter()
@@ -480,8 +478,7 @@ impl Backtest {
 		for position in futures {
 			let symbol = &position.asset.data_symbol;
 			let (Ok(record_now), Ok(record_then)) = (self.get_record(symbol, now), self.get_record(symbol, then)) else {
-				let message = format!("Failed to roll over contract on asset {} at {}", position.symbol, now);
-				return Err(message.into());
+				bail!("Failed to roll over contract on asset {} at {now}", position.symbol);
 			};
 			if record_now.symbol != record_then.symbol {
 				// Roll over into new contract without even checking if the position matches the old one
@@ -496,12 +493,12 @@ impl Backtest {
 		Ok(())
 	}
 
-	fn parse_globex_code(symbol: &String) -> Result<(String, String, String), ErrorBox> {
+	fn parse_globex_code(symbol: &String) -> Result<(String, String, String)> {
 		parse_globex_code(symbol)
-			.ok_or_else(|| "Invalid Globex code".into())
+			.with_context(|| "Invalid Globex code")
 	}
 
-	fn get_contract_name(root_symbol: &String, data_symbol: &String) -> Result<String, ErrorBox> {
+	fn get_contract_name(root_symbol: &String, data_symbol: &String) -> Result<String> {
 		let (root, _, _) = Self::parse_globex_code(root_symbol)?;
 		let (_, month, year) = Self::parse_globex_code(data_symbol)?;
 		let new_symbol = format!("{root}{month}{year}");

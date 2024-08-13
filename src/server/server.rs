@@ -1,16 +1,11 @@
-use std::collections::HashMap;
-use std::error::Error;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use axum::response::IntoResponse;
-use axum::extract::{Json, State};
-use axum::routing::post;
-use axum::Router;
+use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
+use anyhow::{Context, Result, anyhow};
 
 use common::*;
 use crate::backtest::BacktestConfiguration;
@@ -132,12 +127,12 @@ async fn get_correlation(
 	Json(response)
 }
 
-fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>, ErrorBox> {
+fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from_resolved = request.from.resolve(&request.to, &archives)?;
 	let to_resolved = request.to.resolve(&request.from, &archives)?;
-	let result: Result<Vec<Vec<OhlcRecordWeb>>, ErrorBox> = archives
+	let result: Result<Vec<Vec<OhlcRecordWeb>>> = archives
 		.iter()
 		.map(|archive| get_ohlc_records(&from_resolved, &to_resolved, request.time_frame, archive))
 		.collect();
@@ -150,14 +145,14 @@ fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) ->
 	}
 }
 
-fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>, ErrorBox> {
+fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>> {
 	symbols
 		.iter()
 		.map(|x| asset_manager.get_archive(&x))
 		.collect()
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData, ErrorBox> {
+fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &archives)?;
@@ -165,16 +160,16 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 	get_correlation_matrix(resolved_symbols, from, to, archives)
 }
 
-fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>, ErrorBox> {
+fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
 	if time_frame >= 1440 {
 		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
 	} else if time_frame == archive.intraday_time_frame {
 		return Ok(get_raw_records_from_archive(from, to, &archive.intraday.unadjusted));
 	} else if time_frame < archive.intraday_time_frame {
-		return Err("Requested time frame too small for intraday data in archive".into());
+		return Err(anyhow!("Requested time frame too small for intraday data in archive"));
 	} else if time_frame % archive.intraday_time_frame != 0 {
 		let message = format!("Requested time frame must be a multiple of {}", archive.intraday_time_frame);
-		return Err(message.into());
+		return Err(anyhow!(message));
 	}
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
 	archive.intraday.unadjusted
@@ -183,7 +178,7 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
-		.map(|x| -> Result<OhlcRecordWeb, ErrorBox> {
+		.map(|x| -> Result<OhlcRecordWeb> {
 			let first = x.first().unwrap();
 			let last = x.last().unwrap();
 			let symbol = first.symbol.clone();

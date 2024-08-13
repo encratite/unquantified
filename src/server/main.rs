@@ -4,38 +4,39 @@ mod correlation;
 mod backtest;
 mod manager;
 
-use std::error::Error;
 use std::net::SocketAddr;
+use anyhow::{Context, Result, anyhow};
+
 use backtest::BacktestConfiguration;
 use common::*;
 
 #[tokio::main]
-async fn main() -> Result<(), ErrorBox> {
+async fn main() -> Result<()> {
 	let config = get_config("server.ini")?;
-	let get_string = |section, key| -> Result<String, ErrorBox> {
+	let get_string = |section, key| -> Result<String> {
 		config.get(section, key)
-			.ok_or_else(|| format!("Failed to find key \"{}\" in section \"{}\" in configuration file", key, section).into())
+			.with_context(|| anyhow!("Failed to find key \"{key}\" in section \"{section}\" in configuration file"))
 	};
-	let parse_error = |key: &str, section: &str| format!("Failed to parse value for key \"{}\" in section \"{}\" in configuration file", key, section);
-	let get_f64 = |section, key| -> Result<f64, ErrorBox> {
+	let parse_error = |key: &str, section: &str| anyhow!("Failed to parse value for key \"{key}\" in section \"{section}\" in configuration file");
+	let get_f64 = |section, key| -> Result<f64> {
 		let value = get_string(section, key)?;
 		value.parse()
-			.map_err(|_| parse_error(key, section).into())
+			.with_context(|| parse_error(key, section))
 	};
-	let get_u8 = |section, key| -> Result<u8, ErrorBox> {
+	let get_u8 = |section, key| -> Result<u8> {
 		let value = get_string(section, key)?;
 		value.parse()
-		.map_err(|_| parse_error(key, section).into())
+			.with_context(|| parse_error(key, section))
 	};
-	let get_bool = |section, key| -> Result<bool, ErrorBox> {
+	let get_bool = |section, key| -> Result<bool> {
 		let value = get_string(section, key)?;
 		value.parse()
-		.map_err(|_| parse_error(key, section).into())
+			.with_context(|| parse_error(key, section))
 	};
 	let server_section = "server";
 	let address_string = get_string(server_section, "address")?;
 	let address: SocketAddr = address_string.parse()
-		.map_err(|_| "Unable to parse server address")?;
+		.with_context(|| "Unable to parse server address")?;
 	let ticker_directory = get_string(server_section, "ticker_directory")?;
 	let assets_path = get_string(server_section, "assets")?;
 	let backtest_section = "backtest";

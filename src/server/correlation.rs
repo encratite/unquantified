@@ -1,8 +1,8 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
-
+use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, FixedOffset};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
+use anyhow::{Context, Result, bail};
 
 use common::*;
 
@@ -14,7 +14,7 @@ pub struct CorrelationData {
 	pub correlation: Vec<Vec<f64>>,
 }
 
-pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData, ErrorBox> {
+pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData> {
 	// Determine smallest overlapping time range across all OHLC records
 	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
@@ -60,7 +60,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<Fixed
 }
 
 fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>)
-	-> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>), ErrorBox> {
+	-> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
@@ -77,18 +77,18 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 					from = from.max(first_time);
 					to = to.min(last_time);
 				}
-				_ => return Err("Missing records in archive".into())
+				_ => bail!("Missing records in archive")
 			}
 		}
 	Ok((from, to))
 }
 
-fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>, ErrorBox> {
+fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>> {
 	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
 	let in_range = |fixed_time| fixed_time >= *from && fixed_time <= *to;
 	let mut indexes = HashMap::new();
 	let first_archive = &archives.iter().next()
-		.ok_or_else(|| "No archives specified")?;
+		.with_context(|| "No archives specified")?;
 	let mut i: usize = 0;
 	let records = get_records(first_archive);
 	for x in records {
@@ -100,7 +100,7 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 	}
 	let count = indexes.len();
 	if count == 0 {
-		return Err("Unable to finda any OHLC samples matching time constraints".into());
+		bail!("Unable to finda any OHLC samples matching time constraints");
 	}
 	let delta_samples = archives.par_iter().map(|archive| {
 		let mut sum = 0.0;

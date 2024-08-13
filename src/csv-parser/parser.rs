@@ -1,19 +1,14 @@
-use std::{	
-	collections::HashSet, error::Error, fs, path::{Path, PathBuf}
-};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, collections::HashSet, fs, path::{Path, PathBuf}};
 use regex::Regex;
 use serde;
-use chrono::{
-	NaiveDate, NaiveDateTime
-};
+use chrono::{NaiveDate, NaiveDateTime};
 use chrono_tz::Tz;
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
-
-use common::*;
+use anyhow::{Result, anyhow};
 
 use crate::filter::ContractFilter;
+use common::*;
 
 type OhlcTreeMap = BTreeMap<OhlcKey, RawOhlcRecord>;
 
@@ -85,12 +80,12 @@ impl CsvParser {
 					.map_or(false, |x| filter.is_match(x)))
 	}
 
-	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime, ErrorBox>  {
+	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime>  {
 		match NaiveDateTime::parse_from_str(time_string, "%Y-%m-%d %H:%M") {
 			Ok(datetime) => Ok(datetime),
 			Err(_) => match NaiveDate::parse_from_str(time_string, "%Y-%m-%d") {
 				Ok(date) => Ok(date.and_hms_opt(0, 0, 0).unwrap()),
-				Err(_) => Err("Failed to parse datetime".into())
+				Err(_) => Err(anyhow!("Failed to parse date time"))
 			}
 		}
 	}

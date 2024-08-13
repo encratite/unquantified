@@ -1,22 +1,15 @@
 mod panama;
 
-use std::{
-	cmp::Ordering, collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr, sync::Arc
-};
+use std::{cmp::Ordering, collections::BTreeMap, fs::File, path::PathBuf, str::FromStr, sync::Arc};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use panama::PanamaChannel;
-use rkyv::{
-	Archive,
-	Deserialize,
-	Serialize
-};
+use rkyv::{Archive, Deserialize, Serialize};
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
 use lazy_static::lazy_static;
 use regex::Regex;
-
-pub type ErrorBox = Box<dyn Error>;
+use anyhow::{Context, Result, anyhow, bail};
 
 pub type OhlcArc = Arc<OhlcRecord>;
 pub type OhlcVec = Vec<OhlcArc>;
@@ -112,7 +105,7 @@ pub fn parse_globex_code(symbol: &String) -> Option<(String, String, String)> {
 	}
 }
 
-pub fn read_archive(path: &PathBuf, skip_front_contract: bool) -> Result<OhlcArchive, ErrorBox> {
+pub fn read_archive(path: &PathBuf, skip_front_contract: bool) -> Result<OhlcArchive> {
 	let file = File::open(path)?;
 	let mut buffer = Vec::<u8>::new();
 	zstd::stream::copy_decode(file, &mut buffer)?;
@@ -121,19 +114,19 @@ pub fn read_archive(path: &PathBuf, skip_front_contract: bool) -> Result<OhlcArc
 	return Ok(archive);
 }
 
-pub fn write_archive(path: &PathBuf, archive: &RawOhlcArchive) -> Result<(), ErrorBox> {
+pub fn write_archive(path: &PathBuf, archive: &RawOhlcArchive) -> Result<()> {
 	let binary_data = rkyv::to_bytes::<_, 1024>(archive)?;
 	let file = File::create(path.clone())?;
 	zstd::stream::copy_encode(binary_data.as_slice(), file, 1)?;
 	Ok(())
 }
 
-pub fn get_config(path: &str) -> Result<Ini, ErrorBox> {
+pub fn get_config(path: &str) -> Result<Ini> {
 	let mut config = Ini::new();
-	match config.load(path) {
-		Ok(_) => Ok(config),
-		Err(error) => Err(format!("Failed to read configuration file \"{}\": {}", path, error.to_string()).into())
-	}
+	config.load(path)
+		.map_err(|error| anyhow!(error))
+		.with_context(|| format!("Failed to read configuration file \"{path}\""))?;
+	Ok(config)
 }
 
 pub fn get_archive_file_name(symbol: &String) -> String {
@@ -158,7 +151,7 @@ where
 }
 
 impl RawOhlcArchive {
-	pub fn to_archive(&self, skip_front_contract: bool) -> Result<OhlcArchive, ErrorBox> {
+	pub fn to_archive(&self, skip_front_contract: bool) -> Result<OhlcArchive> {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
 		let daily = Self::get_data(&self.daily, &time_zone, skip_front_contract)?;
@@ -171,9 +164,9 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz, skip_front_contract: bool) -> Result<OhlcData, ErrorBox> {
+	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz, skip_front_contract: bool) -> Result<OhlcData> {
 		let Some(last) = records.last() else {
-			return Err("Encountered an OHLC archive without any records".into());
+			bail!("Encountered an OHLC archive without any records");
 		};
 		let is_contract = last.open_interest.is_some();
 		if is_contract {
@@ -205,7 +198,7 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec, ErrorBox> {
+	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec> {
 		if skip_front_contract && records.len() >= 2 {
 			let mut tuples: Vec<(GlobexCode, OhlcArc)> = records
 				.iter()
@@ -213,10 +206,10 @@ impl RawOhlcArchive {
 					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
 						Ok((globex_code, record.clone()))
 					} else {
-						Err("Failed to parse Globex code while filtering records".into())
+						Err(anyhow!("Failed to parse Globex code while filtering records"))
 					}
 				})
-				.collect::<Result<Vec<(GlobexCode, OhlcArc)>, ErrorBox>>()?;
+				.collect::<Result<Vec<(GlobexCode, OhlcArc)>>>()?;
 			tuples.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
 			let filtered_records: Vec<OhlcArc> = tuples
 				.iter()
@@ -229,7 +222,7 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcArc, ErrorBox> {
+	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcArc> {
 		if records.len() == 1 {
 			if let Some(first) = records.first() {
 				return Ok(first.clone());
@@ -257,13 +250,13 @@ impl RawOhlcArchive {
 		}).collect()
 	}
 
-	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec, ErrorBox> {
+	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec> {
 		map.values().map(|records| {
 			Self::get_most_popular_record(records, skip_front_contract)
 		}).collect()
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>, ErrorBox> {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>> {
 		let Some(mut panama) = PanamaChannel::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};

@@ -1,6 +1,6 @@
-use std::error::Error;
+use anyhow::{Context, Result, anyhow};
 
-use common::{parse_globex_code, ErrorBox};
+use common::parse_globex_code;
 use configparser::ini::Ini;
 
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct ContractFilter {
 }
 
 impl ContractFilter {
-	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter, ErrorBox> {
+	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter> {
 		let get_filter = |key| -> Option<Vec<String>> {
 			ini.get(root, key)
 				.map(move |x|
@@ -43,13 +43,13 @@ impl ContractFilter {
 			filter.reset();
 			Ok(filter)
 		} else {
-			Err(format!("Invalid contract filter for \"{}\"", root).into())
+			Err(anyhow!("Invalid contract filter for \"{root}\""))
 		}
 	}
 
-	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>, ErrorBox> {
+	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>> {
 		let config_map = ini.get_map()
-			.ok_or_else(|| "Unable to read configuration file")?;
+			.with_context(|| "Unable to read configuration file")?;
 		config_map.keys()
 			.filter(|x| *x != "data")
 			.map(|symbol| ContractFilter::new(symbol, &ini))

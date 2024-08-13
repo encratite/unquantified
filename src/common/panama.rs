@@ -1,9 +1,9 @@
 use std::{collections::{HashMap, HashSet, VecDeque}, sync::Arc};
-
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
+use anyhow::{Result, anyhow, bail};
 
-use crate::{ErrorBox, OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
+use crate::{OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
 
 pub struct PanamaChannel<'a> {
 	map: &'a OhlcContractMap,
@@ -15,7 +15,7 @@ pub struct PanamaChannel<'a> {
 }
 
 impl<'a> PanamaChannel<'a> {
-	pub fn new(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<PanamaChannel>, ErrorBox> {
+	pub fn new(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<PanamaChannel>> {
 		let Some(last_records) = map.values().last() else {
 			return Ok(None);
 		};
@@ -38,7 +38,7 @@ impl<'a> PanamaChannel<'a> {
 		Ok(Some(channel))
 	}
 
-	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec, ErrorBox> {
+	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec> {
 		let mut output = VecDeque::new();
 		for (time, records) in self.map.iter().rev() {
 			let next_record = self.get_next_record(time, records)?;
@@ -70,7 +70,7 @@ impl<'a> PanamaChannel<'a> {
 		expiration_map
 	}
 
-	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcArc, ErrorBox> {
+	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcArc> {
 		let new_record = RawOhlcArchive::get_most_popular_record(records, self.skip_front_contract)?;
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
@@ -79,7 +79,7 @@ impl<'a> PanamaChannel<'a> {
 		} else {
 			let Some(current_record) = records.iter().find(|x| x.symbol == self.current_contract) else {
 				let message = format!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
-				return Err(message.into());
+				bail!(message);
 			};
 			if !self.used_contracts.contains(&new_symbol) {
 				// Check if the expiration dates are compatible
@@ -104,10 +104,9 @@ impl<'a> PanamaChannel<'a> {
 		}
 	}
 
-	fn get_expiration_date(&self, symbol: &String) -> Result<&DateTime<Tz>, ErrorBox> {
-		match self.expiration_map.get(symbol) {
-			Some(time) => Ok(time),
-			None => Err(format!("Failed to determine contract expiration date of {}", symbol).into())
-		}
+	fn get_expiration_date(&self, symbol: &String) -> Result<&DateTime<Tz>> {
+		self.expiration_map
+			.get(symbol)
+			.ok_or_else(|| anyhow!("Failed to determine contract expiration date of {symbol}"))
 	}
 }

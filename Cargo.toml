@@ -5,6 +5,7 @@ edition = "2021"
 default-run = "server"
 
 [dependencies]
+anyhow = "1.0.86"
 axum = { version = "0.7.5", features = ["macros"] }
 chrono = { version = "0.4.38", features = ["rkyv-32", "serde"] }
 chrono-tz = "0.9.0"

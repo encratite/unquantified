@@ -1,20 +1,21 @@
 mod parser;
 mod filter;
 
-use std::{error::Error, path::PathBuf};
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 use chrono_tz::Tz;
+use anyhow::{Result, anyhow};
+
 use common::*;
 use filter::ContractFilter;
 use parser::CsvParser;
 
-fn main() -> Result<(), ErrorBox> {
+fn main() -> Result<()> {
 	let config = get_config("csv-parser.ini")?;
 	let section = "data";
-	let get_value = |key| -> Result<String, ErrorBox> {
+	let get_value = |key| -> Result<String> {
 		match config.get(section, key) {
 			Some(value) => Ok(value),
-			None => Err(format!("Missing value \"{}\" in configuration file", key).into())
+			None => Err(anyhow!("Missing value \"{key}\" in configuration file"))
 		}
 	};
 	let time_zone_string = get_value("time_zone")?;

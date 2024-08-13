@@ -1,8 +1,8 @@
-use std::{collections::HashMap, error::Error, fs, path::Path, sync::Arc};
-
+use std::{collections::HashMap, fs, path::Path, sync::Arc};
 use dashmap::DashMap;
 use regex::Regex;
 use serde::Deserialize;
+use anyhow::{Context, Result, bail};
 
 use common::*;
 
@@ -43,11 +43,11 @@ impl AssetManager {
 		}
 	}
 
-	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>, ErrorBox> {
+	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>> {
 		// Simple directory traversal check
 		let pattern = Regex::new("^[A-Z0-9]+$")?;
 		if !pattern.is_match(symbol) {
-			return Err("Unable to find an OHLC archive with that symbol".into());
+			bail!("Unable to find an OHLC archive with that symbol");
 		}
 		if let Some(archive_ref) = self.tickers.get(symbol) {
 			Ok(archive_ref.value().clone())
@@ -62,7 +62,7 @@ impl AssetManager {
 		}
 	}
 
-	pub fn resolve_symbols(&self, symbols: &Vec<String>) -> Result<Vec<String>, ErrorBox> {
+	pub fn resolve_symbols(&self, symbols: &Vec<String>) -> Result<Vec<String>> {
 		let all_keyword = "all";
 		if symbols.iter().any(|x| x == all_keyword) {
 			let data_directory = &self.ticker_directory;
@@ -84,9 +84,9 @@ impl AssetManager {
 		}
 	}
 
-	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>), ErrorBox> {
+	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>)> {
 		let asset = self.assets.get(symbol)
-			.ok_or_else(|| "Unable to find a matching asset definition")?;
+			.with_context(|| "Unable to find a matching asset definition")?;
 		let archive = self.get_archive(&asset.data_symbol)?;
 		Ok((asset.clone(), archive))
 	}
