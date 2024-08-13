@@ -50,14 +50,14 @@ impl AssetManager {
 			return Err("Unable to find an OHLC archive with that symbol".into());
 		}
 		if let Some(archive_ref) = self.tickers.get(symbol) {
-			Ok(Arc::clone(archive_ref.value()))
+			Ok(archive_ref.value().clone())
 		} else {
 			let file_name = get_archive_file_name(symbol);
 			let archive_path = Path::new(&self.ticker_directory).join(file_name);
 			let physical_delivery = self.physical_delivery(symbol);
 			let archive = read_archive(&archive_path, physical_delivery)?;
 			let archive_arc = Arc::new(archive);
-			self.tickers.insert(symbol.to_string(), Arc::clone(&archive_arc));
+			self.tickers.insert(symbol.to_string(), archive_arc.clone());
 			Ok(archive_arc)
 		}
 	}

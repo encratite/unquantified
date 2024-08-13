@@ -1,7 +1,7 @@
 mod panama;
 
 use std::{
-	cmp::Ordering, collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr
+	cmp::Ordering, collections::BTreeMap, error::Error, fs::File, path::PathBuf, str::FromStr, sync::Arc
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
@@ -18,9 +18,9 @@ use regex::Regex;
 
 pub type ErrorBox = Box<dyn Error>;
 
-pub type OhlcBox = Box<OhlcRecord>;
-pub type OhlcVec = Vec<OhlcBox>;
-pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcBox>;
+pub type OhlcArc = Arc<OhlcRecord>;
+pub type OhlcVec = Vec<OhlcArc>;
+pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcArc>;
 pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
 
 lazy_static! {
@@ -207,21 +207,21 @@ impl RawOhlcArchive {
 
 	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec, ErrorBox> {
 		if skip_front_contract && records.len() >= 2 {
-			let mut tuples: Vec<(GlobexCode, OhlcBox)> = records
+			let mut tuples: Vec<(GlobexCode, OhlcArc)> = records
 				.iter()
 				.map(|record| {
 					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
-						Ok((globex_code, Box::clone(record)))
+						Ok((globex_code, record.clone()))
 					} else {
 						Err("Failed to parse Globex code while filtering records".into())
 					}
 				})
-				.collect::<Result<Vec<(GlobexCode, OhlcBox)>, ErrorBox>>()?;
+				.collect::<Result<Vec<(GlobexCode, OhlcArc)>, ErrorBox>>()?;
 			tuples.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
-			let filtered_records: Vec<OhlcBox> = tuples
+			let filtered_records: Vec<OhlcArc> = tuples
 				.iter()
 				.skip(1)
-				.map(|(_, record)| Box::clone(record))
+				.map(|(_, record)| record.clone())
 				.collect();
 			Ok(filtered_records)
 		} else {
@@ -229,10 +229,10 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcBox, ErrorBox> {
+	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcArc, ErrorBox> {
 		if records.len() == 1 {
 			if let Some(first) = records.first() {
-				return Ok(Box::clone(first));
+				return Ok(first.clone());
 			}
 		}
 		let filtered_records = Self::filter_records_by_contract(records, skip_front_contract)?;
@@ -247,13 +247,13 @@ impl RawOhlcArchive {
 		} else {
 			filtered_records.iter().max_by_key(|x| x.volume)
 		};
-		Ok(Box::clone(max.unwrap()))
+		Ok(max.unwrap().clone())
 	}
 
 	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcVec {
 		records.iter().map(|x| {
 			let record = x.to_archive(&time_zone);
-			Box::new(record)
+			Arc::new(record)
 		}).collect()
 	}
 
@@ -276,7 +276,7 @@ impl RawOhlcArchive {
 		records.iter().for_each(|x| {
 			let time = x.get_time_utc(time_zone);
 			let record = x.to_archive(&time_zone);
-			let value = Box::new(record);
+			let value = Arc::new(record);
 			if let Some(records) = map.get_mut(&time) {
 				records.push(value);
 			} else {
@@ -295,7 +295,7 @@ impl RawOhlcArchive {
 		let mut map = OhlcTimeMap::new();
 		for record in source {
 			let key = record.time.to_utc();
-			let value = Box::clone(record);
+			let value = record.clone();
 			map.insert(key, value);
 		}
 		map

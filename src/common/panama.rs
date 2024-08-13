@@ -1,9 +1,9 @@
-use std::{collections::{HashMap, HashSet, VecDeque}, error::Error};
+use std::{collections::{HashMap, HashSet, VecDeque}, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
-use crate::{ErrorBox, OhlcBox, OhlcContractMap, OhlcVec, RawOhlcArchive};
+use crate::{ErrorBox, OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
 
 pub struct PanamaChannel<'a> {
 	map: &'a OhlcContractMap,
@@ -25,7 +25,7 @@ impl<'a> PanamaChannel<'a> {
 		}
 		let expiration_map = Self::get_expiration_map(map);
 		let last_record = RawOhlcArchive::get_most_popular_record(last_records, skip_front_contract)?;
-		let current_contract = last_record.symbol;
+		let current_contract = last_record.symbol.clone();
 		let used_contracts = HashSet::from_iter([current_contract.clone()]);
 		let channel = PanamaChannel {
 			map,
@@ -43,7 +43,7 @@ impl<'a> PanamaChannel<'a> {
 		for (time, records) in self.map.iter().rev() {
 			let next_record = self.get_next_record(time, records)?;
 			let adjusted_record = next_record.apply_offset(self.offset);
-			output.push_front(Box::new(adjusted_record));
+			output.push_front(Arc::new(adjusted_record));
 		}
 		let output_vec = Vec::from(output);
 		Ok(output_vec)
@@ -70,12 +70,12 @@ impl<'a> PanamaChannel<'a> {
 		expiration_map
 	}
 
-	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcBox, ErrorBox> {
+	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<OhlcArc, ErrorBox> {
 		let new_record = RawOhlcArchive::get_most_popular_record(records, self.skip_front_contract)?;
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
 			// No rollover necessary yet
-			Ok(Box::clone(&new_record))
+			Ok(new_record.clone())
 		} else {
 			let Some(current_record) = records.iter().find(|x| x.symbol == self.current_contract) else {
 				let message = format!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
@@ -91,15 +91,15 @@ impl<'a> PanamaChannel<'a> {
 					self.offset += delta;
 					self.current_contract = new_symbol.clone();
 					self.used_contracts.insert(new_symbol);
-					Ok(Box::clone(&new_record))
+					Ok(new_record.clone())
 				} else {
 					// We already switched to a contract with a more recent expiration date, ignore it
-					Ok(Box::clone(current_record))
+					Ok(current_record.clone())
 				}
 			} else {
 				// Unusual scenario, the open interest scan resulted in a previously used contract being selected again
 				// Ignore it and stick to the current contract
-				Ok(Box::clone(current_record))
+				Ok(current_record.clone())
 			}
 		}
 	}

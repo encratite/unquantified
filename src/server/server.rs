@@ -222,7 +222,7 @@ fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, rec
 
 fn get_raw_records_from_archive<'a, T>(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, records: T) -> Vec<OhlcRecordWeb>
 where
-	T: IntoIterator<Item = &'a Box<OhlcRecord>>,
+	T: IntoIterator<Item = &'a OhlcArc>,
 {
 	records
 		.into_iter()

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 
-use common::{parse_globex_code, ErrorBox, OhlcArchive, OhlcData, OhlcRecord};
+use common::{parse_globex_code, ErrorBox, OhlcArc, OhlcArchive, OhlcData, OhlcRecord};
 use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -215,7 +215,7 @@ impl Backtest {
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
 			let position = Position {
 				id: self.next_position_id,
-				symbol: current_record.symbol,
+				symbol: current_record.symbol.clone(),
 				asset: asset.clone(),
 				count,
 				side: side.clone(),
@@ -271,7 +271,7 @@ impl Backtest {
 		Ok(())
 	}
 
-	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, Box<OhlcRecord>), ErrorBox> {
+	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, OhlcArc), ErrorBox> {
 		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
 			.ok_or_else(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
@@ -290,7 +290,7 @@ impl Backtest {
 			// Fallback for pathological cases like negative crude
 			margin = asset.margin;
 		}
-		Ok((margin, Box::clone(current_record)))
+		Ok((margin, current_record.clone()))
 	}
 
 	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64), ErrorBox> {
@@ -320,17 +320,17 @@ impl Backtest {
 		}
 	}
 
-	fn get_current_record(&self, symbol: &String) -> Result<Box<OhlcRecord>, ErrorBox> {
+	fn get_current_record(&self, symbol: &String) -> Result<OhlcArc, ErrorBox> {
 		self.get_record(symbol, self.now)
 	}
 
-	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<Box<OhlcRecord>, ErrorBox> {
+	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<OhlcArc, ErrorBox> {
 		let archive = self.asset_manager.get_archive(symbol)?;
 		let error = || format!("Unable to find a record for {symbol} at {}", self.now);
 		let source = Self::get_archive_data(&archive, &self.time_frame);
 		let record = source.time_map.get(&self.now)
 			.ok_or_else(error)?;
-		Ok(Box::clone(record))
+		Ok(record.clone())
 	}
 
 	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>, ErrorBox> {

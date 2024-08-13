@@ -64,7 +64,7 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
-			let get_time = |x: &Box<OhlcRecord>| Some(x.time.fixed_offset());
+			let get_time = |x: &OhlcArc| Some(x.time.fixed_offset());
 			let records = get_records(archive);
 			let first = records
 				.first()
