@@ -4,7 +4,7 @@ use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 
-use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData};
+use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcContractMap, OhlcData};
 use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -193,11 +193,12 @@ impl Backtest {
 	}
 
 	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position> {
-		let root = Self::get_contract_root(&symbol)
+		let (root, month, year) = parse_globex_code(&symbol)
 			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
-			let (maintenance_margin_per_contract, current_record) = self.get_margin(&asset, archive.clone())?;
+			let current_record = self.get_current_record(&symbol)?;
+			let maintenance_margin_per_contract = self.get_margin(&asset, archive.clone())?;
 			let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
@@ -270,7 +271,7 @@ impl Backtest {
 		Ok(())
 	}
 
-	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<(f64, OhlcArc)> {
+	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
 		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
 			.with_context(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
@@ -289,7 +290,7 @@ impl Backtest {
 			// Fallback for pathological cases like negative crude
 			margin = asset.margin;
 		}
-		Ok((margin, current_record.clone()))
+		Ok(margin)
 	}
 
 	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64)> {
@@ -324,11 +325,36 @@ impl Backtest {
 	}
 
 	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<OhlcArc> {
-		let archive = self.asset_manager.get_archive(symbol)?;
-		let source = Self::get_archive_data(&archive, &self.time_frame);
-		let record = source.time_map.get(&self.now)
-			.with_context(|| anyhow!("Unable to find a record for {symbol} at {}", self.now))?;
-		Ok(record.clone())
+		let record;
+		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
+		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcArc> {
+			let source = Self::get_archive_data(&archive, &self.time_frame);
+			let record = source.time_map.get(&time)
+				.with_context(map_error)?
+				.clone();
+			Ok(record)
+		};
+		if let Some((root, month, year)) = parse_globex_code(&symbol) {
+			let (asset, archive) = self.asset_manager.get_asset(&root)?;
+			let data_symbol = format!("{}{month}{year}", asset.data_symbol);
+			let source = Self::get_archive_data(&archive, &self.time_frame);
+			let contract_map = source.contract_map
+				.as_ref()
+				.with_context(|| anyhow!("Archive for {symbol} lacks a contract map"))?;
+			let contracts = contract_map.get(&time)
+				.with_context(map_error)?;
+			record = contracts.iter().find(|&x| x.symbol == data_symbol)
+				.with_context(|| anyhow!("Unable to find a record for contract {data_symbol}"))?
+				.clone();
+		} else if FOREX_MAP.values().any(|x| x == symbol) {
+			// Bypass asset manager for currencies
+			let archive = self.asset_manager.get_archive(symbol)?;
+			record = get_record(archive)?;
+		} else {
+			let (_, archive) = self.asset_manager.get_asset(symbol)?;
+			record = get_record(archive)?;
+		}
+		Ok(record)
 	}
 
 	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>> {
@@ -350,13 +376,6 @@ impl Backtest {
 			.into_iter()
 			.collect();
 		Ok(time_sequence)
-	}
-
-	fn get_contract_root(symbol: &String) -> Option<String> {
-		match parse_globex_code(symbol) {
-			Some((root, _, _)) => Some(root),
-			None => None
-		}
 	}
 
 	fn get_archive_data<'a>(archive: &'a OhlcArchive, time_frame: &TimeFrame) -> &'a OhlcData {
@@ -478,7 +497,7 @@ impl Backtest {
 		for position in futures {
 			let symbol = &position.asset.data_symbol;
 			let (Ok(record_now), Ok(record_then)) = (self.get_record(symbol, now), self.get_record(symbol, then)) else {
-				bail!("Failed to roll over contract on asset {} at {now}", position.symbol);
+				bail!("Failed to perform rollover on asset {} at {now} due to missing data", position.symbol);
 			};
 			if record_now.symbol != record_then.symbol {
 				// Roll over into new contract without even checking if the position matches the old one
