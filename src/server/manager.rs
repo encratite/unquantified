@@ -16,7 +16,6 @@ pub struct Asset {
 	pub symbol: String,
 	pub name: String,
 	pub asset_type: AssetType,
-	pub data_symbol: String,
 	pub currency: String,
 	pub tick_size: f64,
 	pub tick_value: f64,
@@ -87,7 +86,7 @@ impl AssetManager {
 	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>)> {
 		let asset = self.assets.get(symbol)
 			.with_context(|| "Unable to find a matching asset definition")?;
-		let archive = self.get_archive(&asset.data_symbol)?;
+		let archive = self.get_archive(symbol)?;
 		Ok((asset.clone(), archive))
 	}
 
@@ -101,7 +100,7 @@ impl AssetManager {
 
 	fn physical_delivery(&self, symbol: &String) -> bool {
 		self.assets.values().any(|x|
-			x.data_symbol == *symbol &&
+			x.symbol == *symbol &&
 			x.asset_type == AssetType::Futures &&
 			x.physical_delivery)
 	}

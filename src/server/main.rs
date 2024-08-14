@@ -12,7 +12,7 @@ use common::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	let config = get_config("server.ini")?;
+	let config = get_ini("server.ini")?;
 	let get_string = |section, key| -> Result<String> {
 		config.get(section, key)
 			.with_context(|| anyhow!("Failed to find key \"{key}\" in section \"{section}\" in configuration file"))

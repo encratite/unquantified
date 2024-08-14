@@ -3,6 +3,8 @@ use anyhow::{Context, Result, anyhow};
 use common::parse_globex_code;
 use configparser::ini::Ini;
 
+use crate::ini_file::get_ini_sections;
+
 #[derive(Debug, Clone)]
 pub struct ContractFilter {
 	pub root: String,
@@ -48,10 +50,8 @@ impl ContractFilter {
 	}
 
 	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>> {
-		let config_map = ini.get_map()
-			.with_context(|| "Unable to read configuration file")?;
+		let config_map = get_ini_sections(ini)?;
 		config_map.keys()
-			.filter(|x| *x != "data")
 			.map(|symbol| ContractFilter::new(symbol, &ini))
 			.collect()
 	}

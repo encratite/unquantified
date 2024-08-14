@@ -121,7 +121,7 @@ pub fn write_archive(path: &PathBuf, archive: &RawOhlcArchive) -> Result<()> {
 	Ok(())
 }
 
-pub fn get_config(path: &str) -> Result<Ini> {
+pub fn get_ini(path: &str) -> Result<Ini> {
 	let mut config = Ini::new();
 	config.load(path)
 		.map_err(|error| anyhow!(error))

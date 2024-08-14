@@ -7,7 +7,7 @@ use stopwatch::Stopwatch;
 use rayon::prelude::*;
 use anyhow::{Result, anyhow};
 
-use crate::filter::ContractFilter;
+use crate::{filter::ContractFilter, symbol::SymbolMapper};
 use common::*;
 
 type OhlcTreeMap = BTreeMap<OhlcKey, RawOhlcRecord>;
@@ -35,17 +35,19 @@ pub struct CsvParser {
 	intraday_time_frame: u16,
 	input_directory: PathBuf,
 	output_directory: PathBuf,
-	filters: Vec<ContractFilter>
+	filters: Vec<ContractFilter>,
+	symbol_mapper: SymbolMapper
 }
 
 impl CsvParser {
-	pub fn new(time_zone: Tz, intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>) -> CsvParser {
+	pub fn new(time_zone: Tz, intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>, symbol_mapper: SymbolMapper) -> CsvParser {
 		CsvParser {
 			time_zone,
 			intraday_time_frame,
 			input_directory,
 			output_directory,
-			filters
+			filters,
+			symbol_mapper
 		}
 	}
 
@@ -189,7 +191,7 @@ impl CsvParser {
 		let Ok(time) = Self::parse_date_time(record.time.as_str()) else {
 			return;
 		};
-		let symbol = record.symbol.to_string();
+		let symbol = self.symbol_mapper.translate(&record.symbol);
 		let key = OhlcKey {
 			symbol: symbol.clone(),
 			time: time
@@ -209,7 +211,8 @@ impl CsvParser {
 
 	fn get_archive_path(&self, time_frame_directory: &PathBuf) -> PathBuf {
 		let symbol = Self::get_last_token(time_frame_directory);
-		let file_name = get_archive_file_name(&symbol);
+		let exchange_symbol = self.symbol_mapper.translate(&symbol);
+		let file_name = get_archive_file_name(&exchange_symbol);
 		return Path::new(&self.output_directory).join(file_name);
 	}
 }

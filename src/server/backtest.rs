@@ -4,7 +4,7 @@ use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 
-use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcContractMap, OhlcData};
+use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData};
 use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -192,8 +192,8 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_position(&mut self, symbol: String, count: u32, side: PositionSide) -> Result<Position> {
-		let (root, month, year) = parse_globex_code(&symbol)
+	pub fn open_position(&mut self, symbol: &String, count: u32, side: PositionSide) -> Result<Position> {
+		let (root, _, _) = parse_globex_code(&symbol)
 			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
@@ -276,7 +276,7 @@ impl Backtest {
 			.with_context(|| "Date conversion failed")?;
 		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
 		let current_record = archive.daily.time_map.get(&date_utc)
-			.with_context(|| anyhow!("Unable to find current record for symbol {} at {date}", asset.data_symbol))?;
+			.with_context(|| anyhow!("Unable to find current record for symbol {} at {date}", asset.symbol))?;
 		let last_record = archive.daily.unadjusted.last()
 			.with_context(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
@@ -334,17 +334,16 @@ impl Backtest {
 				.clone();
 			Ok(record)
 		};
-		if let Some((root, month, year)) = parse_globex_code(&symbol) {
-			let (asset, archive) = self.asset_manager.get_asset(&root)?;
-			let data_symbol = format!("{}{month}{year}", asset.data_symbol);
+		if let Some((root, _, _)) = parse_globex_code(&symbol) {
+			let (_, archive) = self.asset_manager.get_asset(&root)?;
 			let source = Self::get_archive_data(&archive, &self.time_frame);
 			let contract_map = source.contract_map
 				.as_ref()
 				.with_context(|| anyhow!("Archive for {symbol} lacks a contract map"))?;
 			let contracts = contract_map.get(&time)
 				.with_context(map_error)?;
-			record = contracts.iter().find(|&x| x.symbol == data_symbol)
-				.with_context(|| anyhow!("Unable to find a record for contract {data_symbol}"))?
+			record = contracts.iter().find(|&x| x.symbol == *symbol)
+				.with_context(|| anyhow!("Unable to find a record for contract {symbol}"))?
 				.clone();
 		} else if FOREX_MAP.values().any(|x| x == symbol) {
 			// Bypass asset manager for currencies
@@ -495,7 +494,7 @@ impl Backtest {
 			.iter()
 			.filter(|position| position.asset.asset_type == AssetType::Futures);
 		for position in futures {
-			let symbol = &position.asset.data_symbol;
+			let symbol = &position.asset.symbol;
 			let (Ok(record_now), Ok(record_then)) = (self.get_record(symbol, now), self.get_record(symbol, then)) else {
 				bail!("Failed to perform rollover on asset {} at {now} due to missing data", position.symbol);
 			};
@@ -505,22 +504,9 @@ impl Backtest {
 				self.enable_fees = false;
 				self.close_position(position.id, position.count)?;
 				self.enable_fees = true;
-				let new_symbol = Self::get_contract_name(&position.symbol, &record_now.symbol)?;
-				self.open_position(new_symbol, position.count, position.side.clone())?;
+				self.open_position(&record_now.symbol, position.count, position.side.clone())?;
 			}
 		}
 		Ok(())
-	}
-
-	fn parse_globex_code(symbol: &String) -> Result<(String, String, String)> {
-		parse_globex_code(symbol)
-			.with_context(|| "Invalid Globex code")
-	}
-
-	fn get_contract_name(root_symbol: &String, data_symbol: &String) -> Result<String> {
-		let (root, _, _) = Self::parse_globex_code(root_symbol)?;
-		let (_, month, year) = Self::parse_globex_code(data_symbol)?;
-		let new_symbol = format!("{root}{month}{year}");
-		Ok(new_symbol)
 	}
 }
