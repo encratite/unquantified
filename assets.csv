@@ -1,30 +1,39 @@
 symbol,name,asset_type,data_symbol,currency,tick_size,tick_value,margin,overnight_margin,broker_fee,exchange_fee,physical_delivery
 ES,S&P 500 E-Mini,Future,ES,USD,0.25,12.50,11331.10,true,0.85,1.40,false
-MES,Micro S&P 500 E-Mini,Future,ES,USD,0.25,1.25,1133.11,true,0.25,0.37,false
+MES,Micro S&P 500 E-Mini,Future,ET,USD,0.25,1.25,1133.11,true,0.25,0.37,false
 NQ,Nasdaq 100 E-Mini,Future,NQ,USD,0.25,0.5,21674.50,true,0.85,1.40,false
-MNQ,Micro Nasdaq 100 E-Mini,Future,NQ,USD,0.25,0.5,2167.45,true,0.25,0.37,false
-MYM,E-Mini Dow Jones Industrial Average,Future,YM,USD,1.0,0.5,703.36,true,0.25,0.37,false
-M2K,Russell 2000 E-Mini,Future,QR,USD,0.1,0.5,527.726,true,0.25,0.37,false
+MNQ,Micro Nasdaq 100 E-Mini,Future,NM,USD,0.25,0.5,2167.45,true,0.25,0.37,false
+YM,E-Mini Dow Jones Industrial Average,Future,YM,USD,1.0,5.0,7033.60,true,0.85,1.40,false
+MYM,Micro E-Mini Dow Jones Industrial Average,Future,YR,USD,1.0,0.5,703.36,true,0.25,0.37,false
+RTY,Russell 2000 E-Mini,Future,QR,USD,0.1,5.0,5277.26,true,0.85,1.40,false
+M2K,Micro Russell 2000 E-Mini,Future,RX,USD,0.1,0.5,527.726,true,0.25,0.37,false
 ENY,E-Mini Nikkei 225,Future,MC,JPY,10,1000,182070.32,true,0.25,2.17,false
 FDXM,Mini-DAX,Future,DY,EUR,1.0,5.0,4723.66,true,0.85,0.27,false
-FDXS,Micro-DAX,Future,DY,EUR,1.0,1.0,944.731,true,0.85,0.27,false
+FDXS,Micro-DAX,Future,JM,EUR,1.0,1.0,944.731,true,0.85,0.26,false
 6E,Euro FX,Future,E6,USD,0.000050,6.25,2730.51,false,0.50,0.26,false
-M6E,Micro Euro FX,Future,E6,USD,0.0001,1.25,273.051,false,0.15,0.26,false
+M6E,Micro EUR/USD,Future,MF,USD,0.0001,1.25,273.051,false,0.15,0.26,false
 6J,Japanese Yen,Future,J6,USD,0.0000005,6.25,2901.75,false,0.50,0.26,false
 6B,British Pound,Future,B6,USD,0.0001,6.25,1911.86,false,0.50,0.26,false
 6S,Swiss Francs,Future,S6,USD,0.0001,12.5,4284.56,false,0.50,0.26,false
-MSF,Micro Swiss Francs,Future,S6,USD,0.0001,1.25,428.469,false,0.15,0.26,false
-MGC,Micro Gold,Future,GC,USD,0.1,1.0,1345.51,false,0.25,0.52,false
-SIL,Silver,Future,SI,USD,0.005,5.0,3496.875,false,0.25,1.02,true
-MHG,Micro High Grade Copper,Future,HG,USD,0.0005,1.25,890.77,false,0.85,0.52,true
+MSF,Micro CHF/USD,Future,WN,USD,0.0001,1.25,428.469,false,0.15,0.26,false
+GC,Gold,Future,GC,USD,0.1,10.0,13455.10,false,0.85,1.62,false
+MGC,Micro Gold,Future,GR,USD,0.1,1.0,1345.51,false,0.25,0.52,false
+SI,Silver,Future,SI,USD,0.005,25.0,17484.375,false,0.85,1.02,true
+SIL,Micro Silver,Future,SO,USD,0.005,5.0,3496.875,false,0.25,1.02,true
+HG,High Grade Copper,Future,HG,USD,0.0005,12.5,8907.70,false,0.85,1.62,true
+MHG,Micro Copper,Future,QL,USD,0.0005,1.25,890.77,false,0.85,0.52,true
 PL,Platinum,Future,PL,USD,0.1,5.0,4317.82,false,0.85,1.62,true
-MCL,Micro WTI Crude Oil,Future,CL,USD,0.01,1.0,1300,false,0.25,0.52,true
+CL,Crude Oil,Future,CL,USD,0.01,10.0,13000,false,0.85,1.52,true
+MCL,Micro WTI Crude Oil,Future,CY,USD,0.01,1.0,1300,false,0.25,0.52,true
 NG,Natural Gas,Future,NG,USD,0.001,10,4721.64,false,0.85,1.62,true
-MNG,Micro Natural Gas,Future,NG,USD,0.00025,0.25,472.164,false,0.25,0.52,true
+MNG,Micro Natural Gas,Future,CN,USD,0.00025,0.25,472.164,false,0.25,0.52,true
 ZS,Soybean,Future,ZS,USD,0.25,12.50,3464.88,false,0.85,2.12,true
+XK,Mini Soybean,Future,XK,USD,0.25,1.25,346.488,false,0.85,1.05,true
 ZL,Soybean Oil,Future,ZL,USD,0.01,6.0,2401.78,false,0.85,2.12,true
 ZM,Soybean Meal,Future,ZM,USD,0.1,10,3122.16,false,0.85,2.12,true
 ZW,Wheat,Future,ZW,USD,0.25,12.50,2800.52,false,0.85,2.12,true
+XW,Mini-sized Chicago SRW Wheat,Future,XW,USD,0.25,1.25,280.052,false,0.85,2.12,true
+XC,Mini-Corn,Future,XN,USD,0.25,1.25,360.935,false,0.85,2.12,true
 CT,Cotton No. 2,Future,CT,USD,0.01,5.0,2808.57,false,0.85,2.12,true
 SB,Sugar No. 11,Future,SB,USD,0.01,11.20,1685.32,false,0.85,2.12,true
 HE,Lean Hogs,Future,HE,USD,0.025,10.0,3113.52,false,0.85,2.12,true
@@ -34,7 +43,7 @@ ZN,10-Year T-Note,Future,ZN,USD,0.03125,15.625,2692.04,false,0.85,0.82,false
 ZF,5-Year T-Note,Future,ZF,USD,0.03125,7.8125,1807.61,false,0.85,0.67,false
 ZT,2-Year T-Note,Future,ZT,USD,0.00390625,7.8125,1172.43,false,0.85,0.67,false
 ZQ,30-Day Fed Funds Rate,Future,ZQ,USD,0.0025,10.4175,409.356,false,0.85,0.98,false
-MBT,Micro Bitcoin,Future,BT,USD,5,0.5,2773.81,false,2.25,2.52,false
-MET,Micro Ether,Future,ER,USD,0.5,0.05,189.508,false,0.20,0.22,false
-VXM,Mini S&P 500 VIX,Future,VI,USD,0.05,50.00,857.22,false,0.25,0.22,false
+MBT,Micro Bitcoin,Future,BA,USD,5,0.5,2773.81,false,2.25,2.52,false
+MET,Micro Ether,Future,TA,USD,0.5,0.05,189.508,false,0.20,0.22,false
+VXM,Mini S&P 500 VIX,Future,VJ,USD,0.05,50.00,857.22,false,0.25,0.22,false
 V2TX,VSTOXX,Future,DV,EUR,0.05,5.0,825,false,0.85,0.22,false
