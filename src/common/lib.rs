@@ -235,10 +235,22 @@ impl RawOhlcArchive {
 			.collect();
 		let open_interest_available = open_interest.len() == filtered_records.len();
 		let non_zero_open_interest = open_interest.iter().all(|x| *x > 0);
+		let non_zero_volume = filtered_records
+			.iter()
+			.any(|x| x.volume > 0);
 		let max = if open_interest_available && non_zero_open_interest {
-			filtered_records.iter().max_by_key(|x| x.open_interest.unwrap())
+			filtered_records
+				.iter()
+				.max_by_key(|x| x.open_interest.unwrap())
+		} else if non_zero_volume {
+			filtered_records
+				.iter()
+				.max_by_key(|x| x.volume)
 		} else {
-			filtered_records.iter().max_by_key(|x| x.volume)
+			// Fallback for really old records from around 2000
+			filtered_records
+				.iter()
+				.min_by_key(|x| GlobexCode::new(&x.symbol).unwrap())
 		};
 		Ok(max.unwrap().clone())
 	}
