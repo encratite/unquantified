@@ -17,7 +17,7 @@ pub struct ContractFilter {
 }
 
 impl ContractFilter {
-	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter> {
+	pub fn new(root: &String, ini: &Ini) -> Option<ContractFilter> {
 		let get_filter = |key| -> Option<Vec<String>> {
 			ini.get(root, key)
 				.map(move |x|
@@ -43,17 +43,18 @@ impl ContractFilter {
 				previous_symbol: None
 			};
 			filter.reset();
-			Ok(filter)
+			Some(filter)
 		} else {
-			Err(anyhow!("Invalid contract filter for \"{root}\""))
+			None
 		}
 	}
 
 	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>> {
 		let config_map = get_ini_sections(ini)?;
-		config_map.keys()
-			.map(|symbol| ContractFilter::new(symbol, &ini))
-			.collect()
+		let filters = config_map.keys()
+			.filter_map(|symbol| ContractFilter::new(symbol, &ini))
+			.collect();
+		Ok(filters)
 	}
 
 	pub fn is_included(&mut self, symbol: &String) -> bool {

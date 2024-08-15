@@ -16,7 +16,7 @@ impl SymbolMapper {
 		let config_map = get_ini_sections(ini)?;
 		for (data_symbol, map) in config_map {
 			if let Some(Some(exchange_symbol)) = map.get("exchange_symbol") {
-				symbols.insert(data_symbol, exchange_symbol.clone());
+				symbols.insert(data_symbol.to_uppercase(), exchange_symbol.clone());
 			}
 		}
 		let mapper = SymbolMapper {
