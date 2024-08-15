@@ -19,6 +19,8 @@ export class WebUi {
 		this.editor = null;
 		this.editorContainer = null;
 		this.engine = null;
+		this.history = [];
+		this.historyIndex = null;
 	}
 
 	async initialize() {
@@ -277,6 +279,7 @@ export class WebUi {
 		const container = document.createElement("div");
 		container.className = "editor";
 		container.onkeydown = this.onEditorKeyDown.bind(this);
+		container.onkeyup = this.onEditorKeyUp.bind(this);
 		this.append(container);
 		const editor = ace.edit(container);
 		editor.setOptions({
@@ -303,10 +306,11 @@ export class WebUi {
 		editor.navigateFileEnd();
 		this.editor = editor;
 		this.editorContainer = container;
+		this.enableHistory = true;
 	}
 
 	async onEditorKeyDown(event) {
-		if (event.key === "Enter" && event.shiftKey) {
+		if (event.key === "Enter" && !event.shiftKey) {
 			event.preventDefault();
 			const script = this.editor.getValue();	
 			this.enableEditor(false);
@@ -314,6 +318,7 @@ export class WebUi {
 				await this.engine.run(script);
 				const data = this.getLocalStorageData();
 				data.lastScript = script;
+				this.history.push(script);
 				data.variables = this.engine.serializeVariables();
 				this.setLocalStorageData(data);
 				this.disableHighlight();
@@ -326,6 +331,39 @@ export class WebUi {
 				this.enableEditor(true);
 			}
 		}
+	}
+
+	onEditorKeyUp(event) {
+		const arrowUp = event.key === "ArrowUp";
+		const arrowDown = event.key === "ArrowDown";
+		const historyLast = this.history.length - 1;
+		const incrementIndex = direction => {
+			this.historyIndex += direction;
+			this.historyIndex = Math.max(this.historyIndex, 0);
+			this.historyIndex = Math.min(this.historyIndex, historyLast);
+		};
+		if (this.enableHistory && arrowUp) {
+			if (this.historyIndex === null) {
+				this.historyIndex = historyLast;
+			}
+			else {
+				incrementIndex(-1);
+			}
+			this.showHistory(event);
+		}
+		else if (this.enableHistory && arrowDown && this.historyIndex !== null) {
+			incrementIndex(1);
+			this.showHistory(event);
+		}
+		else if (event.key !== "Enter") {
+			this.enableHistory = false;
+		}
+	}
+
+	showHistory(event) {
+		const history = this.history[this.historyIndex];
+		this.editor.setValue(history, 1);
+		event.preventDefault();
 	}
 
 	getLocalStorageData() {
