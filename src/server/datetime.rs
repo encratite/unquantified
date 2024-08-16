@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 
 use common::OhlcArchive;
 
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 enum OffsetUnit {
 	#[serde(rename = "m")]
 	Minutes,
@@ -22,7 +22,7 @@ enum OffsetUnit {
 	Years
 }
 
-#[derive(Deserialize, PartialEq, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 enum SpecialDateTime {
 	First,
@@ -30,7 +30,7 @@ enum SpecialDateTime {
 	Now
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelativeDateTime {
 	date: Option<DateTime<FixedOffset>>,
@@ -50,9 +50,9 @@ pub struct RelativeDateTime {
 	/*
 	This optional member is used for the special keywords in the Unquantified prompt language:
 	- "first": Evaluates to the first point in time at which data is available for the specified symbol.
-	  If it is being used with multiple symbols, the minmum point in time out of all of them is used.
+	  If it is being used with multiple symbols, the minimum point in time out of all of them is used.
 	  This keyword may only be used for the "from" parameter.
-	- "last": Evaluates to the last point in time at wich data is available. With multiple symbols, the maximum is used.
+	- "last": Evaluates to the last point in time at which data is available. With multiple symbols, the maximum is used.
 	  This keyword may only be used for the "to" parameter.
 	- "now": Evaluates to the current point in time.
 	  This keyword may only be used for the "to" parameter.

@@ -18,7 +18,7 @@ struct ServerState {
 	backtest_configuration: BacktestConfiguration
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetHistoryRequest {
 	symbols: Vec<String>,
@@ -28,26 +28,26 @@ struct GetHistoryRequest {
 	time_frame: u16
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct GetHistoryResponse {
 	tickers: Option<HashMap<String, Vec<OhlcRecordWeb>>>,
 	error: Option<String>
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct GetCorrelationRequest {
 	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct GetCorrelationResponse {
 	correlation: Option<CorrelationData>,
 	error: Option<String>
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OhlcRecordWeb {
 	pub symbol: String,

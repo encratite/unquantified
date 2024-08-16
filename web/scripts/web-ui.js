@@ -357,6 +357,7 @@ export class WebUi {
 		}
 		else if (event.key !== "Enter") {
 			this.enableHistory = false;
+			this.historyIndex = null;
 		}
 	}
 

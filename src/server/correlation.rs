@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 
 use common::*;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CorrelationData {
 	pub symbols: Vec<String>,
 	pub from: DateTime<FixedOffset>,
