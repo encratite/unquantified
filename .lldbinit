@@ -1,0 +1,5 @@
+command script import lldb.py
+
+type summary add -F lldb.DateTime_summary chrono::datetime::DateTime<chrono::offset::utc::Utc>
+type summary add -F lldb.DateTime_summary chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>
+type summary add -F lldb.DateTime_summary chrono::datetime::DateTime<chrono_tz::timezones::Tz>
