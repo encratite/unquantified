@@ -4,7 +4,7 @@ use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 
-use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData};
+use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData, TimeFrame};
 use strum_macros::Display;
 
 use crate::manager::{Asset, AssetManager, AssetType};
@@ -30,12 +30,6 @@ pub enum PositionSide {
 	Long,
 	#[strum(serialize = "short")]
 	Short
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TimeFrame {
-	Daily,
-	Intraday
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,7 +322,7 @@ impl Backtest {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
 		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcArc> {
-			let source = Self::get_archive_data(&archive, &self.time_frame);
+			let source = archive.get_data(&self.time_frame);
 			let record = source.time_map.get(&time)
 				.with_context(map_error)?
 				.clone();
@@ -336,7 +330,7 @@ impl Backtest {
 		};
 		if let Some((root, _, _)) = parse_globex_code(&symbol) {
 			let (_, archive) = self.asset_manager.get_asset(&root)?;
-			let source = Self::get_archive_data(&archive, &self.time_frame);
+			let source = archive.get_data(&self.time_frame);
 			let contract_map = source.contract_map
 				.as_ref()
 				.with_context(|| anyhow!("Archive for {symbol} lacks a contract map"))?;
@@ -362,7 +356,7 @@ impl Backtest {
 		let time_reference_symbol = "ES".to_string();
 		let time_reference = asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
-		let source = Self::get_archive_data(&time_reference, time_frame);
+		let source = time_reference.get_data(time_frame);
 		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = Box::new(source.time_map.keys());
 		let time_keys_in_range = time_keys
 			.filter(|&&x|
@@ -375,14 +369,6 @@ impl Backtest {
 			.into_iter()
 			.collect();
 		Ok(time_sequence)
-	}
-
-	fn get_archive_data<'a>(archive: &'a OhlcArchive, time_frame: &TimeFrame) -> &'a OhlcData {
-		if *time_frame == TimeFrame::Daily {
-			&archive.daily
-		} else {
-			&archive.intraday
-		}
 	}
 
 	fn get_account_value(&self) -> f64 {

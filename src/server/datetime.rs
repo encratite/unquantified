@@ -4,7 +4,7 @@ use chrono_tz::Tz;
 use serde::Deserialize;
 use anyhow::{Result, anyhow};
 
-use common::OhlcArchive;
+use common::{OhlcArchive, TimeFrame};
 
 #[derive(Debug, Deserialize, Clone)]
 enum OffsetUnit {
@@ -61,28 +61,28 @@ pub struct RelativeDateTime {
 }
 
 impl RelativeDateTime {
-	pub fn resolve(&self, other: &RelativeDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+	pub fn resolve(&self, other: &RelativeDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
 		match (self.date.is_some(), self.offset.is_some(), self.offset_unit.is_some(), self.special_keyword.is_some()) {
 			(true, false, false, false) => Ok(self.date.unwrap()),
 			(false, true, true, false) => {
-				let other_time = other.to_fixed(archives)?;
+				let other_time = other.to_fixed(time_frame, archives)?;
 				let offset_time = get_offset_date_time(&other_time, self.offset.unwrap(), self.offset_unit.clone().unwrap())
 					.expect("Invalid offset calculation".into());
 				Ok(offset_time)
 			},
 			(false, false, false, true) => {
-				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), archives)?;
+				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), time_frame, archives)?;
 				Ok(special_time)
 			},
 			_ => Err(anyhow!("Invalid relative date time"))
 		}
 	}
 
-	fn to_fixed(&self, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+	fn to_fixed(&self, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
 		match (self.date.is_some(), self.special_keyword.is_some()) {
 			(true, false) => Ok(self.date.unwrap()),
 			(false, true) => {
-				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), archives)?;
+				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), time_frame, archives)?;
 				Ok(special_time)
 			},
 			_ => Err(anyhow!("Invalid combination of relative date time parameters"))
@@ -96,8 +96,8 @@ pub fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
 		.unwrap()
 }
 
-fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>> {
-	let mut time_values = archive.intraday
+fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>> {
+	let mut time_values = archive.get_data(time_frame)
 		.unadjusted
 		.iter()
 		.map(|x| x.time);
@@ -112,7 +112,7 @@ fn resolve_first_last(is_first: bool, archive: &Arc<OhlcArchive>) -> Result<Date
 	}
 }
 
-fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
 	if special_keyword == SpecialDateTime::Now {
 		let now: DateTime<Local> = Local::now();
 		let now_with_timezone: DateTime<FixedOffset> = now.with_timezone(now.offset());
@@ -121,7 +121,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, archives: &Vec<Arc<OhlcArch
 		let is_first = special_keyword == SpecialDateTime::First;
 		let times = archives
 			.iter()
-			.map(|x| resolve_first_last(is_first, x))
+			.map(|x| resolve_first_last(is_first, time_frame, x))
 			.collect::<Result<Vec<DateTime<FixedOffset>>>>()?;
 		let time = if is_first {
 			times.iter().min()

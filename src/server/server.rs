@@ -13,6 +13,8 @@ use crate::correlation::*;
 use crate::datetime::*;
 use crate::manager::AssetManager;
 
+const SECONDS_PER_DAY: u16 = 1440;
+
 struct ServerState {
 	asset_manager: AssetManager,
 	backtest_configuration: BacktestConfiguration
@@ -128,10 +130,15 @@ async fn get_correlation(
 }
 
 fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
+	let time_frame = if request.time_frame >= SECONDS_PER_DAY {
+		TimeFrame::Daily
+	} else {
+		TimeFrame::Intraday
+	};
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
-	let from_resolved = request.from.resolve(&request.to, &archives)?;
-	let to_resolved = request.to.resolve(&request.from, &archives)?;
+	let from_resolved = request.from.resolve(&request.to, &time_frame, &archives)?;
+	let to_resolved = request.to.resolve(&request.from, &time_frame, &archives)?;
 	let result: Result<Vec<Vec<OhlcRecordWeb>>> = archives
 		.iter()
 		.map(|archive| get_ohlc_records(&from_resolved, &to_resolved, request.time_frame, archive))
@@ -155,13 +162,14 @@ fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> R
 fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
-	let from = request.from.resolve(&request.to, &archives)?;
-	let to = request.to.resolve(&request.from, &archives)?;
+	let time_frame = TimeFrame::Daily;
+	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
+	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
 	get_correlation_matrix(resolved_symbols, from, to, archives)
 }
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
-	if time_frame >= 1440 {
+	if time_frame >= SECONDS_PER_DAY {
 		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
 	} else if time_frame == archive.intraday_time_frame {
 		return Ok(get_raw_records_from_archive(from, to, &archive.intraday.unadjusted));

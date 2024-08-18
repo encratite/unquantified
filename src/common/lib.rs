@@ -20,6 +20,12 @@ lazy_static! {
 	static ref GLOBEX_REGEX: Regex = Regex::new("^([A-Z0-9]{2,})([FGHJKMNQUVXZ])([0-9]{2})$").unwrap();
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TimeFrame {
+	Daily,
+	Intraday
+}
+
 #[derive(Debug, Archive, Serialize, Deserialize)]
 pub struct RawOhlcArchive {
 	pub daily: Vec<RawOhlcRecord>,
@@ -345,6 +351,17 @@ impl OhlcRecord {
 			volume: self.volume,
 			open_interest: self.open_interest
 		}
+	}
+}
+
+impl OhlcArchive {
+	pub fn get_data(&self, time_frame: &TimeFrame) -> &OhlcData {
+		if *time_frame == TimeFrame::Daily {
+			&self.daily
+		} else {
+			&self.intraday
+		}
+
 	}
 }
 
