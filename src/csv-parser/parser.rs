@@ -167,7 +167,10 @@ impl CsvParser {
 						return;
 					}
 				}
-				self.add_ohlc_record(&record, &mut ohlc_map);
+				if record.volume > 0 {
+					// Remove records without any volume because the records are either too old or insignificant
+					self.add_ohlc_record(&record, &mut ohlc_map);
+				}
 			});
 			if let Some(filter) = current_filter.as_mut() {
 				filter.reset();

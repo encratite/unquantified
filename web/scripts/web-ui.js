@@ -328,6 +328,7 @@ export class WebUi {
 			}
 			catch (error) {
 				toastr.error(error, "Script Error");
+				console.error(error);
 				this.enableEditor(true);
 			}
 		}

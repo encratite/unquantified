@@ -249,11 +249,12 @@ impl RawOhlcArchive {
 				.iter()
 				.max_by_key(|x| x.open_interest.unwrap())
 		} else if non_zero_volume {
+			// This filter is no longer necessary because csv-parser filters for volume > 0
 			filtered_records
 				.iter()
 				.max_by_key(|x| x.volume)
 		} else {
-			// Fallback for really old records from around 2000
+			// Fallback for old records from around 2000
 			filtered_records
 				.iter()
 				.min_by_key(|x| GlobexCode::new(&x.symbol).unwrap())

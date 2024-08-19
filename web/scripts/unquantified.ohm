@@ -2,7 +2,7 @@ Unquantified {
 	Program = Statement*
 	Statement = (Assignment | Call) (eol | end)
 	Assignment = variable "=" (Value | Parameters)
-	Value = variable | dateTime | date | offset | timeFrame | numeric | symbol | keyword | string | SymbolArray | Parameters
+	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | string | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
 	Parameter = identifier ":" numeric ("to" numeric ("step" numeric)?)?
 	Call = identifier Value ("," Value)*
@@ -16,7 +16,7 @@ Unquantified {
 	dateTime = date space+ digit digit ":" digit digit (":" digit digit)?
 	offset = ("+" | "-") nonZeroDigit digit* ("mo" | "m" | "h" | "d" | "w" | "y")
 	timeFrame = nonZeroDigit digit* ("m" | "h")
-	symbol = upper (upper | digit)+
+	symbol = (upper | nonZeroDigit) (upper | nonZeroDigit)+
 	stringDelimiter = "\""
 	string = stringDelimiter (~stringDelimiter any)* stringDelimiter
 	keyword = "true" | "false" | "first" | "last" | "now" | "daily" | "all"
