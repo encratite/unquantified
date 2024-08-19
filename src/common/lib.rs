@@ -67,7 +67,7 @@ Currency pair:
 Futures:
 - Both "unadjusted"/"adjusted" contains a continuous contract with new records generated from multiple overlapping contracts
 - In the case of "unadjusted" it is the original values with automatic roll-overs based on volume and open interest
-- "adjusted" features new records generated using the Panama channel method for use with indicators, same roll-over criteria
+- "adjusted" features new records generated using the Panama Canal method for use with indicators, same roll-over criteria
 - "time_map" maps timestamps to continuous contract data in "adjusted"
 - Each vector in "contract_map" contains the full set of active contracts for that particular point in time
  */

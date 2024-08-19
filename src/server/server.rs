@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 
 use common::*;
 use crate::backtest::BacktestConfiguration;
@@ -170,9 +170,9 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
 	if time_frame >= SECONDS_PER_DAY {
-		return Ok(get_raw_records_from_archive(from, to, &archive.daily.unadjusted));
+		return Ok(get_raw_records_from_archive(from, to, archive.daily.get_adjusted_fallback()));
 	} else if time_frame == archive.intraday_time_frame {
-		return Ok(get_raw_records_from_archive(from, to, &archive.intraday.unadjusted));
+		return Ok(get_raw_records_from_archive(from, to, archive.intraday.get_adjusted_fallback()));
 	} else if time_frame < archive.intraday_time_frame {
 		return Err(anyhow!("Requested time frame too small for intraday data in archive"));
 	} else if time_frame % archive.intraday_time_frame != 0 {
@@ -180,43 +180,47 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		return Err(anyhow!(message));
 	}
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
-	archive.intraday.unadjusted
+	archive.intraday
+		.get_adjusted_fallback()
 		.iter()
 		.filter(|x| matches_from_to(from, to, x))
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
-		.map(|x| -> Result<OhlcRecordWeb> {
-			let first = x.first().unwrap();
-			let last = x.last().unwrap();
-			let symbol = first.symbol.clone();
-			let time = first.time.to_rfc3339();
-			let open = first.open;
-			let high = x
-				.iter()
-				.max_by(|x, y| x.high.partial_cmp(&y.high).unwrap())
-				.unwrap()
-				.high;
-			let low = x
-				.iter()
-				.min_by(|x, y| x.low.partial_cmp(&y.low).unwrap())
-				.unwrap()
-				.low;
-			let close = last.close;
-			let volume = x.iter().map(|x| x.volume).sum();
-			let open_interest = x.iter().map(|x| x.open_interest).sum();
-			Ok(OhlcRecordWeb {
-				symbol,
-				time,
-				open,
-				high,
-				low,
-				close,
-				volume,
-				open_interest
-			})
-		})
+		.map(get_ohlc_record)
 		.collect()
+}
+
+fn get_ohlc_record(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
+	let first = data.first().unwrap();
+	let last = data.last().unwrap();
+	let symbol = first.symbol.clone();
+	let time = first.time.to_rfc3339();
+	let open = first.open;
+	let high = data
+		.iter()
+		.max_by(|x, y| x.high.partial_cmp(&y.high).unwrap())
+		.unwrap()
+		.high;
+	let low = data
+		.iter()
+		.min_by(|x, y| x.low.partial_cmp(&y.low).unwrap())
+		.unwrap()
+		.low;
+	let close = last.close;
+	let volume = data.iter().map(|x| x.volume).sum();
+	let open_interest = data.iter().map(|x| x.open_interest).sum();
+	let record = OhlcRecordWeb {
+		symbol,
+		time,
+		open,
+		high,
+		low,
+		close,
+		volume,
+		open_interest
+	};
+	Ok(record)
 }
 
 fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, record: &OhlcRecord) -> bool {
@@ -230,6 +234,6 @@ where
 	records
 		.into_iter()
 		.filter(|x| matches_from_to(from, to, x))
-		.map(|x| OhlcRecordWeb::new(&**x))  // Dereference twice to get the OhlcRecord
+		.map(|x| OhlcRecordWeb::new(&**x))
 		.collect()
 }
