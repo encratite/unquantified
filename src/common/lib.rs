@@ -3,7 +3,7 @@ mod panama;
 use std::{cmp::Ordering, collections::BTreeMap, fs::File, path::PathBuf, str::FromStr, sync::Arc};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
-use panama::PanamaChannel;
+use panama::PanamaCanal;
 use rkyv::{Archive, Deserialize, Serialize};
 use configparser::ini::Ini;
 use serde::de::DeserializeOwned;
@@ -249,7 +249,6 @@ impl RawOhlcArchive {
 				.iter()
 				.max_by_key(|x| x.open_interest.unwrap())
 		} else if non_zero_volume {
-			// This filter is no longer necessary because csv-parser filters for volume > 0
 			filtered_records
 				.iter()
 				.max_by_key(|x| x.volume)
@@ -276,7 +275,7 @@ impl RawOhlcArchive {
 	}
 
 	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>> {
-		let Some(mut panama) = PanamaChannel::new(map, skip_front_contract)? else {
+		let Some(mut panama) = PanamaCanal::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};
 		let adjusted = panama.get_adjusted_data()?;

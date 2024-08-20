@@ -13,7 +13,7 @@ use crate::correlation::*;
 use crate::datetime::*;
 use crate::manager::AssetManager;
 
-const SECONDS_PER_DAY: u16 = 1440;
+const MINUTES_PER_DAY: u16 = 1440;
 
 struct ServerState {
 	asset_manager: AssetManager,
@@ -130,7 +130,7 @@ async fn get_correlation(
 }
 
 fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
-	let time_frame = if request.time_frame >= SECONDS_PER_DAY {
+	let time_frame = if request.time_frame >= MINUTES_PER_DAY {
 		TimeFrame::Daily
 	} else {
 		TimeFrame::Intraday
@@ -169,7 +169,7 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 }
 
 fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
-	if time_frame >= SECONDS_PER_DAY {
+	if time_frame >= MINUTES_PER_DAY {
 		return Ok(get_raw_records_from_archive(from, to, archive.daily.get_adjusted_fallback()));
 	} else if time_frame == archive.intraday_time_frame {
 		return Ok(get_raw_records_from_archive(from, to, archive.intraday.get_adjusted_fallback()));

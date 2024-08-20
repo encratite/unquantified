@@ -1,13 +1,15 @@
-use std::{collections::{HashMap, HashSet, VecDeque}, sync::Arc};
+use std::{collections::{HashSet, VecDeque}, sync::Arc};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use anyhow::{Result, anyhow, bail};
 
-use crate::{OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
+use crate::{GlobexCode, OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
 
-type BoundaryMap<'a> = HashMap<&'a String, (DateTime<Tz>, DateTime<Tz>)>;
+type BoundaryMap<'a> = BTreeMap<&'a String, (DateTime<Tz>, DateTime<Tz>)>;
 
-pub struct PanamaChannel<'a> {
+pub struct PanamaCanal<'a> {
 	map: &'a OhlcContractMap,
 	boundary_map: BoundaryMap<'a>,
 	offset: f64,
@@ -16,8 +18,8 @@ pub struct PanamaChannel<'a> {
 	skip_front_contract: bool
 }
 
-impl<'a> PanamaChannel<'a> {
-	pub fn new(map: &'a OhlcContractMap, skip_front_contract: bool) -> Result<Option<PanamaChannel>> {
+impl<'a> PanamaCanal<'a> {
+	pub fn new(map: &'a OhlcContractMap, skip_front_contract: bool) -> Result<Option<PanamaCanal>> {
 		let Some(last_records) = map.values().last() else {
 			return Ok(None);
 		};
@@ -29,7 +31,7 @@ impl<'a> PanamaChannel<'a> {
 		let last_record = RawOhlcArchive::get_most_popular_record(last_records, skip_front_contract)?;
 		let current_contract = last_record.symbol.clone();
 		let used_contracts = HashSet::from_iter([current_contract.clone()]);
-		let channel = PanamaChannel {
+		let channel = PanamaCanal {
 			map,
 			boundary_map,
 			offset: 0.0,
@@ -42,7 +44,13 @@ impl<'a> PanamaChannel<'a> {
 
 	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec> {
 		let mut output = VecDeque::new();
+		let time_limit_opt = self.get_time_limit()?;
 		for (time, records) in self.map.iter().rev() {
+			if let Some(time_limit) = time_limit_opt {
+				if *time < time_limit {
+					break;
+				}
+			}
 			if let Some(next_record) = self.get_next_record(time, records)? {
 				let adjusted_record = next_record.apply_offset(self.offset);
 				output.push_front(Arc::new(adjusted_record));
@@ -54,7 +62,7 @@ impl<'a> PanamaChannel<'a> {
 
 	fn get_boundary_map(map: &'a OhlcContractMap) -> BoundaryMap<'a> {
 		// Keep track of when contracts start and expire, so we don't accidentally roll over into the wrong contract
-		let mut boundary_map: BoundaryMap = HashMap::new();
+		let mut boundary_map: BoundaryMap = BTreeMap::new();
 		for records in map.values() {
 			for record in records {
 				let key = &record.symbol;
@@ -77,21 +85,24 @@ impl<'a> PanamaChannel<'a> {
 
 	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<Option<OhlcArc>> {
 		let get_output = |record: &OhlcArc| Ok(Some(record.clone()));
-		let new_record = RawOhlcArchive::get_most_popular_record(records, self.skip_front_contract)?;
+		let filtered_records = self.filter_records(records);
+		if filtered_records.is_empty() {
+			bail!("Failed to filter for older records for contract {} at {}", self.current_contract, time.to_rfc3339());
+		}
+		let new_record = RawOhlcArchive::get_most_popular_record(&filtered_records, self.skip_front_contract)?;
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
 			// No rollover necessary yet
 			get_output(&new_record)
 		} else {
-			let Some(current_record) = records.iter().find(|x| x.symbol == self.current_contract) else {
+			let Some(current_record) = filtered_records.iter().find(|x| x.symbol == self.current_contract) else {
 				let (first, _) = self.get_boundaries(&self.current_contract)?;
 				if first < time {
 					// There is still more data available for that contract, just not for the current point in time
 					// Leave a gap and wait for the older records to become available to perform the rollover
 					return Ok(None);
 				} else {
-					let message = format!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
-					bail!(message);
+					bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
 				}
 			};
 			if !self.used_contracts.contains(&new_symbol) {
@@ -121,5 +132,35 @@ impl<'a> PanamaChannel<'a> {
 		self.boundary_map
 			.get(symbol)
 			.ok_or_else(|| anyhow!("Failed to determine contract expiration date of {symbol}"))
+	}
+
+	fn get_time_limit(&self) -> Result<Option<DateTime<Tz>>> {
+		if self.skip_front_contract {
+			// Prevent get_next_record from being called on the first contract with skip_front_contract enabled
+			// Otherwise it would return an error
+			let mut contracts: Vec<(GlobexCode, DateTime<Tz>)> = self.boundary_map
+				.iter()
+				.map(|(key, (first, _))| (GlobexCode::new(key).unwrap(), first.clone()))
+				.collect();
+			if contracts.len() < 2 {
+				bail!("Invalid contract count");
+			}
+			contracts.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
+			let (_, time_limit) = contracts[1];
+			Ok(Some(time_limit.clone()))
+		} else {
+			Ok(None)
+		}
+	}
+
+	fn filter_records(&self, records: &OhlcVec) -> OhlcVec {
+		records
+			.iter()
+			.filter(|x| {
+				let ordering = GlobexCode::new(&x.symbol).cmp(&GlobexCode::new(&self.current_contract));
+				ordering == Ordering::Less || ordering == Ordering::Equal
+			})
+			.cloned()
+			.collect()
 	}
 }
