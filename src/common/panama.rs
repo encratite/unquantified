@@ -28,7 +28,9 @@ impl<'a> PanamaCanal<'a> {
 			return Ok(None);
 		}
 		let boundary_map = Self::get_boundary_map(map);
-		let last_record = RawOhlcArchive::get_most_popular_record(last_records, skip_front_contract)?;
+		let Some(last_record) = RawOhlcArchive::get_most_popular_record(last_records, skip_front_contract)? else {
+			bail!("Unable to determine initial contract");
+		};
 		let current_contract = last_record.symbol.clone();
 		let used_contracts = HashSet::from_iter([current_contract.clone()]);
 		let channel = PanamaCanal {
@@ -86,24 +88,16 @@ impl<'a> PanamaCanal<'a> {
 	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<Option<OhlcArc>> {
 		let get_output = |record: &OhlcArc| Ok(Some(record.clone()));
 		let filtered_records = self.filter_records(records);
-		if filtered_records.is_empty() {
-			bail!("Failed to filter for older records for contract {} at {}", self.current_contract, time.to_rfc3339());
-		}
-		let new_record = RawOhlcArchive::get_most_popular_record(&filtered_records, self.skip_front_contract)?;
+		let Some(new_record) = RawOhlcArchive::get_most_popular_record(&filtered_records, self.skip_front_contract)? else {
+			return self.perform_time_check(time);
+		};
 		let new_symbol = new_record.symbol.clone();
 		if *new_symbol == self.current_contract {
 			// No rollover necessary yet
 			get_output(&new_record)
 		} else {
 			let Some(current_record) = filtered_records.iter().find(|x| x.symbol == self.current_contract) else {
-				let (first, _) = self.get_boundaries(&self.current_contract)?;
-				if first < time {
-					// There is still more data available for that contract, just not for the current point in time
-					// Leave a gap and wait for the older records to become available to perform the rollover
-					return Ok(None);
-				} else {
-					bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
-				}
+				return self.perform_time_check(time);
 			};
 			if !self.used_contracts.contains(&new_symbol) {
 				// Check if the expiration dates are compatible
@@ -162,5 +156,16 @@ impl<'a> PanamaCanal<'a> {
 			})
 			.cloned()
 			.collect()
+	}
+
+	fn perform_time_check(&self, time: &DateTime<Utc>) -> Result<Option<OhlcArc>> {
+		let (first, _) = self.get_boundaries(&self.current_contract)?;
+		if first < time {
+			// There is still more data available for that contract, just not for the current point in time
+			// Leave a gap and wait for the older records to become available to perform the rollover
+			return Ok(None);
+		} else {
+			bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
+		}
 	}
 }

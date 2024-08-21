@@ -228,10 +228,12 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcArc> {
-		if records.len() == 1 {
+	fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<Option<OhlcArc>> {
+		if records.is_empty() {
+			return Ok(None);
+		} else if records.len() == 1 {
 			if let Some(first) = records.first() {
-				return Ok(first.clone());
+				return Ok(Some(first.clone()));
 			}
 		}
 		let filtered_records = Self::filter_records_by_contract(records, skip_front_contract)?;
@@ -258,7 +260,7 @@ impl RawOhlcArchive {
 				.iter()
 				.min_by_key(|x| GlobexCode::new(&x.symbol).unwrap())
 		};
-		Ok(max.unwrap().clone())
+		Ok(Some(max.unwrap().clone()))
 	}
 
 	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcVec {
@@ -269,9 +271,16 @@ impl RawOhlcArchive {
 	}
 
 	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec> {
-		map.values().map(|records| {
-			Self::get_most_popular_record(records, skip_front_contract)
-		}).collect()
+		map.values()
+			.map(|records| {
+				Self::get_most_popular_record(records, skip_front_contract)
+			})
+			.filter_map(|result| match result {
+				Ok(Some(value)) => Some(Ok(value)),
+				Ok(None) => None,
+				Err(err) => Some(Err(err)),
+			})
+			.collect()
 	}
 
 	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>> {
