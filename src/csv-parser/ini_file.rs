@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-
 use anyhow::{Context, Result};
-
 use configparser::ini::Ini;
 
 pub type IniMap = HashMap<String, HashMap<String, Option<String>>>;

@@ -6,8 +6,7 @@ mod ini_file;
 use std::{path::PathBuf, str::FromStr};
 use chrono_tz::Tz;
 use anyhow::{Result, anyhow};
-
-use common::*;
+use common::get_ini;
 use filter::ContractFilter;
 use parser::CsvParser;
 use symbol::SymbolMapper;

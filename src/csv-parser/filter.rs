@@ -1,8 +1,6 @@
 use anyhow::{Context, Result, anyhow};
-
 use common::parse_globex_code;
 use configparser::ini::Ini;
-
 use crate::ini_file::get_ini_sections;
 
 #[derive(Debug, Clone)]

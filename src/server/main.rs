@@ -1,14 +1,10 @@
 mod server;
 mod datetime;
 mod correlation;
-mod backtest;
-mod manager;
 
 use std::net::SocketAddr;
-use anyhow::{Context, Result, anyhow};
-
-use backtest::BacktestConfiguration;
-use common::*;
+use anyhow::{anyhow, Context, Result};
+use common::{backtest::BacktestConfiguration, get_ini};
 
 #[tokio::main]
 async fn main() -> Result<()> {

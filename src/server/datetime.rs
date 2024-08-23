@@ -3,8 +3,7 @@ use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, Time
 use chrono_tz::Tz;
 use serde::Deserialize;
 use anyhow::{Result, anyhow};
-
-use common::{OhlcArchive, TimeFrame};
+use common::ohlc::{OhlcArchive, TimeFrame};
 
 #[derive(Debug, Deserialize, Clone)]
 enum OffsetUnit {

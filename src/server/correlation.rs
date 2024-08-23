@@ -2,9 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, FixedOffset};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
-use anyhow::{Context, Result, bail};
-
-use common::*;
+use anyhow::{bail, Context, Result};
+use common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
 
 #[derive(Debug, Serialize)]
 pub struct CorrelationData {

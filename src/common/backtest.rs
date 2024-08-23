@@ -3,11 +3,10 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
-
-use common::{parse_globex_code, OhlcArc, OhlcArchive, OhlcData, TimeFrame};
 use strum_macros::Display;
-
 use crate::manager::{Asset, AssetManager, AssetType};
+use crate::{parse_globex_code, OhlcArchive};
+use crate::ohlc::{OhlcArc, TimeFrame};
 
 const FOREX_USD: &str = "USD";
 const FOREX_EUR: &str = "EUR";

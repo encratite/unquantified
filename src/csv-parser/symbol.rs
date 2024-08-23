@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-
 use common::parse_globex_code;
 use configparser::ini::Ini;
 use anyhow::Result;
-
 use crate::ini_file::get_ini_sections;
 
 pub struct SymbolMapper {
