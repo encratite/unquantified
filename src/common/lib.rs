@@ -1,7 +1,7 @@
 mod panama;
 
 use std::{cmp::Ordering, collections::BTreeMap, fs::File, path::PathBuf, str::FromStr, sync::Arc};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use panama::PanamaCanal;
