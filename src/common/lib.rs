@@ -1,6 +1,7 @@
 mod panama;
 
 use std::{cmp::Ordering, collections::BTreeMap, fs::File, path::PathBuf, str::FromStr, sync::Arc};
+use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use panama::PanamaCanal;
@@ -10,6 +11,7 @@ use serde::de::DeserializeOwned;
 use lazy_static::lazy_static;
 use regex::Regex;
 use anyhow::{Context, Result, anyhow, bail};
+use crate::panama::OffsetMap;
 
 pub type OhlcArc = Arc<OhlcRecord>;
 pub type OhlcVec = Vec<OhlcArc>;
@@ -160,8 +162,15 @@ impl RawOhlcArchive {
 	pub fn to_archive(&self, skip_front_contract: bool) -> Result<OhlcArchive> {
 		let time_zone = Tz::from_str(self.time_zone.as_str())
 			.expect("Invalid time zone in archive");
-		let daily = Self::get_data(&self.daily, &time_zone, skip_front_contract)?;
-		let intraday = Self::get_data(&self.intraday, &time_zone, skip_front_contract)?;
+		let (daily, offset_map_opt) = Self::get_data(&self.daily, None, &time_zone, skip_front_contract)?;
+		let Some(offset_map) = offset_map_opt else {
+			bail!("Missing offset map");
+		};
+		let Some(daily_adjusted) = &daily.adjusted else {
+			bail!("Missing daily adjusted records");
+		};
+		let daily_offset_map = Some((daily_adjusted, &offset_map));
+		let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, &time_zone, skip_front_contract)?;
 		let archive = OhlcArchive {
 			daily,
 			intraday,
@@ -170,16 +179,35 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz, skip_front_contract: bool) -> Result<OhlcData> {
-		let Some(last) = records.last() else {
-			bail!("Encountered an OHLC archive without any records");
-		};
-		let is_contract = last.open_interest.is_some();
+	fn is_contract(records: &Vec<RawOhlcRecord>) -> bool {
+		let mut contracts = HashSet::new();
+		for x in records {
+			contracts.insert(&x.symbol);
+			if contracts.len() >= 2 {
+				return true;
+			}
+		}
+		false
+	}
+
+	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, time_zone: &Tz, skip_front_contract: bool) -> Result<(OhlcData, Option<OffsetMap>)> {
+		let is_contract = Self::is_contract(records);
 		if is_contract {
 			// Futures contract
 			let contract_map = Self::get_contract_map(records, time_zone);
 			let unadjusted = Self::get_unadjusted_data_from_map(&contract_map, skip_front_contract)?;
-			let adjusted = Self::get_adjusted_data_from_map(&contract_map, skip_front_contract)?;
+			let adjusted;
+			let output_offset_map;
+			if let Some((daily, offset_map)) = daily_offset_map {
+				adjusted = Some(PanamaCanal::from_offset_map(&contract_map, daily, offset_map)?);
+				output_offset_map = None;
+			} else {
+				let adjusted_data_opt = Self::get_adjusted_data_from_map(&contract_map, skip_front_contract)?;
+				(adjusted, output_offset_map) = match adjusted_data_opt {
+					Some((x, y)) => (Some(x), Some(y)),
+					None => (None, None)
+				};
+			}
 			let time_map = Self::get_time_map(&unadjusted, &adjusted);
 			let data = OhlcData {
 				unadjusted,
@@ -187,7 +215,7 @@ impl RawOhlcArchive {
 				time_map,
 				contract_map: Some(contract_map)
 			};
-			Ok(data)
+			Ok((data, output_offset_map))
 		} else {
 			// Currency
 			let contract_map = None;
@@ -200,7 +228,7 @@ impl RawOhlcArchive {
 				time_map,
 				contract_map
 			};
-			Ok(data)
+			Ok((data, None))
 		}
 	}
 
@@ -283,12 +311,12 @@ impl RawOhlcArchive {
 			.collect()
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<OhlcVec>> {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<(OhlcVec, OffsetMap)>> {
 		let Some(mut panama) = PanamaCanal::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};
-		let adjusted = panama.get_adjusted_data()?;
-		Ok(Some(adjusted))
+		let output = panama.get_adjusted_data()?;
+		Ok(Some(output))
 	}
 
 	fn get_contract_map(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcContractMap {

@@ -1,18 +1,21 @@
 use std::{collections::{HashSet, VecDeque}, sync::Arc};
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use chrono::{DateTime, Utc};
+use std::collections::{BTreeMap, HashMap};
+use std::thread::current;
+use chrono::{Date, DateTime, Timelike, Utc};
 use chrono_tz::Tz;
 use anyhow::{Result, anyhow, bail};
 
 use crate::{GlobexCode, OhlcArc, OhlcContractMap, OhlcVec, RawOhlcArchive};
 
 type BoundaryMap<'a> = BTreeMap<&'a String, (DateTime<Tz>, DateTime<Tz>)>;
+pub type OffsetMap = HashMap<String, f64>;
 
 pub struct PanamaCanal<'a> {
 	map: &'a OhlcContractMap,
 	boundary_map: BoundaryMap<'a>,
 	offset: f64,
+	offset_map: OffsetMap,
 	current_contract: String,
 	used_contracts: HashSet<String>,
 	skip_front_contract: bool
@@ -33,18 +36,20 @@ impl<'a> PanamaCanal<'a> {
 		};
 		let current_contract = last_record.symbol.clone();
 		let used_contracts = HashSet::from_iter([current_contract.clone()]);
-		let channel = PanamaCanal {
+		let mut channel = PanamaCanal {
 			map,
 			boundary_map,
 			offset: 0.0,
+			offset_map: HashMap::new(),
 			current_contract,
 			used_contracts,
 			skip_front_contract
 		};
+		channel.update_offset_map();
 		Ok(Some(channel))
 	}
 
-	pub fn get_adjusted_data(&mut self) -> Result<OhlcVec> {
+	pub fn get_adjusted_data(&mut self) -> Result<(OhlcVec, OffsetMap)> {
 		let mut output = VecDeque::new();
 		let time_limit_opt = self.get_time_limit()?;
 		for (time, records) in self.map.iter().rev() {
@@ -59,7 +64,56 @@ impl<'a> PanamaCanal<'a> {
 			}
 		}
 		let output_vec = Vec::from(output);
-		Ok(output_vec)
+		Ok((output_vec, self.offset_map.clone()))
+	}
+
+	pub fn from_offset_map(intraday: &OhlcContractMap, daily: &OhlcVec, offset_map: &OffsetMap) -> Result<OhlcVec> {
+		let mut output = OhlcVec::new();
+		let mut daily_map = HashMap::new();
+		for x in daily {
+			daily_map.insert(x.time.date_naive(), &x.symbol);
+		}
+		let Some((first_time, _)) = intraday.first_key_value() else {
+			bail!("Unable to get first intraday date");
+		};
+		let first_date = first_time.date_naive();
+		let Some(mut current_contract) = Self::deref(daily_map.get(&first_date)) else {
+			bail!("Unable to get first contract");
+		};
+		let Some(mut offset) = Self::deref(offset_map.get(current_contract)) else {
+			bail!("Unable to initialize Panama offset for contract {current_contract}");
+		};
+		let mut rollover_date = first_date;
+		for (time, records) in intraday.iter() {
+			let date = time.date_naive();
+			let Some(daily_contract) = Self::deref(daily_map.get(&date)) else {
+				bail!("Unable to find a corresponding daily entry for {time}");
+			};
+			if daily_contract != current_contract {
+				// Try to perform the rollover during the primary trading session and not at midnight
+				if time.hour() >= 12 || date > rollover_date {
+					let Some(new_offset) = Self::deref(offset_map.get(daily_contract)) else {
+						bail!("Unable to determine offset for contract {daily_contract}");
+					};
+					offset = new_offset;
+					current_contract = daily_contract;
+				}
+				rollover_date = date;
+			}
+			let Some(contract_record) = records.iter().find(|x| x.symbol == *current_contract) else {
+				bail!("Unable to find a matching record for {current_contract} at {time}");
+			};
+			let adjusted_record = contract_record.apply_offset(offset);
+			output.push(Arc::new(adjusted_record));
+		}
+		Ok(output)
+	}
+
+	fn deref<T>(opt: Option<&T>) -> Option<T>
+	where
+		T: Copy
+	{
+		opt.map(|x| *x)
 	}
 
 	fn get_boundary_map(map: &'a OhlcContractMap) -> BoundaryMap<'a> {
@@ -109,6 +163,7 @@ impl<'a> PanamaCanal<'a> {
 					self.offset += delta;
 					self.current_contract = new_symbol.clone();
 					self.used_contracts.insert(new_symbol);
+					self.update_offset_map();
 					get_output(&new_record)
 				} else {
 					// We already switched to a contract with a more recent expiration date, ignore it
@@ -167,5 +222,9 @@ impl<'a> PanamaCanal<'a> {
 		} else {
 			bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
 		}
+	}
+
+	fn update_offset_map(&mut self) {
+		self.offset_map.insert(self.current_contract.clone(), self.offset);
 	}
 }

@@ -187,11 +187,11 @@ fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, ti
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
-		.map(get_ohlc_record)
+		.map(merge_ohlc_records)
 		.collect()
 }
 
-fn get_ohlc_record(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
+fn merge_ohlc_records(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
 	let first = data.first().unwrap();
 	let last = data.last().unwrap();
 	let symbol = first.symbol.clone();
