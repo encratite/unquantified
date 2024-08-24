@@ -6,13 +6,13 @@ mod ini_file;
 use std::{path::PathBuf, str::FromStr};
 use chrono_tz::Tz;
 use anyhow::{Result, anyhow};
-use common::get_ini;
 use filter::ContractFilter;
 use parser::CsvParser;
 use symbol::SymbolMapper;
+use unq_common::get_ini;
 
 fn main() -> Result<()> {
-	let ini = get_ini("csv-parser.ini")?;
+	let ini = get_ini("config/unq-parser.ini")?;
 	let section = "data";
 	let get_value = |key| -> Result<String> {
 		match ini.get(section, key) {

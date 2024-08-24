@@ -4,8 +4,8 @@ use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 use strum_macros::Display;
-use crate::manager::{Asset, AssetManager, AssetType};
-use crate::{parse_globex_code, OhlcArchive};
+use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
+use crate::OhlcArchive;
 use crate::ohlc::{OhlcArc, TimeFrame};
 
 const FOREX_USD: &str = "USD";

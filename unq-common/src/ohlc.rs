@@ -5,7 +5,7 @@ use anyhow::{anyhow, bail};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use rkyv::{Archive, Deserialize, Serialize};
-use crate::GlobexCode;
+use crate::globex::GlobexCode;
 use crate::panama::{OffsetMap, PanamaCanal};
 
 pub type OhlcArc = Arc<OhlcRecord>;

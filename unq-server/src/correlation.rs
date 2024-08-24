@@ -3,7 +3,7 @@ use chrono::{DateTime, FixedOffset};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
 use anyhow::{bail, Context, Result};
-use common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
+use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
 
 #[derive(Debug, Serialize)]
 pub struct CorrelationData {

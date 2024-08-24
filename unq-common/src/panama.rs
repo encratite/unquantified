@@ -2,7 +2,7 @@ use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, sync::Arc, cmp::O
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use chrono_tz::Tz;
 use anyhow::{Result, anyhow, bail};
-use crate::{GlobexCode, RawOhlcArchive};
+use crate::{globex::GlobexCode, RawOhlcArchive};
 use crate::ohlc::{OhlcArc, OhlcContractMap, OhlcVec};
 
 type BoundaryMap<'a> = BTreeMap<&'a String, (DateTime<Tz>, DateTime<Tz>)>;

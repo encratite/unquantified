@@ -1,9 +1,9 @@
 use std::sync::Arc;
-use chrono::{DateTime, Duration, FixedOffset, Local, Months, NaiveDateTime, TimeDelta, TimeZone};
+use chrono::{DateTime, Duration, FixedOffset, Local, Months, TimeDelta};
 use chrono_tz::Tz;
 use serde::Deserialize;
 use anyhow::{Result, anyhow};
-use common::ohlc::{OhlcArchive, TimeFrame};
+use unq_common::ohlc::{OhlcArchive, TimeFrame};
 
 #[derive(Debug, Deserialize, Clone)]
 enum OffsetUnit {
@@ -87,12 +87,6 @@ impl RelativeDateTime {
 			_ => Err(anyhow!("Invalid combination of relative date time parameters"))
 		}
 	}
-}
-
-pub fn get_date_time_tz(time: NaiveDateTime, tz: &Tz) -> DateTime<Tz> {
-	tz.from_local_datetime(&time)
-		.single()
-		.unwrap()
 }
 
 fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>> {

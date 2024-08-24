@@ -4,11 +4,11 @@ mod correlation;
 
 use std::net::SocketAddr;
 use anyhow::{anyhow, Context, Result};
-use common::{backtest::BacktestConfiguration, get_ini};
+use unq_common::{backtest::BacktestConfiguration, get_ini};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	let config = get_ini("server.ini")?;
+	let config = get_ini("config/unq-server.ini")?;
 	let get_string = |section, key| -> Result<String> {
 		config.get(section, key)
 			.with_context(|| anyhow!("Failed to find key \"{key}\" in section \"{section}\" in configuration file"))
