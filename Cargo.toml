@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "unq-common",
     "unq-parser",
-    "unq-server"
+    "unq-server",
+    "unq-strategy"
 ]

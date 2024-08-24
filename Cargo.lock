@@ -1488,6 +1488,17 @@ dependencies = [
  "tokio",
  "tower-http",
  "unq-common",
+ "unq-strategy",
+]
+
+[[package]]
+name = "unq-strategy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "chrono-tz",
+ "unq-common",
 ]
 
 [[package]]

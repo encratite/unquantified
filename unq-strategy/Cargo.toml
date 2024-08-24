@@ -1,0 +1,10 @@
+[package]
+name = "unq-strategy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unq-common = { version = "0.3.0", path = "../unq-common" }
+chrono = "0.4.38"
+chrono-tz = "0.9.0"
+anyhow = "1.0.86"

@@ -116,7 +116,7 @@ pub struct Position {
 	pub time: DateTime<Utc>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BacktestEvent {
 	pub time: DateTime<Utc>,
 	pub event_type: EventType,
@@ -125,7 +125,7 @@ pub struct BacktestEvent {
 
 #[derive(Debug)]
 pub struct BacktestResult {
-	// Just a placeholder for now
+	pub events: Vec<BacktestEvent>
 }
 
 impl Backtest {
@@ -185,7 +185,7 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_position(&mut self, symbol: &String, count: u32, side: PositionSide) -> Result<Position> {
+	pub fn open_position(&mut self, symbol: &String, count: u32, side: PositionSide) -> Result<u32> {
 		let (root, _, _) = parse_globex_code(&symbol)
 			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
@@ -222,10 +222,30 @@ impl Backtest {
 			self.positions.push(position.clone());
 			let message = format!("Opened position: {count} x {symbol} @ {ask}, {side} (ID {})", position.id);
 			self.log_event(EventType::OpenPosition, message);
-			Ok(position)
+			Ok(position.id)
 		} else {
 			panic!("Encountered an unknown asset type");
 		}
+	}
+
+	pub fn open_by_root(&mut self, root: &String, count: u32, side: PositionSide) -> Result<u32> {
+		let archive = self.asset_manager.get_archive(root)?;
+		let data = archive.get_data(&self.time_frame);
+		let latest_record = if let Some(record) = data.time_map.get(&self.now) {
+			record
+		} else {
+			let adjusted = data.get_adjusted_fallback();
+			let Some(record) = adjusted
+				.iter()
+				.rev()
+				.filter(|x| x.time < self.now)
+				.next()
+			else {
+				bail!("Unable to determine contract to open position for root {root}");
+			};
+			record
+		};
+		self.open_position(&latest_record.symbol, count, side)
 	}
 
 	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
@@ -262,6 +282,12 @@ impl Backtest {
 		let message = format!("Closed position: {count} x {} @ {bid}, {} (ID {})", position.symbol, position.side, position.id);
 		self.log_event(EventType::ClosePosition, message);
 		Ok(())
+	}
+
+	pub fn get_result(&self) -> BacktestResult {
+		BacktestResult {
+			events: self.events.clone()
+		}
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {

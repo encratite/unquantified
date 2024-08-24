@@ -2,6 +2,7 @@ pub mod backtest;
 pub mod manager;
 pub mod ohlc;
 pub mod globex;
+pub mod strategy;
 mod panama;
 
 use std::{fs::File, path::PathBuf};
