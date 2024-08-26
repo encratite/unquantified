@@ -1,10 +1,13 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::sync::Mutex;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Error};
+use anyhow::__private::kind::TraitKind;
+use tokio::task;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcRecord, TimeFrame};
@@ -115,15 +118,27 @@ async fn get_history(
 	State(state): State<Arc<ServerState>>,
 	Json(request): Json<GetHistoryRequest>
 ) -> impl IntoResponse {
-	let response = match get_history_data(request, &state.asset_manager) {
-		Ok(data) => GetHistoryResponse {
+	let get_response = |data| {
+		GetHistoryResponse {
 			tickers: Some(data),
 			error: None
-		},
-		Err(error) => GetHistoryResponse {
+		}
+	};
+	let get_error = |error: Error| {
+		GetHistoryResponse {
 			tickers: None,
 			error: Some(error.to_string())
 		}
+	};
+	let state_clone = state.clone();
+	let response = match task::spawn_blocking(move || get_history_data(request, &state_clone.asset_manager)).await {
+		Ok(task_result) => {
+			match task_result {
+				Ok(data) => get_response(data),
+				Err(error) => get_error(error)
+			}
+		}
+		Err(error) => get_error(anyhow!(error))
 	};
 	Json(response)
 }
@@ -276,15 +291,17 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	let time_frame = TimeFrame::Daily;
 	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
-	let mut backtest = Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?;
+	let backtest_mutex = Mutex::new(Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?);
 	let parameters = StrategyParameters(request.parameters);
-	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &mut backtest)?;
+	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_mutex)?;
 	let mut done = false;
 	while !done {
 		strategy.next()?;
-		// done = backtest.next()?;
+		let mut backtest = backtest_mutex.lock().unwrap();
+		done = backtest.next()?;
 	}
-	// let result = backtest.get_result();
-	// Ok(result)
-	todo!()
+	let result;
+	let mut backtest = backtest_mutex.lock().unwrap();
+	result = backtest.get_result();
+	Ok(result)
 }
