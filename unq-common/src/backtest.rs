@@ -1,8 +1,8 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
 use chrono::{DateTime, Utc};
-use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
+use serde::Serialize;
 use strum_macros::Display;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
 use crate::OhlcArchive;
@@ -31,7 +31,7 @@ pub enum PositionSide {
 	Short
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum EventType {
 	OpenPosition,
 	ClosePosition,
@@ -39,10 +39,10 @@ pub enum EventType {
 	Error
 }
 
-pub struct Backtest {
+pub struct Backtest<'a> {
 	configuration: BacktestConfiguration,
 	// The asset manager is used to access asset definitions and OHLC records
-	asset_manager: Arc<AssetManager>,
+	asset_manager: &'a AssetManager,
 	// All cash is kept in USD. There are no separate currency accounts.
 	// Buying or selling securities that are traded in other currencies cause implicit conversion.
 	cash: f64,
@@ -116,32 +116,32 @@ pub struct Position {
 	pub time: DateTime<Utc>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BacktestEvent {
 	pub time: DateTime<Utc>,
 	pub event_type: EventType,
 	pub message: String
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct BacktestResult {
 	pub events: Vec<BacktestEvent>
 }
 
-impl Backtest {
-	pub fn new(&self, from: DateTime<Tz>, to: DateTime<Tz>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest> {
+impl<'a> Backtest<'a> {
+	pub fn new(from: DateTime<Utc>, to: DateTime<Utc>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: &AssetManager) -> Result<Backtest> {
 		if from >= to {
 			bail!("Invalid from/to parameters");
 		}
-		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, &asset_manager)?;
+		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
 			cash: configuration.starting_cash,
 			positions: Vec::new(),
-			from: from.to_utc(),
-			to: to.to_utc(),
-			now: from.to_utc(),
+			from,
+			to,
+			now: from,
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
@@ -186,6 +186,10 @@ impl Backtest {
 	}
 
 	pub fn open_position(&mut self, symbol: &String, count: u32, side: PositionSide) -> Result<u32> {
+		// Try to interpret the symbol as a futures root first
+		if let Ok(position_id) = self.open_by_root(symbol, count, side.clone()) {
+			return Ok(position_id);
+		};
 		let (root, _, _) = parse_globex_code(&symbol)
 			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
@@ -228,26 +232,6 @@ impl Backtest {
 		}
 	}
 
-	pub fn open_by_root(&mut self, root: &String, count: u32, side: PositionSide) -> Result<u32> {
-		let archive = self.asset_manager.get_archive(root)?;
-		let data = archive.get_data(&self.time_frame);
-		let latest_record = if let Some(record) = data.time_map.get(&self.now) {
-			record
-		} else {
-			let adjusted = data.get_adjusted_fallback();
-			let Some(record) = adjusted
-				.iter()
-				.rev()
-				.filter(|x| x.time < self.now)
-				.next()
-			else {
-				bail!("Unable to determine contract to open position for root {root}");
-			};
-			record
-		};
-		self.open_position(&latest_record.symbol, count, side)
-	}
-
 	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
 		let position = self.positions
 			.iter()
@@ -288,6 +272,26 @@ impl Backtest {
 		BacktestResult {
 			events: self.events.clone()
 		}
+	}
+
+	fn open_by_root(&mut self, root: &String, count: u32, side: PositionSide) -> Result<u32> {
+		let archive = self.asset_manager.get_archive(root)?;
+		let data = archive.get_data(&self.time_frame);
+		let latest_record = if let Some(record) = data.time_map.get(&self.now) {
+			record
+		} else {
+			let adjusted = data.get_adjusted_fallback();
+			let Some(record) = adjusted
+				.iter()
+				.rev()
+				.filter(|x| x.time < self.now)
+				.next()
+			else {
+				bail!("Unable to determine contract to open position for root {root}");
+			};
+			record
+		};
+		self.open_position(&latest_record.symbol, count, side)
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
@@ -375,7 +379,7 @@ impl Backtest {
 		Ok(record)
 	}
 
-	fn get_time_sequence(from: &DateTime<Tz>, to: &DateTime<Tz>, time_frame: &TimeFrame, asset_manager: &Arc<AssetManager>) -> Result<VecDeque<DateTime<Utc>>> {
+	fn get_time_sequence(from: &DateTime<Utc>, to: &DateTime<Utc>, time_frame: &TimeFrame, asset_manager: &AssetManager) -> Result<VecDeque<DateTime<Utc>>> {
 		// Use S&P 500 futures as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();

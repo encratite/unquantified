@@ -1,10 +1,11 @@
 use anyhow::Result;
-use crate::backtest::{Backtest, BacktestResult};
+use serde::Deserialize;
 
 pub trait Strategy {
-	fn run(&mut self, symbols: Vec<String>, parameters: StrategyParameters, backtest: &mut Backtest) -> Result<BacktestResult>;
+	fn next(&mut self) -> Result<()>;
 }
 
+#[derive(Debug, Deserialize)]
 pub struct StrategyParameter {
 	pub name: String,
 	pub values: Option<Vec<f64>>,
@@ -13,9 +14,13 @@ pub struct StrategyParameter {
 	pub step: Option<f64>
 }
 
-pub struct StrategyParameters(Vec<StrategyParameter>);
+pub struct StrategyParameters(pub Vec<StrategyParameter>);
 
 impl StrategyParameters {
+	pub fn new(params: Vec<StrategyParameter>) -> Self {
+		StrategyParameters(params)
+	}
+
 	pub fn get_values(&self, name: &str) -> Option<Vec<f64>> {
 		match self.get_parameter(name) {
 			Some(parameter) => parameter.values.clone(),

@@ -1498,6 +1498,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "chrono-tz",
+ "once_cell",
  "unq-common",
 ]
 

@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use anyhow::{Result, anyhow};
-use unq_common::backtest::BacktestConfiguration;
+use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcRecord, TimeFrame};
+use unq_common::strategy::{StrategyParameter, StrategyParameters};
+use unq_strategy::get_strategy;
 use crate::correlation::{get_correlation_matrix, CorrelationData};
 use crate::datetime::RelativeDateTime;
 
@@ -44,6 +46,21 @@ struct GetCorrelationRequest {
 #[derive(Debug, Serialize)]
 struct GetCorrelationResponse {
 	correlation: Option<CorrelationData>,
+	error: Option<String>
+}
+
+#[derive(Debug, Deserialize)]
+struct RunBacktestRequest {
+	strategy: String,
+	symbols: Vec<String>,
+	from: RelativeDateTime,
+	to: RelativeDateTime,
+	parameters: Vec<StrategyParameter>
+}
+
+#[derive(Debug, Serialize)]
+struct RunBacktestResponse {
+	result: Option<BacktestResult>,
 	error: Option<String>
 }
 
@@ -87,6 +104,7 @@ pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: Str
 	let app = Router::new()
 		.route("/history", post(get_history))
 		.route("/correlation", post(get_correlation))
+		.route("/backtest", post(run_backtest))
 		.with_state(state_arc)
 		.fallback_service(serve_dir);
 	let listener = TcpListener::bind(address).await.unwrap();
@@ -121,6 +139,23 @@ async fn get_correlation(
 		},
 		Err(error) => GetCorrelationResponse {
 			correlation: None,
+			error: Some(error.to_string())
+		}
+	};
+	Json(response)
+}
+
+async fn run_backtest(
+	State(state): State<Arc<ServerState>>,
+	Json(request): Json<RunBacktestRequest>
+) -> impl IntoResponse {
+	let response = match get_backtest_result(request, &state.asset_manager, &state.backtest_configuration) {
+		Ok(data) => RunBacktestResponse {
+			result: Some(data),
+			error: None
+		},
+		Err(error) => RunBacktestResponse {
+			result: None,
 			error: Some(error.to_string())
 		}
 	};
@@ -234,4 +269,22 @@ where
 		.filter(|x| matches_from_to(from, to, x))
 		.map(|x| OhlcRecordWeb::new(&**x))
 		.collect()
+}
+
+fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager, backtest_configuration: &BacktestConfiguration) -> Result<BacktestResult> {
+	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
+	let time_frame = TimeFrame::Daily;
+	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
+	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
+	let mut backtest = Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?;
+	let parameters = StrategyParameters(request.parameters);
+	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &mut backtest)?;
+	let mut done = false;
+	while !done {
+		strategy.next()?;
+		// done = backtest.next()?;
+	}
+	// let result = backtest.get_result();
+	// Ok(result)
+	todo!()
 }
