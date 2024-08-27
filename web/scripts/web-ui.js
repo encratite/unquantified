@@ -215,12 +215,12 @@ export class WebUi {
 	}
 
 	getCandlestickDatasets(history) {
-		const tickers = Object.keys(history.tickers);
+		const tickers = Object.keys(history.result);
 		if (tickers.length != 1) {
 			throw new Error("Invalid ticker count");
 		}
 		const ticker = tickers[0];
-		const records = history.tickers[ticker];
+		const records = history.result[ticker];
 		const data = records.map(ohlc => {
 			const dateTime = this.getTime(ohlc.time);
 			return {
@@ -242,11 +242,11 @@ export class WebUi {
 	}
 
 	getLineDatasets(history) {
-		const tickers = Object.keys(history.tickers);
+		const tickers = Object.keys(history.result);
 		const multiMode = tickers.length > 1;
 		const datasets = tickers
 			.map(symbol => {
-				const records = history.tickers[symbol];
+				const records = history.result[symbol];
 				let firstClose = null;
 				if (records.length > 0) {
 					firstClose = records[0].close;
@@ -431,7 +431,7 @@ export class WebUi {
 		const correlationMax = 1;
 		for (let i = 0; i < symbols.length; i++) {
 			const symbol = symbols[i];
-			const data = correlation.correlation[i];
+			const data = correlation.result[i];
 			const row = createRow();
 			const cell = createCell(symbol, row);
 			setSeparatorStyle(cell, i, false);
@@ -511,7 +511,7 @@ export class WebUi {
 		if (tickers instanceof SymbolArray) {
 			separators = tickers.value.map(x => x.separator);
 		}
-		this.renderCorrelationMatrix(response.correlation, separators);
+		this.renderCorrelationMatrix(response.result, separators);
 	}
 
 	async timezone(callArguments) {

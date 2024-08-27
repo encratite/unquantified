@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use anyhow::{Result, anyhow, Error};
-use anyhow::__private::kind::TraitKind;
 use tokio::task;
+use tokio::task::JoinError;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcRecord, TimeFrame};
@@ -23,6 +23,12 @@ struct ServerState {
 	backtest_configuration: BacktestConfiguration
 }
 
+#[derive(Debug, Serialize)]
+struct Response<T> {
+	result: Option<T>,
+	error: Option<String>
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetHistoryRequest {
@@ -33,23 +39,11 @@ struct GetHistoryRequest {
 	time_frame: u16
 }
 
-#[derive(Debug, Serialize)]
-struct GetHistoryResponse {
-	tickers: Option<HashMap<String, Vec<OhlcRecordWeb>>>,
-	error: Option<String>
-}
-
 #[derive(Debug, Deserialize)]
 struct GetCorrelationRequest {
 	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime
-}
-
-#[derive(Debug, Serialize)]
-struct GetCorrelationResponse {
-	correlation: Option<CorrelationData>,
-	error: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,12 +53,6 @@ struct RunBacktestRequest {
 	from: RelativeDateTime,
 	to: RelativeDateTime,
 	parameters: Vec<StrategyParameter>
-}
-
-#[derive(Debug, Serialize)]
-struct RunBacktestResponse {
-	result: Option<BacktestResult>,
-	error: Option<String>
 }
 
 #[derive(Debug, Serialize)]
@@ -114,67 +102,55 @@ pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: Str
 	axum::serve(listener, app).await.unwrap();
 }
 
-async fn get_history(
-	State(state): State<Arc<ServerState>>,
-	Json(request): Json<GetHistoryRequest>
-) -> impl IntoResponse {
-	let get_response = |data| {
-		GetHistoryResponse {
-			tickers: Some(data),
+async fn get_response<A, B>(state: Arc<ServerState>, request: A, get_data: Box<dyn FnOnce(A, Arc<ServerState>) -> Result<B> + Send>) -> impl IntoResponse
+where
+	A: Send + 'static,
+	B: Send + Serialize + 'static
+{
+	let get_response = |data: B| {
+		Response {
+			result: Some(data),
 			error: None
 		}
 	};
 	let get_error = |error: Error| {
-		GetHistoryResponse {
-			tickers: None,
+		Response {
+			result: None,
 			error: Some(error.to_string())
 		}
 	};
-	let state_clone = state.clone();
-	let response = match task::spawn_blocking(move || get_history_data(request, &state_clone.asset_manager)).await {
-		Ok(task_result) => {
-			match task_result {
-				Ok(data) => get_response(data),
-				Err(error) => get_error(error)
-			}
-		}
-		Err(error) => get_error(anyhow!(error))
-	};
+	let response = task::spawn_blocking(|| get_data(request, state))
+		.await
+		.map(|task_result| task_result.map_or_else(get_error, get_response))
+		.unwrap_or_else(|error: JoinError| get_error(anyhow!(error)));
 	Json(response)
+}
+
+async fn get_history(
+	State(state): State<Arc<ServerState>>,
+	Json(request): Json<GetHistoryRequest>
+) -> impl IntoResponse {
+	get_response(state, request, Box::new(|request, state| {
+		get_history_data(request, &state.asset_manager)
+	})).await
 }
 
 async fn get_correlation(
 	State(state): State<Arc<ServerState>>,
 	Json(request): Json<GetCorrelationRequest>
 ) -> impl IntoResponse {
-	let response = match get_correlation_data(request, &state.asset_manager) {
-		Ok(data) => GetCorrelationResponse {
-			correlation: Some(data),
-			error: None
-		},
-		Err(error) => GetCorrelationResponse {
-			correlation: None,
-			error: Some(error.to_string())
-		}
-	};
-	Json(response)
+	get_response(state, request, Box::new(|request, state| {
+		get_correlation_data(request, &state.asset_manager)
+	})).await
 }
 
 async fn run_backtest(
 	State(state): State<Arc<ServerState>>,
 	Json(request): Json<RunBacktestRequest>
 ) -> impl IntoResponse {
-	let response = match get_backtest_result(request, &state.asset_manager, &state.backtest_configuration) {
-		Ok(data) => RunBacktestResponse {
-			result: Some(data),
-			error: None
-		},
-		Err(error) => RunBacktestResponse {
-			result: None,
-			error: Some(error.to_string())
-		}
-	};
-	Json(response)
+	get_response(state, request, Box::new(|request, state| {
+		get_backtest_result(request, &state.asset_manager, &state.backtest_configuration)
+	})).await
 }
 
 fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
@@ -301,7 +277,7 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 		done = backtest.next()?;
 	}
 	let result;
-	let mut backtest = backtest_mutex.lock().unwrap();
+	let backtest = backtest_mutex.lock().unwrap();
 	result = backtest.get_result();
 	Ok(result)
 }
