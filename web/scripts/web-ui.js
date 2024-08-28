@@ -8,6 +8,7 @@ import {
 	Symbol,
 	SymbolArray,
 	String,
+	Parameters,
 	Keyword
 } from "./engine.js";
 
@@ -30,6 +31,7 @@ export class WebUi {
 			candle: this.plotCandlestick.bind(this),
 			plot: this.plotLine.bind(this),
 			correlation: this.correlation.bind(this),
+			backtest: this.backtest.bind(this),
 			timezone: this.timezone.bind(this)
 		};
 		this.engine = new ScriptingEngine(callHandlers);
@@ -88,6 +90,19 @@ export class WebUi {
 			to: to
 		};
 		const response = await this.invoke("/correlation", request);
+		return response;
+	}
+
+	async runBacktest(strategy, symbols, from, to, parameters, timeFrame) {
+		const request = {
+			strategy: strategy,
+			symbols: symbols,
+			from: from,
+			to: to,
+			parameters: parameters,
+			timeFrame: timeFrame
+		};
+		const response = await this.invoke("/backtest", request);
 		return response;
 	}
 
@@ -467,9 +482,10 @@ export class WebUi {
 		const to = callArguments[2] || new TimeParameter(Keyword.Last);
 		const timeFrame = callArguments[3] || new TimeFrame(SecondsPerDay);
 		let symbols;
+		const invalidSymbol = "Invalid symbol argument type";
 		if (isCandlestick) {
 			if (!(symbolArgument instanceof Symbol)) {
-				throw new Error("Invalid symbol data type");
+				throw new Error(invalidSymbol);
 			}
 			symbols = [symbolArgument.getJsonValue()];
 		}
@@ -482,7 +498,7 @@ export class WebUi {
 				symbols = symbolArgument.getJsonValue();
 			}
 			else {
-				throw new Error("Invalid symbol data type");
+				throw new Error(invalidSymbol);
 			}
 		}
 		this.validateFromTo(from, to);
@@ -501,24 +517,54 @@ export class WebUi {
 
 	async correlation(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 3);
-		const tickers = callArguments[0];
+		const symbols = callArguments[0];
 		const from = callArguments[1] || new TimeParameter(Keyword.First);
 		const to = callArguments[2] || new TimeParameter(Keyword.Last);
-		this.validateSymbols(tickers);
+		this.validateSymbols(symbols);
 		this.validateFromTo(from, to);
-		const response = await this.getCorrelation(tickers.getJsonValue(), from.getJsonValue(), to.getJsonValue());
+		const response = await this.getCorrelation(symbols.getJsonValue(), from.getJsonValue(), to.getJsonValue());
 		let separators = null;
-		if (tickers instanceof SymbolArray) {
-			separators = tickers.value.map(x => x.separator);
+		if (symbols instanceof SymbolArray) {
+			separators = symbols.value.map(x => x.separator);
 		}
 		this.renderCorrelationMatrix(response.result, separators);
+	}
+
+	async backtest(callArguments) {
+		this.validateArgumentCount(callArguments, 4, 6);
+		const strategy = callArguments[0];
+		const symbols = callArguments[1];
+		const from = callArguments[2];
+		const to = callArguments[3];
+		const parameters = callArguments[4] || new Parameters([]);
+		const timeFrame = callArguments[5] || new String("daily");
+		if (!(strategy instanceof String)) {
+			throw new Error("Invalid strategy argument type");
+		}
+		this.validateSymbols(symbols);
+		this.validateFromTo(from, to);
+		if (!(parameters instanceof Parameters)) {
+			throw new Error("Invalid parameters argument type");
+		}
+		if (!(timeFrame instanceof String)) {
+			throw new Error("Invalid time frame argument type");
+		}
+		const response = await this.runBacktest(
+			strategy.getJsonValue(),
+			symbols.getJsonValue(),
+			from.getJsonValue(),
+			to.getJsonValue(),
+			parameters.getJsonValue(),
+			timeFrame.getJsonValue(),
+		);
+		console.log(response);
 	}
 
 	async timezone(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 1);
 		const timezoneArgument = callArguments[0];
 		if (!(timezoneArgument instanceof String)) {
-			throw new Error("Invalid timezone data type");
+			throw new Error("Invalid timezone argument type");
 		}
 		const timezone = timezoneArgument.value;
 		const data = this.getLocalStorageData();
@@ -541,7 +587,7 @@ export class WebUi {
 			}
 		}
 		else if (!(tickers instanceof Symbol)) {
-			throw new Error("Invalid ticker data type");
+			throw new Error("Invalid symbol argument type");
 		}
 	}
 

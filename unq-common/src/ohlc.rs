@@ -13,9 +13,11 @@ pub type OhlcVec = Vec<OhlcArc>;
 pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcArc>;
 pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Archive, Serialize, serde::Deserialize)]
 pub enum TimeFrame {
+	#[serde(rename = "daily")]
 	Daily,
+	#[serde(rename = "intraday")]
 	Intraday
 }
 

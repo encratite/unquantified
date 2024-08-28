@@ -47,12 +47,14 @@ struct GetCorrelationRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RunBacktestRequest {
 	strategy: String,
 	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime,
-	parameters: Vec<StrategyParameter>
+	parameters: Vec<StrategyParameter>,
+	time_frame: TimeFrame
 }
 
 #[derive(Debug, Serialize)]
@@ -267,14 +269,15 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	let time_frame = TimeFrame::Daily;
 	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
-	let backtest_mutex = Mutex::new(Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?);
+	let backtest = Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?;
+	let backtest_mutex = Mutex::new(backtest);
 	let parameters = StrategyParameters(request.parameters);
 	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_mutex)?;
 	let mut done = false;
 	while !done {
 		strategy.next()?;
-		let mut backtest = backtest_mutex.lock().unwrap();
-		done = backtest.next()?;
+		let mut backtest_mut = backtest_mutex.lock().unwrap();
+		done = backtest_mut.next()?;
 	}
 	let result;
 	let backtest = backtest_mutex.lock().unwrap();
