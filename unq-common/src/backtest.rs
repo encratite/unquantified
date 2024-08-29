@@ -1,4 +1,5 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
@@ -26,9 +27,9 @@ lazy_static! {
 	};
 }
 
-type BacktestEvents = Rc<Vec<BacktestEvent>>;
-type EquityCurveDaily = Rc<Vec<EquityCurveData>>;
-type EquityCurveTrades = Rc<Vec<f64>>;
+type BacktestEvents = Rc<RefCell<Vec<BacktestEvent>>>;
+type EquityCurveDaily = Rc<RefCell<Vec<EquityCurveData>>>;
+type EquityCurveTrades = Rc<RefCell<Vec<f64>>>;
 
 #[derive(Clone, PartialEq, Display)]
 pub enum PositionSide {
@@ -134,9 +135,9 @@ pub struct BacktestEvent {
 pub struct BacktestResult {
 	starting_cash: f64,
 	final_cash: f64,
-	events: Rc<Vec<BacktestEvent>>,
-	equity_curve_daily: Rc<Vec<EquityCurveData>>,
-	equity_curve_trades: Rc<Vec<f64>>
+	events: BacktestEvents,
+	equity_curve_daily: EquityCurveDaily,
+	equity_curve_trades: EquityCurveTrades
 }
 
 #[derive(Serialize)]
@@ -156,8 +157,8 @@ impl<'a> Backtest<'a> {
 			date: from,
 			account_value: configuration.starting_cash
 		};
-		let equity_curve_daily = Rc::new(vec![equity_curve_data]);
-		let equity_curve_trades = Rc::new(vec![configuration.starting_cash]);
+		let equity_curve_daily = Rc::new(RefCell::new(vec![equity_curve_data]));
+		let equity_curve_trades = Rc::new(RefCell::new(vec![configuration.starting_cash]));
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
@@ -167,7 +168,7 @@ impl<'a> Backtest<'a> {
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
-			events: Rc::new(Vec::new()),
+			events: Rc::new(RefCell::new(Vec::new())),
 			equity_curve_daily,
 			equity_curve_trades,
 			terminated: false
@@ -267,9 +268,9 @@ impl<'a> Backtest<'a> {
 				side: side.clone(),
 				price: ask,
 				margin: maintenance_margin_usd,
-				archive: archive,
+				archive,
 				time: self.now.clone(),
-				automatic_rollover: automatic_rollover
+				automatic_rollover
 			};
 			self.next_position_id += 1;
 			self.positions.push(position.clone());
@@ -320,7 +321,8 @@ impl<'a> Backtest<'a> {
 		}
 		if enable_equity_curve {
 			let account_value = self.get_account_value(true);
-			self.equity_curve_trades.push(account_value);
+			let mut equity_curve_trades = self.equity_curve_trades.borrow_mut();
+			equity_curve_trades.push(account_value);
 		}
 		Ok(())
 	}
@@ -540,7 +542,8 @@ impl<'a> Backtest<'a> {
 			event_type,
 			message
 		};
-		self.events.push(event);
+		let mut events = self.events.borrow_mut();
+		events.push(event);
 	}
 
 	fn close_all_positions(&mut self) -> Result<()> {
@@ -588,6 +591,7 @@ impl<'a> Backtest<'a> {
 
 	fn update_equity_curve(&mut self) -> Result<()> {
 		let last_date_opt = self.equity_curve_daily
+			.borrow()
 			.last()
 			.and_then(|x| Self::get_date(&x.date).ok());
 		let Some(last_date) = last_date_opt else {
@@ -601,7 +605,8 @@ impl<'a> Backtest<'a> {
 				date,
 				account_value
 			};
-			self.equity_curve_daily.push(equity_curve_data);
+			let mut equity_curve_daily = self.equity_curve_daily.borrow_mut();
+			equity_curve_daily.push(equity_curve_data);
 		}
 		Ok(())
 	}
