@@ -1,7 +1,7 @@
 use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, sync::Arc, cmp::Ordering};
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use chrono_tz::Tz;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, Context};
 use crate::{globex::GlobexCode, RawOhlcArchive};
 use crate::ohlc::{OhlcArc, OhlcContractMap, OhlcVec};
 
@@ -197,7 +197,7 @@ impl<'a> PanamaCanal<'a> {
 	fn get_boundaries(&self, symbol: &String) -> Result<&(DateTime<Tz>, DateTime<Tz>)> {
 		self.boundary_map
 			.get(symbol)
-			.ok_or_else(|| anyhow!("Failed to determine contract expiration date of {symbol}"))
+			.with_context(|| anyhow!("Failed to determine contract expiration date of {symbol}"))
 	}
 
 	fn get_time_limit(&self) -> Result<Option<DateTime<Tz>>> {

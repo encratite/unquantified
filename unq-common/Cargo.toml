@@ -13,7 +13,7 @@ dashmap = "6.0.1"
 lazy_static = "1.5.0"
 regex = "1.10.5"
 rkyv = "0.7.44"
-serde = { version = "1.0.203", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive", "rc"] }
 strum = "0.26.3"
 strum_macros = "0.26.4"
 zstd = "0.13.1"

@@ -1,5 +1,6 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
 use std::cmp::Ordering;
+use std::rc::Rc;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
@@ -25,7 +26,11 @@ lazy_static! {
 	};
 }
 
-#[derive(Debug, Clone, PartialEq, Display)]
+type BacktestEvents = Rc<Vec<BacktestEvent>>;
+type EquityCurveDaily = Rc<Vec<EquityCurveData>>;
+type EquityCurveTrades = Rc<Vec<f64>>;
+
+#[derive(Clone, PartialEq, Display)]
 pub enum PositionSide {
 	#[strum(serialize = "long")]
 	Long,
@@ -33,7 +38,7 @@ pub enum PositionSide {
 	Short
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum EventType {
 	OpenPosition,
 	ClosePosition,
@@ -61,12 +66,16 @@ pub struct Backtest<'a> {
 	// Sequential ID used to uniquely identify positions
 	next_position_id: u32,
 	// Text-based event log, in ascending order
-	events: Vec<BacktestEvent>,
+	events: BacktestEvents,
+	// Daily equity curve data
+	equity_curve_daily: EquityCurveDaily,
+	// Equity curve, by trades
+	equity_curve_trades: EquityCurveTrades,
 	// Indicates whether the backtest is still running or not
 	terminated: bool
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BacktestConfiguration {
 	// Initial cash the backtest starts with, in USD
 	pub starting_cash: f64,
@@ -87,7 +96,7 @@ pub struct BacktestConfiguration {
 	pub overnight_margin_ratio: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Position {
 	// Positions are uniquely identified by a sequential ID
 	pub id: u32,
@@ -114,16 +123,27 @@ pub struct Position {
 	pub automatic_rollover: Option<bool>
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct BacktestEvent {
 	pub time: DateTime<Utc>,
 	pub event_type: EventType,
 	pub message: String
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct BacktestResult {
-	pub events: Vec<BacktestEvent>
+	starting_cash: f64,
+	final_cash: f64,
+	events: Rc<Vec<BacktestEvent>>,
+	equity_curve_daily: Rc<Vec<EquityCurveData>>,
+	equity_curve_trades: Rc<Vec<f64>>
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EquityCurveData {
+	pub date: DateTime<Utc>,
+	pub account_value: f64
 }
 
 impl<'a> Backtest<'a> {
@@ -132,6 +152,12 @@ impl<'a> Backtest<'a> {
 			bail!("Invalid from/to parameters");
 		}
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
+		let equity_curve_data = EquityCurveData {
+			date: from,
+			account_value: configuration.starting_cash
+		};
+		let equity_curve_daily = Rc::new(vec![equity_curve_data]);
+		let equity_curve_trades = Rc::new(vec![configuration.starting_cash]);
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
@@ -141,7 +167,9 @@ impl<'a> Backtest<'a> {
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
-			events: Vec::new(),
+			events: Rc::new(Vec::new()),
+			equity_curve_daily,
+			equity_curve_trades,
 			terminated: false
 		};
 		Ok(backtest)
@@ -167,6 +195,7 @@ impl<'a> Backtest<'a> {
 				self.margin_call_check()?;
 				self.now = now;
 				self.rollover_contracts()?;
+				self.update_equity_curve()?;
 				Ok(false)
 			}
 			None => {
@@ -183,12 +212,16 @@ impl<'a> Backtest<'a> {
 	}
 
 	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
-		self.close_position_internal(position_id, count, true, true)
+		self.close_position_internal(position_id, count, true, true, true)
 	}
 
 	pub fn get_result(&self) -> BacktestResult {
 		BacktestResult {
-			events: self.events.clone()
+			starting_cash: self.configuration.starting_cash,
+			final_cash: self.cash,
+			events: self.events.clone(),
+			equity_curve_daily: self.equity_curve_daily.clone(),
+			equity_curve_trades: self.equity_curve_trades.clone()
 		}
 	}
 
@@ -197,7 +230,7 @@ impl<'a> Backtest<'a> {
 			.iter()
 			.find(|x| x.id == id)
 			.cloned()
-			.ok_or_else(|| anyhow!("Unable to find position with ID {id}"))
+			.with_context(|| anyhow!("Unable to find position with ID {id}"))
 	}
 
 	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
@@ -241,7 +274,7 @@ impl<'a> Backtest<'a> {
 			self.next_position_id += 1;
 			self.positions.push(position.clone());
 			if enable_logging {
-				let message = format!("Opened position: {count} x {symbol} @ {ask:.2}, {side} (ID {})", position.id);
+				let message = format!("Opened {side} position: {count} x {symbol} @ {ask:.2} (ID {})", position.id);
 				self.log_event(EventType::OpenPosition, message);
 			}
 			Ok(position.id)
@@ -250,7 +283,7 @@ impl<'a> Backtest<'a> {
 		}
 	}
 
-	fn close_position_internal(&mut self, position_id: u32, count: u32, enable_fees: bool, enable_logging: bool) -> Result<()> {
+	fn close_position_internal(&mut self, position_id: u32, count: u32, enable_fees: bool, enable_logging: bool, enable_equity_curve: bool) -> Result<()> {
 		let position = self.positions
 			.iter()
 			.find(|x| x.id == position_id)
@@ -282,8 +315,12 @@ impl<'a> Backtest<'a> {
 			panic!("Encountered an unknown asset type");
 		}
 		if enable_logging {
-			let message = format!("Closed position: {count} x {} @ {bid:.2}, {} (ID {})", position.symbol, position.side, position.id);
+			let message = format!("Closed {} position: {count} x {} @ {bid:.2} (ID {})", position.side, position.symbol, position.id);
 			self.log_event(EventType::ClosePosition, message);
+		}
+		if enable_equity_curve {
+			let account_value = self.get_account_value(true);
+			self.equity_curve_trades.push(account_value);
 		}
 		Ok(())
 	}
@@ -309,10 +346,8 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
-		let date = self.now.naive_utc().date().and_hms_opt(0, 0, 0)
-			.with_context(|| "Date conversion failed")?;
-		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(date, Utc);
-		let current_record = archive.daily.time_map.get(&date_utc)
+		let date = Self::get_date(&self.now)?;
+		let current_record = archive.daily.time_map.get(&date)
 			.with_context(|| anyhow!("Unable to find current record for symbol {} at {date}", asset.symbol))?;
 		let last_record = archive.daily.unadjusted.last()
 			.with_context(|| "Last record missing")?;
@@ -535,10 +570,10 @@ impl<'a> Backtest<'a> {
 				let globex_current = Self::get_globex_code(&position.symbol)?;
 				let globex_new = Self::get_globex_code(&record_now.symbol)?;
 				if globex_current.cmp(&globex_new) == Ordering::Less {
-					self.close_position_internal(position.id, position.count, false, false)?;
+					self.close_position_internal(position.id, position.count, false, false, false)?;
 					let position_id = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, false, false)?;
 					let new_position = self.get_position(position_id)?;
-					let message = format!("Rolled over position: {} x {} @ {:.2}, {} (ID {})", new_position.count, new_position.symbol, new_position.price, new_position.side, new_position.id);
+					let message = format!("Rolled over {} position: {} x {} @ {:.2} (ID {})", new_position.side, new_position.count, new_position.symbol, new_position.price, new_position.id);
 					self.log_event(EventType::Rollover, message);
 				}
 			}
@@ -548,6 +583,36 @@ impl<'a> Backtest<'a> {
 
 	fn get_globex_code(symbol: &String) -> Result<GlobexCode> {
 		GlobexCode::new(symbol)
-			.ok_or_else(|| anyhow!("Unable to parse Globex code {symbol}"))
+			.with_context(|| anyhow!("Unable to parse Globex code {symbol}"))
+	}
+
+	fn update_equity_curve(&mut self) -> Result<()> {
+		let last_date_opt = self.equity_curve_daily
+			.last()
+			.and_then(|x| Self::get_date(&x.date).ok());
+		let Some(last_date) = last_date_opt else {
+			bail!("Equity curve daily data missing");
+		};
+		let date = Self::get_date(&self.now)?;
+		// Only update the equity curve
+		if date > last_date {
+			let account_value = self.get_account_value(true);
+			let equity_curve_data = EquityCurveData {
+				date,
+				account_value
+			};
+			self.equity_curve_daily.push(equity_curve_data);
+		}
+		Ok(())
+	}
+
+	fn get_date(date_time: &DateTime<Utc>) -> Result<DateTime<Utc>> {
+		let naive_date_time = date_time
+			.naive_utc()
+			.date()
+			.and_hms_opt(0, 0, 0)
+			.with_context(|| "Date conversion failed")?;
+		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(naive_date_time, Utc);
+		Ok(date_utc)
 	}
 }
