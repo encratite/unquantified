@@ -1,10 +1,12 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
+use std::cmp::Ordering;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use strum_macros::Display;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
+use crate::globex::GlobexCode;
 use crate::OhlcArchive;
 use crate::ohlc::{OhlcArc, TimeFrame};
 
@@ -35,7 +37,9 @@ pub enum PositionSide {
 pub enum EventType {
 	OpenPosition,
 	ClosePosition,
+	Rollover,
 	MarginCall,
+	Warning,
 	Error
 }
 
@@ -48,10 +52,6 @@ pub struct Backtest<'a> {
 	cash: f64,
 	// Long and short positions held by the account
 	positions: Vec<Position>,
-	// The point in time where the simulation starts
-	from: DateTime<Utc>,
-	// The point in time where the simulation stops
-	to: DateTime<Utc>,
 	// The current point in time
 	now: DateTime<Utc>,
 	// Controls the speed of the event loop, specified by the strategy
@@ -63,9 +63,7 @@ pub struct Backtest<'a> {
 	// Text-based event log, in ascending order
 	events: Vec<BacktestEvent>,
 	// Indicates whether the backtest is still running or not
-	terminated: bool,
-	// Internally enables/disables Forex/broker/exchange fees, as a temporary bypass for rolling over contracts
-	enable_fees: bool
+	terminated: bool
 }
 
 #[derive(Debug, Clone)]
@@ -87,8 +85,6 @@ pub struct BacktestConfiguration {
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
 	pub overnight_margin_ratio: f64,
-	// If true, automatically roll over futures contracts
-	pub automatic_rollover: bool
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +109,9 @@ pub struct Position {
 	// Underlying OHLC archive of the asset
 	pub archive: Arc<OhlcArchive>,
 	// Time the position was created
-	pub time: DateTime<Utc>
+	pub time: DateTime<Utc>,
+	// Only used for futures, determines if the position should be automatically rolled over
+	pub automatic_rollover: Option<bool>
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,15 +137,12 @@ impl<'a> Backtest<'a> {
 			asset_manager,
 			cash: configuration.starting_cash,
 			positions: Vec::new(),
-			from,
-			to,
 			now: from,
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
 			events: Vec::new(),
-			terminated: false,
-			enable_fees: true
+			terminated: false
 		};
 		Ok(backtest)
 	}
@@ -161,6 +156,7 @@ impl<'a> Backtest<'a> {
 	- An overnight margin call occurred and liquidating the positions failed due to missing OHLC data
 	- An automatic rollover was triggered and the new contract cannot be determined due to missing data
 	- The end of the simulated period has been reached and positions cannot be closed
+	Returns true if the simulation is done, false otherwise.
 	*/
 	pub fn next(&mut self) -> Result<bool> {
 		if self.terminated {
@@ -169,23 +165,42 @@ impl<'a> Backtest<'a> {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				self.margin_call_check()?;
-				let then = self.now;
-				if self.configuration.automatic_rollover {
-					self.rollover_contracts(now, then)?;
-				}
 				self.now = now;
-				Ok(true)
+				self.rollover_contracts()?;
+				Ok(false)
 			}
 			None => {
 				// Cash out
 				self.close_all_positions()?;
 				self.terminated = true;
-				Ok(false)
+				Ok(true)
 			}
 		}
 	}
 
 	pub fn open_position(&mut self, symbol: &String, count: u32, side: PositionSide) -> Result<u32> {
+		self.open_position_internal(symbol, count, side, Some(true), true, true)
+	}
+
+	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
+		self.close_position_internal(position_id, count, true, true)
+	}
+
+	pub fn get_result(&self) -> BacktestResult {
+		BacktestResult {
+			events: self.events.clone()
+		}
+	}
+
+	pub fn get_position(&self, id: u32) -> Result<Position> {
+		self.positions
+			.iter()
+			.find(|x| x.id == id)
+			.cloned()
+			.ok_or_else(|| anyhow!("Unable to find position with ID {id}"))
+	}
+
+	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
 		// Try to interpret the symbol as a futures root first
 		if let Ok(position_id) = self.open_by_root(symbol, count, side.clone()) {
 			return Ok(position_id);
@@ -200,7 +215,7 @@ impl<'a> Backtest<'a> {
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
 			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
-			let fees = if self.enable_fees {
+			let fees = if enable_fees {
 				forex_fee + asset.broker_fee + asset.exchange_fee
 			} else {
 				0.0
@@ -220,19 +235,22 @@ impl<'a> Backtest<'a> {
 				price: ask,
 				margin: maintenance_margin_usd,
 				archive: archive,
-				time: self.now.clone()
+				time: self.now.clone(),
+				automatic_rollover: automatic_rollover
 			};
 			self.next_position_id += 1;
 			self.positions.push(position.clone());
-			let message = format!("Opened position: {count} x {symbol} @ {ask}, {side} (ID {})", position.id);
-			self.log_event(EventType::OpenPosition, message);
+			if enable_logging {
+				let message = format!("Opened position: {count} x {symbol} @ {ask:.2}, {side} (ID {})", position.id);
+				self.log_event(EventType::OpenPosition, message);
+			}
 			Ok(position.id)
 		} else {
 			panic!("Encountered an unknown asset type");
 		}
 	}
 
-	pub fn close_position(&mut self, position_id: u32, count: u32) -> Result<()> {
+	fn close_position_internal(&mut self, position_id: u32, count: u32, enable_fees: bool, enable_logging: bool) -> Result<()> {
 		let position = self.positions
 			.iter()
 			.find(|x| x.id == position_id)
@@ -244,7 +262,7 @@ impl<'a> Backtest<'a> {
 		let asset = &position.asset;
 		let bid;
 		if asset.asset_type == AssetType::Futures {
-			let (value, position_bid) = self.get_position_value(&position, count)?;
+			let (value, position_bid) = self.get_position_value(&position, count, enable_fees)?;
 			bid = position_bid;
 			self.cash += value;
 			let new_count = position.count - count;
@@ -263,15 +281,11 @@ impl<'a> Backtest<'a> {
 		} else {
 			panic!("Encountered an unknown asset type");
 		}
-		let message = format!("Closed position: {count} x {} @ {bid}, {} (ID {})", position.symbol, position.side, position.id);
-		self.log_event(EventType::ClosePosition, message);
-		Ok(())
-	}
-
-	pub fn get_result(&self) -> BacktestResult {
-		BacktestResult {
-			events: self.events.clone()
+		if enable_logging {
+			let message = format!("Closed position: {count} x {} @ {bid:.2}, {} (ID {})", position.symbol, position.side, position.id);
+			self.log_event(EventType::ClosePosition, message);
 		}
+		Ok(())
 	}
 
 	fn open_by_root(&mut self, root: &String, count: u32, side: PositionSide) -> Result<u32> {
@@ -400,10 +414,10 @@ impl<'a> Backtest<'a> {
 		Ok(time_sequence)
 	}
 
-	fn get_account_value(&self) -> f64 {
+	fn get_account_value(&self, enable_fees: bool) -> f64 {
 		let position_value: f64 = self.positions
 			.iter()
-			.map(|position| self.get_position_value(position, position.count)
+			.map(|position| self.get_position_value(position, position.count, enable_fees)
 				.map(|(value, _)| value)
 				.unwrap_or(0.0))
 			.sum();
@@ -411,7 +425,7 @@ impl<'a> Backtest<'a> {
 		account_value
 	}
 
-	fn get_position_value(&self, position: &Position, count: u32) -> Result<(f64, f64)> {
+	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64)> {
 		let asset = &position.asset;
 		let record = self.get_current_record(&position.symbol)?;
 		let bid = record.close;
@@ -421,7 +435,7 @@ impl<'a> Backtest<'a> {
 			gain = - gain;
 		}
 		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
-		let cost = if self.enable_fees {
+		let cost = if enable_fees {
 			forex_fee + asset.broker_fee + asset.exchange_fee
 		} else {
 			0.0
@@ -450,7 +464,7 @@ impl<'a> Backtest<'a> {
 			let Some((position_id, position_count)) = self.get_first_position() else {
 				break;
 			};
-			let account_value = self.get_account_value();
+			let account_value = self.get_account_value(true);
 			/*
 			The current overnight margin check is wrong for two reasons:
 			1. It doesn't differentiate between different time zones (US session vs. European session vs. Asian session)
@@ -465,8 +479,8 @@ impl<'a> Backtest<'a> {
 				}
 				let close_result = self.close_position(position_id, position_count);
 				if close_result.is_err() {
-					let message = format!("Received a margin call with positions that cannot be liquidated");
-					self.log_event(EventType::Error, message);
+					let message = "Received a margin call with positions that cannot be liquidated";
+					self.log_event(EventType::Error, message.to_string());
 					self.terminated = true;
 					return close_result;
 				}
@@ -503,25 +517,37 @@ impl<'a> Backtest<'a> {
 		Ok(())
 	}
 
-	fn rollover_contracts(&mut self, now: DateTime<Utc>, then: DateTime<Utc>) -> Result<()> {
+	fn rollover_contracts(&mut self) -> Result<()> {
 		let positions = self.positions.clone();
 		let futures = positions
 			.iter()
-			.filter(|position| position.asset.asset_type == AssetType::Futures);
+			.filter(|position|
+				position.asset.asset_type == AssetType::Futures &&
+				position.automatic_rollover.is_some_and(|x| x)
+			);
 		for position in futures {
 			let symbol = &position.asset.symbol;
-			let (Ok(record_now), Ok(record_then)) = (self.get_record(symbol, now), self.get_record(symbol, then)) else {
-				bail!("Failed to perform rollover on asset {} at {now} due to missing data", position.symbol);
+			let Ok(record_now) = self.get_current_record(symbol) else {
+				continue;
 			};
-			if record_now.symbol != record_then.symbol {
-				// Roll over into new contract without even checking if the position matches the old one
-				// Temporarily disable fees to simulate the cost of a spread trade
-				self.enable_fees = false;
-				self.close_position(position.id, position.count)?;
-				self.enable_fees = true;
-				self.open_position(&record_now.symbol, position.count, position.side.clone())?;
+			if record_now.symbol != position.symbol {
+				// Check if the new contract is more recent than the one in the position we are currently holding
+				let globex_current = Self::get_globex_code(&position.symbol)?;
+				let globex_new = Self::get_globex_code(&record_now.symbol)?;
+				if globex_current.cmp(&globex_new) == Ordering::Less {
+					self.close_position_internal(position.id, position.count, false, false)?;
+					let position_id = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, false, false)?;
+					let new_position = self.get_position(position_id)?;
+					let message = format!("Rolled over position: {} x {} @ {:.2}, {} (ID {})", new_position.count, new_position.symbol, new_position.price, new_position.side, new_position.id);
+					self.log_event(EventType::Rollover, message);
+				}
 			}
 		}
 		Ok(())
+	}
+
+	fn get_globex_code(symbol: &String) -> Result<GlobexCode> {
+		GlobexCode::new(symbol)
+			.ok_or_else(|| anyhow!("Unable to parse Globex code {symbol}"))
 	}
 }

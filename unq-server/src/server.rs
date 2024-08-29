@@ -266,10 +266,9 @@ where
 
 fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager, backtest_configuration: &BacktestConfiguration) -> Result<BacktestResult> {
 	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
-	let time_frame = TimeFrame::Daily;
-	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
-	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
-	let backtest = Backtest::new(from.to_utc(), to.to_utc(), time_frame, backtest_configuration.clone(), asset_manager)?;
+	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
+	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
+	let backtest = Backtest::new(from.to_utc(), to.to_utc(), request.time_frame, backtest_configuration.clone(), asset_manager)?;
 	let backtest_mutex = Mutex::new(backtest);
 	let parameters = StrategyParameters(request.parameters);
 	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_mutex)?;
