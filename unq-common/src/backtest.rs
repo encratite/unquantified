@@ -1,7 +1,6 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
-use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,9 +26,9 @@ lazy_static! {
 	};
 }
 
-type BacktestEvents = Rc<RefCell<Vec<BacktestEvent>>>;
-type EquityCurveDaily = Rc<RefCell<Vec<EquityCurveData>>>;
-type EquityCurveTrades = Rc<RefCell<Vec<f64>>>;
+type BacktestEvents = Arc<Mutex<Vec<BacktestEvent>>>;
+type EquityCurveDaily = Arc<Mutex<Vec<EquityCurveData>>>;
+type EquityCurveTrades = Arc<Mutex<Vec<f64>>>;
 
 #[derive(Clone, PartialEq, Display)]
 pub enum PositionSide {
@@ -157,8 +156,8 @@ impl<'a> Backtest<'a> {
 			date: from,
 			account_value: configuration.starting_cash
 		};
-		let equity_curve_daily = Rc::new(RefCell::new(vec![equity_curve_data]));
-		let equity_curve_trades = Rc::new(RefCell::new(vec![configuration.starting_cash]));
+		let equity_curve_daily = Arc::new(Mutex::new(vec![equity_curve_data]));
+		let equity_curve_trades = Arc::new(Mutex::new(vec![configuration.starting_cash]));
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
@@ -168,7 +167,7 @@ impl<'a> Backtest<'a> {
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
-			events: Rc::new(RefCell::new(Vec::new())),
+			events: Arc::new(Mutex::new(Vec::new())),
 			equity_curve_daily,
 			equity_curve_trades,
 			terminated: false
@@ -321,7 +320,7 @@ impl<'a> Backtest<'a> {
 		}
 		if enable_equity_curve {
 			let account_value = self.get_account_value(true);
-			let mut equity_curve_trades = self.equity_curve_trades.borrow_mut();
+			let mut equity_curve_trades = self.equity_curve_trades.lock().unwrap();
 			equity_curve_trades.push(account_value);
 		}
 		Ok(())
@@ -542,7 +541,7 @@ impl<'a> Backtest<'a> {
 			event_type,
 			message
 		};
-		let mut events = self.events.borrow_mut();
+		let mut events = self.events.lock().unwrap();
 		events.push(event);
 	}
 
@@ -590,8 +589,8 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn update_equity_curve(&mut self) -> Result<()> {
-		let last_date_opt = self.equity_curve_daily
-			.borrow()
+		let mut equity_curve_daily = self.equity_curve_daily.lock().unwrap();
+		let last_date_opt = equity_curve_daily
 			.last()
 			.and_then(|x| Self::get_date(&x.date).ok());
 		let Some(last_date) = last_date_opt else {
@@ -605,7 +604,6 @@ impl<'a> Backtest<'a> {
 				date,
 				account_value
 			};
-			let mut equity_curve_daily = self.equity_curve_daily.borrow_mut();
 			equity_curve_daily.push(equity_curve_data);
 		}
 		Ok(())
