@@ -1,11 +1,10 @@
 use std::sync::Arc;
-use chrono::{DateTime, Duration, FixedOffset, Local, Months, TimeDelta};
-use chrono_tz::Tz;
+use chrono::{Duration, Local, Months, NaiveDateTime, TimeDelta};
 use serde::Deserialize;
 use anyhow::{Result, anyhow};
 use unq_common::ohlc::{OhlcArchive, TimeFrame};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 enum OffsetUnit {
 	#[serde(rename = "m")]
 	Minutes,
@@ -21,7 +20,7 @@ enum OffsetUnit {
 	Years
 }
 
-#[derive(Debug, Deserialize, PartialEq, Clone)]
+#[derive(Deserialize, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 enum SpecialDateTime {
 	First,
@@ -29,10 +28,10 @@ enum SpecialDateTime {
 	Now
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelativeDateTime {
-	date: Option<DateTime<FixedOffset>>,
+	date: Option<NaiveDateTime>,
 	/*
 	offset and offset_unit encode relative offsets such as +15m, -1w and -4y.
 	If set, all other members of RelativeDateTime must be set to None.
@@ -60,7 +59,7 @@ pub struct RelativeDateTime {
 }
 
 impl RelativeDateTime {
-	pub fn resolve(&self, other: &RelativeDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+	pub fn resolve(&self, other: &RelativeDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 		match (self.date.is_some(), self.offset.is_some(), self.offset_unit.is_some(), self.special_keyword.is_some()) {
 			(true, false, false, false) => Ok(self.date.unwrap()),
 			(false, true, true, false) => {
@@ -77,7 +76,7 @@ impl RelativeDateTime {
 		}
 	}
 
-	fn to_fixed(&self, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+	fn to_fixed(&self, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 		match (self.date.is_some(), self.special_keyword.is_some()) {
 			(true, false) => Ok(self.date.unwrap()),
 			(false, true) => {
@@ -89,13 +88,13 @@ impl RelativeDateTime {
 	}
 }
 
-fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<OhlcArchive>) -> Result<DateTime<FixedOffset>> {
+fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<OhlcArchive>) -> Result<NaiveDateTime> {
 	let mut time_values = archive.get_data(time_frame)
 		.unadjusted
 		.iter()
 		.map(|x| x.time);
-	let get_some_time = |time: Option<DateTime<Tz>>| match time {
-		Some(x) => Ok(x.fixed_offset()),
+	let get_some_time = |time: Option<NaiveDateTime>| match time {
+		Some(x) => Ok(x),
 		None => Err(anyhow!("No records available"))
 	};
 	if is_first {
@@ -105,17 +104,17 @@ fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<Ohlc
 	}
 }
 
-fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<DateTime<FixedOffset>> {
+fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 	if special_keyword == SpecialDateTime::Now {
-		let now: DateTime<Local> = Local::now();
-		let now_with_timezone: DateTime<FixedOffset> = now.with_timezone(now.offset());
-		Ok(now_with_timezone)
+		let now = Local::now();
+		let time = now.naive_local();
+		Ok(time)
 	} else {
 		let is_first = special_keyword == SpecialDateTime::First;
 		let times = archives
 			.iter()
 			.map(|x| resolve_first_last(is_first, time_frame, x))
-			.collect::<Result<Vec<DateTime<FixedOffset>>>>()?;
+			.collect::<Result<Vec<NaiveDateTime>>>()?;
 		let time = if is_first {
 			times.iter().min()
 		} else {
@@ -128,7 +127,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, arc
 	}
 }
 
-fn get_offset_date_time(time: &DateTime<FixedOffset>, offset: i16, offset_unit: OffsetUnit) -> Option<DateTime<FixedOffset>> {
+fn get_offset_date_time(time: &NaiveDateTime, offset: i16, offset_unit: OffsetUnit) -> Option<NaiveDateTime> {
 	let add_signed = |duration: fn(i64) -> TimeDelta, x: i16|
 		time.checked_add_signed(duration(x as i64));
 	let get_months = |x: i16| if x >= 0 {

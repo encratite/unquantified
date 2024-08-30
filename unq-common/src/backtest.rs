@@ -1,7 +1,7 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
 use std::cmp::Ordering;
 use std::sync::Mutex;
-use chrono::{DateTime, Utc};
+use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
@@ -58,11 +58,11 @@ pub struct Backtest<'a> {
 	// Long and short positions held by the account
 	positions: Vec<Position>,
 	// The current point in time
-	now: DateTime<Utc>,
+	now: NaiveDateTime,
 	// Controls the speed of the event loop, specified by the strategy
 	time_frame: TimeFrame,
 	// Fixed points in time the simulation will iterate over
-	time_sequence: VecDeque<DateTime<Utc>>,
+	time_sequence: VecDeque<NaiveDateTime>,
 	// Sequential ID used to uniquely identify positions
 	next_position_id: u32,
 	// Text-based event log, in ascending order
@@ -118,19 +118,20 @@ pub struct Position {
 	// Underlying OHLC archive of the asset
 	pub archive: Arc<OhlcArchive>,
 	// Time the position was created
-	pub time: DateTime<Utc>,
+	pub time: NaiveDateTime,
 	// Only used for futures, determines if the position should be automatically rolled over
 	pub automatic_rollover: Option<bool>
 }
 
 #[derive(Clone, Serialize)]
 pub struct BacktestEvent {
-	pub time: DateTime<Utc>,
+	pub time: NaiveDateTime,
 	pub event_type: EventType,
 	pub message: String
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BacktestResult {
 	starting_cash: f64,
 	final_cash: f64,
@@ -142,12 +143,12 @@ pub struct BacktestResult {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EquityCurveData {
-	pub date: DateTime<Utc>,
+	pub date: NaiveDateTime,
 	pub account_value: f64
 }
 
 impl<'a> Backtest<'a> {
-	pub fn new(from: DateTime<Utc>, to: DateTime<Utc>, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: &AssetManager) -> Result<Backtest> {
+	pub fn new(from: NaiveDateTime, to: NaiveDateTime, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: &AssetManager) -> Result<Backtest> {
 		if from >= to {
 			bail!("Invalid from/to parameters");
 		}
@@ -347,9 +348,8 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
-		let date = Self::get_date(&self.now)?;
-		let current_record = archive.daily.time_map.get(&date)
-			.with_context(|| anyhow!("Unable to find current record for symbol {} at {date}", asset.symbol))?;
+		let current_record = archive.daily.time_map.get(&self.now)
+			.with_context(|| anyhow!("Unable to find current record for symbol {} at {}", asset.symbol, self.now))?;
 		let last_record = archive.daily.unadjusted.last()
 			.with_context(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
@@ -397,7 +397,7 @@ impl<'a> Backtest<'a> {
 		self.get_record(symbol, self.now)
 	}
 
-	fn get_record(&self, symbol: &String, time: DateTime<Utc>) -> Result<OhlcArc> {
+	fn get_record(&self, symbol: &String, time: NaiveDateTime) -> Result<OhlcArc> {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
 		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcArc> {
@@ -429,14 +429,14 @@ impl<'a> Backtest<'a> {
 		Ok(record)
 	}
 
-	fn get_time_sequence(from: &DateTime<Utc>, to: &DateTime<Utc>, time_frame: &TimeFrame, asset_manager: &AssetManager) -> Result<VecDeque<DateTime<Utc>>> {
+	fn get_time_sequence(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: &TimeFrame, asset_manager: &AssetManager) -> Result<VecDeque<NaiveDateTime>> {
 		// Use S&P 500 futures as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();
 		let time_reference = asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
 		let source = time_reference.get_data(time_frame);
-		let time_keys: Box<dyn Iterator<Item = &DateTime<Utc>>> = Box::new(source.time_map.keys());
+		let time_keys: Box<dyn Iterator<Item = &NaiveDateTime>> = Box::new(source.time_map.keys());
 		let time_keys_in_range = time_keys
 			.filter(|&&x|
 				x >= *from &&
@@ -590,32 +590,21 @@ impl<'a> Backtest<'a> {
 
 	fn update_equity_curve(&mut self) -> Result<()> {
 		let mut equity_curve_daily = self.equity_curve_daily.lock().unwrap();
-		let last_date_opt = equity_curve_daily
+		let last_date_opt: Option<NaiveDateTime> = equity_curve_daily
 			.last()
-			.and_then(|x| Self::get_date(&x.date).ok());
+			.map(|x| x.date);
 		let Some(last_date) = last_date_opt else {
 			bail!("Equity curve daily data missing");
 		};
-		let date = Self::get_date(&self.now)?;
 		// Only update the equity curve
-		if date > last_date {
+		if self.now > last_date {
 			let account_value = self.get_account_value(true);
 			let equity_curve_data = EquityCurveData {
-				date,
+				date: self.now,
 				account_value
 			};
 			equity_curve_daily.push(equity_curve_data);
 		}
 		Ok(())
-	}
-
-	fn get_date(date_time: &DateTime<Utc>) -> Result<DateTime<Utc>> {
-		let naive_date_time = date_time
-			.naive_utc()
-			.date()
-			.and_hms_opt(0, 0, 0)
-			.with_context(|| "Date conversion failed")?;
-		let date_utc = DateTime::<Utc>::from_naive_utc_and_offset(naive_date_time, Utc);
-		Ok(date_utc)
 	}
 }

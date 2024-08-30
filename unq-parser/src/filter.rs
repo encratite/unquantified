@@ -3,7 +3,7 @@ use configparser::ini::Ini;
 use unq_common::globex::parse_globex_code;
 use crate::ini_file::get_ini_sections;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ContractFilter {
 	pub root: String,
 	first_contract: Option<String>,

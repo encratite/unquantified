@@ -5,7 +5,7 @@ pub trait Strategy {
 	fn next(&mut self) -> Result<()>;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct StrategyParameter {
 	pub name: String,
 	pub values: Option<Vec<f64>>,

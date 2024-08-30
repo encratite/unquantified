@@ -67,7 +67,7 @@ export class TimeParameter extends BasicValue {
 	getJsonValue() {
 		if (this.value instanceof luxon.DateTime) {
 			return {
-				date: this.value.toISO(),
+				date: TimeParameter.toFormat(this.value),
 				offset: null,
 				offsetUnit: null,
 				specialKeyword: null
@@ -81,6 +81,10 @@ export class TimeParameter extends BasicValue {
 				specialKeyword: this.value
 			};
 		}
+	}
+
+	static toFormat(dateTime) {
+		return dateTime.toFormat("yyyy-MM-dd'T'HH:mm:ss");
 	}
 }
 
@@ -162,7 +166,6 @@ export class ScriptingEngine {
 		this.callHandlers = callHandlers;
 		this.grammar = null;
 		this.semantics = null;
-		this.timezone = null;
 	}
 
 	async initialize() {
@@ -304,7 +307,7 @@ export class ScriptingEngine {
 
 	initializeSerialization() {
 		luxon.DateTime.prototype.toKVIN = (o, kvin) => {
-			return {args: [o.toISO()]};
+			return {args: [TimeParameter.toFormat(o)]};
 		};
 		const types = [
 			Variable,
@@ -362,10 +365,6 @@ export class ScriptingEngine {
 		this.variables = KVIN.deserialize(data);
 	}
 
-	setTimezone(timezone) {
-		this.timezone = timezone;
-	}
-
 	substituteVariables(input) {
 		const output = input.map(x => {
 			if (x instanceof Variable) {
@@ -383,16 +382,12 @@ export class ScriptingEngine {
 	}
 
 	createDate(year, month, day) {
-		const options = {};
-		if (this.timezone != null) {
-			options.zone = this.timezone;
-		}
 		const ymd = {
 			year: year,
 			month: month,
 			day: day
 		};
-		const dateTime = luxon.DateTime.fromObject(ymd, options);
+		const dateTime = luxon.DateTime.fromObject(ymd);
 		return dateTime;
 	}
 }

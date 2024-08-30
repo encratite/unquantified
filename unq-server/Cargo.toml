@@ -1,16 +1,15 @@
 [package]
 name = "unq-server"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 default-run = "unq-server"
 
 [dependencies]
-unq-common = { version = "0.3.0", path = "../unq-common" }
+unq-common = { version = "0.4.0", path = "../unq-common" }
 unq-strategy = { version = "0.1.0", path = "../unq-strategy" }
 anyhow = "1.0.86"
 axum = { version = "0.7.5", features = ["macros"] }
 chrono = { version = "0.4.38", features = ["rkyv-32", "serde"] }
-chrono-tz = "0.9.0"
 configparser = "3.1.0"
 csv = "1.3.0"
 futures-util = "0.3.30"

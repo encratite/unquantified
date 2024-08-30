@@ -1,5 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
-use chrono::{DateTime, FixedOffset};
+use chrono::NaiveDateTime;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
 use anyhow::{bail, Context, Result};
@@ -8,12 +8,12 @@ use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
 #[derive(Debug, Serialize)]
 pub struct CorrelationData {
 	pub symbols: Vec<String>,
-	pub from: DateTime<FixedOffset>,
-	pub to: DateTime<FixedOffset>,
+	pub from: NaiveDateTime,
+	pub to: NaiveDateTime,
 	pub correlation: Vec<Vec<f64>>,
 }
 
-pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData> {
+pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime, request_to: NaiveDateTime, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData> {
 	// Determine smallest overlapping time range across all OHLC records
 	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
@@ -58,12 +58,12 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: DateTime<Fixed
 	Ok(output)
 }
 
-fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>)
-	-> Result<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
+fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime, archives: &Vec<Arc<OhlcArchive>>)
+	-> Result<(NaiveDateTime, NaiveDateTime)> {
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
-			let get_time = |x: &OhlcArc| Some(x.time.fixed_offset());
+			let get_time = |x: &OhlcArc| Some(x.time);
 			let records = get_records(archive);
 			let first = records
 				.first()
@@ -82,7 +82,7 @@ fn get_common_time_range(request_from: DateTime<FixedOffset>, request_to: DateTi
 	Ok((from, to))
 }
 
-fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>> {
+fn get_delta_samples(from: &NaiveDateTime, to: &NaiveDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>> {
 	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
 	let in_range = |fixed_time| fixed_time >= *from && fixed_time <= *to;
 	let mut indexes = HashMap::new();
@@ -91,9 +91,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 	let mut i: usize = 0;
 	let records = get_records(first_archive);
 	for x in records {
-		let fixed_time = x.time.fixed_offset();
-		if in_range(fixed_time) {
-			indexes.insert(fixed_time, i);
+		if in_range(x.time) {
+			indexes.insert(x.time, i);
 			i += 1;
 		}
 	}
@@ -108,9 +107,8 @@ fn get_delta_samples(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, a
 		// Get close samples for the dynamic time range
 		let records = get_records(archive);
 		for record in records {
-			let fixed_time = record.time.fixed_offset();
-			if in_range(fixed_time) {
-				if let Some(index) = indexes.get(&fixed_time) {
+			if in_range(record.time) {
+				if let Some(index) = indexes.get(&record.time) {
 					let sample = record.close;
 					samples[*index] = sample;
 					sum += sample;

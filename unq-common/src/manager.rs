@@ -5,12 +5,12 @@ use serde::Deserialize;
 use anyhow::{Context, Result, bail};
 use crate::{get_archive_file_name, read_archive, read_csv, OhlcArchive};
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Deserialize, Clone, PartialEq)]
 pub enum AssetType {
 	Futures
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct Asset {
 	pub symbol: String,
 	pub name: String,

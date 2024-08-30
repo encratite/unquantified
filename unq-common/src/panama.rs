@@ -1,11 +1,10 @@
 use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, sync::Arc, cmp::Ordering};
-use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
-use chrono_tz::Tz;
+use chrono::{Duration, NaiveDate, NaiveDateTime, Timelike};
 use anyhow::{Result, anyhow, bail, Context};
 use crate::{globex::GlobexCode, RawOhlcArchive};
 use crate::ohlc::{OhlcArc, OhlcContractMap, OhlcVec};
 
-type BoundaryMap<'a> = BTreeMap<&'a String, (DateTime<Tz>, DateTime<Tz>)>;
+type BoundaryMap<'a> = BTreeMap<&'a String, (NaiveDateTime, NaiveDateTime)>;
 pub type OffsetMap = HashMap<String, f64>;
 
 pub struct PanamaCanal<'a> {
@@ -69,7 +68,7 @@ impl<'a> PanamaCanal<'a> {
 		let mut output = OhlcVec::new();
 		let mut daily_map = HashMap::new();
 		for x in daily {
-			daily_map.insert(x.time.date_naive(), &x.symbol);
+			daily_map.insert(x.time.date(), &x.symbol);
 		}
 		let (mut current_contract, first_date) = Self::get_current_contract(intraday, daily, &daily_map)?;
 		let Some(mut offset) = Self::deref(offset_map.get(current_contract)) else {
@@ -77,7 +76,7 @@ impl<'a> PanamaCanal<'a> {
 		};
 		let mut rollover_date = first_date;
 		for (time, records) in intraday.iter() {
-			let date = time.date_naive();
+			let date = time.date();
 			if let Some(daily_contract) = Self::deref(daily_map.get(&date)) {
 				if daily_contract != current_contract {
 					// Try to perform the rollover during the primary trading session and not at midnight
@@ -104,14 +103,14 @@ impl<'a> PanamaCanal<'a> {
 	fn get_current_contract<'b>(intraday: &OhlcContractMap, daily: &OhlcVec, daily_map: &HashMap<NaiveDate, &'b String>) -> Result<(&'b String, NaiveDate)> {
 		let first_intraday_date_opt = intraday
 			.keys()
-			.map(|x| x.date_naive())
+			.map(|x| x.date())
 			.next();
 		let Some(first_intraday_date) = first_intraday_date_opt else {
 			bail!("Unable to get first intraday date");
 		};
 		let first_daily_date_opt = daily
 			.iter()
-			.map(|x| x.time.date_naive())
+			.map(|x| x.time.date())
 			.next();
 		let Some(first_daily_date) = first_daily_date_opt else {
 			bail!("Unable to get first daily date");
@@ -156,7 +155,7 @@ impl<'a> PanamaCanal<'a> {
 		boundary_map
 	}
 
-	fn get_next_record(&mut self, time: &DateTime<Utc>, records: &OhlcVec) -> Result<Option<OhlcArc>> {
+	fn get_next_record(&mut self, time: &NaiveDateTime, records: &OhlcVec) -> Result<Option<OhlcArc>> {
 		let get_output = |record: &OhlcArc| Ok(Some(record.clone()));
 		let filtered_records = self.filter_records(records);
 		let Some(new_record) = RawOhlcArchive::get_most_popular_record(&filtered_records, self.skip_front_contract)? else {
@@ -194,17 +193,17 @@ impl<'a> PanamaCanal<'a> {
 		}
 	}
 
-	fn get_boundaries(&self, symbol: &String) -> Result<&(DateTime<Tz>, DateTime<Tz>)> {
+	fn get_boundaries(&self, symbol: &String) -> Result<&(NaiveDateTime, NaiveDateTime)> {
 		self.boundary_map
 			.get(symbol)
 			.with_context(|| anyhow!("Failed to determine contract expiration date of {symbol}"))
 	}
 
-	fn get_time_limit(&self) -> Result<Option<DateTime<Tz>>> {
+	fn get_time_limit(&self) -> Result<Option<NaiveDateTime>> {
 		if self.skip_front_contract {
 			// Prevent get_next_record from being called on the first contract with skip_front_contract enabled
 			// Otherwise it would return an error
-			let mut contracts: Vec<(GlobexCode, DateTime<Tz>)> = self.boundary_map
+			let mut contracts: Vec<(GlobexCode, NaiveDateTime)> = self.boundary_map
 				.iter()
 				.map(|(key, (first, _))| (GlobexCode::new(key).unwrap(), first.clone()))
 				.collect();
@@ -230,14 +229,14 @@ impl<'a> PanamaCanal<'a> {
 			.collect()
 	}
 
-	fn perform_time_check(&self, time: &DateTime<Utc>) -> Result<Option<OhlcArc>> {
+	fn perform_time_check(&self, time: &NaiveDateTime) -> Result<Option<OhlcArc>> {
 		let (first, _) = self.get_boundaries(&self.current_contract)?;
 		if first < time {
 			// There is still more data available for that contract, just not for the current point in time
 			// Leave a gap and wait for the older records to become available to perform the rollover
-			return Ok(None);
+			Ok(None)
 		} else {
-			bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time.to_rfc3339());
+			bail!("Failed to perform rollover for contract {} at {}", self.current_contract, time);
 		}
 	}
 

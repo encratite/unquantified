@@ -1,19 +1,17 @@
 use std::collections::{BTreeMap, HashSet};
-use std::str::FromStr;
 use std::sync::Arc;
 use anyhow::{anyhow, bail};
-use chrono::{DateTime, NaiveDateTime, Utc};
-use chrono_tz::Tz;
+use chrono::NaiveDateTime;
 use rkyv::{Archive, Deserialize, Serialize};
 use crate::globex::GlobexCode;
 use crate::panama::{OffsetMap, PanamaCanal};
 
 pub type OhlcArc = Arc<OhlcRecord>;
 pub type OhlcVec = Vec<OhlcArc>;
-pub type OhlcTimeMap = BTreeMap<DateTime<Utc>, OhlcArc>;
-pub type OhlcContractMap = BTreeMap<DateTime<Utc>, OhlcVec>;
+pub type OhlcTimeMap = BTreeMap<NaiveDateTime, OhlcArc>;
+pub type OhlcContractMap = BTreeMap<NaiveDateTime, OhlcVec>;
 
-#[derive(Debug, Clone, PartialEq, Archive, Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Archive, Serialize, serde::Deserialize)]
 pub enum TimeFrame {
 	#[serde(rename = "daily")]
 	Daily,
@@ -21,15 +19,14 @@ pub enum TimeFrame {
 	Intraday
 }
 
-#[derive(Debug, Archive, Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct RawOhlcArchive {
 	pub daily: Vec<RawOhlcRecord>,
 	pub intraday: Vec<RawOhlcRecord>,
-	pub intraday_time_frame: u16,
-	pub time_zone: String
+	pub intraday_time_frame: u16
 }
 
-#[derive(Debug, Archive, Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct RawOhlcRecord {
 	pub symbol: String,
 	pub time: NaiveDateTime,
@@ -41,7 +38,6 @@ pub struct RawOhlcRecord {
 	pub open_interest: Option<u32>
 }
 
-#[derive(Debug)]
 pub struct OhlcArchive {
 	pub daily: OhlcData,
 	pub intraday: OhlcData,
@@ -66,7 +62,6 @@ Futures:
 - "time_map" maps timestamps to continuous contract data in "adjusted"
 - Each vector in "contract_map" contains the full set of active contracts for that particular point in time
  */
-#[derive(Debug)]
 pub struct OhlcData {
 	pub unadjusted: OhlcVec,
 	pub adjusted: Option<OhlcVec>,
@@ -74,10 +69,10 @@ pub struct OhlcData {
 	pub contract_map: Option<OhlcContractMap>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OhlcRecord {
 	pub symbol: String,
-	pub time: DateTime<Tz>,
+	pub time: NaiveDateTime,
 	pub open: f64,
 	pub high: f64,
 	pub low: f64,
@@ -88,9 +83,7 @@ pub struct OhlcRecord {
 
 impl RawOhlcArchive {
 	pub fn to_archive(&self, skip_front_contract: bool) -> anyhow::Result<OhlcArchive> {
-		let time_zone = Tz::from_str(self.time_zone.as_str())
-			.expect("Invalid time zone in archive");
-		let (daily, offset_map_opt) = Self::get_data(&self.daily, None, &time_zone, skip_front_contract)?;
+		let (daily, offset_map_opt) = Self::get_data(&self.daily, None, skip_front_contract)?;
 		let Some(offset_map) = offset_map_opt else {
 			bail!("Missing offset map");
 		};
@@ -98,7 +91,7 @@ impl RawOhlcArchive {
 			bail!("Missing daily adjusted records");
 		};
 		let daily_offset_map = Some((daily_adjusted, &offset_map));
-		let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, &time_zone, skip_front_contract)?;
+		let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, skip_front_contract)?;
 		let archive = OhlcArchive {
 			daily,
 			intraday,
@@ -153,11 +146,11 @@ impl RawOhlcArchive {
 		false
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, time_zone: &Tz, skip_front_contract: bool) -> anyhow::Result<(OhlcData, Option<OffsetMap>)> {
+	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, skip_front_contract: bool) -> anyhow::Result<(OhlcData, Option<OffsetMap>)> {
 		let is_contract = Self::is_contract(records);
 		if is_contract {
 			// Futures contract
-			let contract_map = Self::get_contract_map(records, time_zone);
+			let contract_map = Self::get_contract_map(records);
 			let unadjusted = Self::get_unadjusted_data_from_map(&contract_map, skip_front_contract)?;
 			let adjusted;
 			let output_offset_map;
@@ -182,7 +175,7 @@ impl RawOhlcArchive {
 		} else {
 			// Currency
 			let contract_map = None;
-			let unadjusted = Self::get_unadjusted_data(records, time_zone);
+			let unadjusted = Self::get_unadjusted_data(records);
 			let adjusted = None;
 			let time_map = Self::get_time_map(&unadjusted, &adjusted);
 			let data = OhlcData {
@@ -219,9 +212,9 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcVec {
+	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>) -> OhlcVec {
 		records.iter().map(|x| {
-			let record = x.to_archive(&time_zone);
+			let record = x.to_archive();
 			Arc::new(record)
 		}).collect()
 	}
@@ -247,17 +240,16 @@ impl RawOhlcArchive {
 		Ok(Some(output))
 	}
 
-	fn get_contract_map(records: &Vec<RawOhlcRecord>, time_zone: &Tz) -> OhlcContractMap {
+	fn get_contract_map(records: &Vec<RawOhlcRecord>) -> OhlcContractMap {
 		let mut map = OhlcContractMap::new();
 		records.iter().for_each(|x| {
-			let time = x.get_time_utc(time_zone);
-			let record = x.to_archive(&time_zone);
+			let record = x.to_archive();
 			let value = Arc::new(record);
-			if let Some(records) = map.get_mut(&time) {
+			if let Some(records) = map.get_mut(&x.time) {
 				records.push(value);
 			} else {
 				let records = vec![value];
-				map.insert(time, records);
+				map.insert(x.time, records);
 			}
 		});
 		map
@@ -270,7 +262,7 @@ impl RawOhlcArchive {
 		};
 		let mut map = OhlcTimeMap::new();
 		for record in source {
-			let key = record.time.to_utc();
+			let key = record.time;
 			let value = record.clone();
 			map.insert(key, value);
 		}
@@ -279,11 +271,10 @@ impl RawOhlcArchive {
 }
 
 impl RawOhlcRecord {
-	pub fn to_archive(&self, time_zone: &Tz) -> OhlcRecord {
-		let time_tz = self.get_time_tz(time_zone);
+	pub fn to_archive(&self) -> OhlcRecord {
 		OhlcRecord {
 			symbol: self.symbol.clone(),
-			time: time_tz,
+			time: self.time,
 			open: self.open,
 			high: self.high,
 			low: self.low,
@@ -291,16 +282,6 @@ impl RawOhlcRecord {
 			volume: self.volume,
 			open_interest: self.open_interest
 		}
-	}
-
-	pub fn get_time_tz(&self, time_zone: &Tz) -> DateTime<Tz> {
-		let time_utc = DateTime::<Utc>::from_naive_utc_and_offset(self.time, Utc);
-		time_utc.with_timezone(time_zone)
-	}
-
-	pub fn get_time_utc(&self, time_zone: &Tz) -> DateTime<Utc> {
-		let time_tz = self.get_time_tz(time_zone);
-		time_tz.to_utc()
 	}
 }
 

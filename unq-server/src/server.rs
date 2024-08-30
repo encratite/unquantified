@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use std::sync::Mutex;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
-use chrono::{DateTime, FixedOffset};
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
@@ -23,13 +23,13 @@ struct ServerState {
 	backtest_configuration: BacktestConfiguration
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct Response<T> {
 	result: Option<T>,
 	error: Option<String>
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetHistoryRequest {
 	symbols: Vec<String>,
@@ -39,14 +39,14 @@ struct GetHistoryRequest {
 	time_frame: u16
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct GetCorrelationRequest {
 	symbols: Vec<String>,
 	from: RelativeDateTime,
 	to: RelativeDateTime
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RunBacktestRequest {
 	strategy: String,
@@ -57,11 +57,11 @@ struct RunBacktestRequest {
 	time_frame: TimeFrame
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OhlcRecordWeb {
 	pub symbol: String,
-	pub time: String,
+	pub time: NaiveDateTime,
 	pub open: f64,
 	pub high: f64,
 	pub low: f64,
@@ -74,7 +74,7 @@ impl OhlcRecordWeb {
 	pub fn new(record: &OhlcRecord) -> OhlcRecordWeb {
 		OhlcRecordWeb {
 			symbol: record.symbol.clone(),
-			time: record.time.to_rfc3339(),
+			time: record.time,
 			open: record.open,
 			high: record.high,
 			low: record.low,
@@ -194,7 +194,7 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 	get_correlation_matrix(resolved_symbols, from, to, archives)
 }
 
-fn get_ohlc_records(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
+fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
 	if time_frame >= MINUTES_PER_DAY {
 		return Ok(get_raw_records_from_archive(from, to, archive.daily.get_adjusted_fallback()));
 	} else if time_frame == archive.intraday_time_frame {
@@ -221,7 +221,7 @@ fn merge_ohlc_records(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
 	let first = data.first().unwrap();
 	let last = data.last().unwrap();
 	let symbol = first.symbol.clone();
-	let time = first.time.to_rfc3339();
+	let time = first.time;
 	let open = first.open;
 	let high = data
 		.iter()
@@ -249,11 +249,11 @@ fn merge_ohlc_records(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
 	Ok(record)
 }
 
-fn matches_from_to(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, record: &OhlcRecord) -> bool {
+fn matches_from_to(from: &NaiveDateTime, to: &NaiveDateTime, record: &OhlcRecord) -> bool {
 	record.time >= *from && record.time < *to
 }
 
-fn get_raw_records_from_archive<'a, T>(from: &DateTime<FixedOffset>, to: &DateTime<FixedOffset>, records: T) -> Vec<OhlcRecordWeb>
+fn get_raw_records_from_archive<'a, T>(from: &NaiveDateTime, to: &NaiveDateTime, records: T) -> Vec<OhlcRecordWeb>
 where
 	T: IntoIterator<Item = &'a OhlcArc>,
 {
@@ -268,7 +268,7 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
-	let backtest = Backtest::new(from.to_utc(), to.to_utc(), request.time_frame, backtest_configuration.clone(), asset_manager)?;
+	let backtest = Backtest::new(from, to, request.time_frame, backtest_configuration.clone(), asset_manager)?;
 	let backtest_mutex = Mutex::new(backtest);
 	let parameters = StrategyParameters(request.parameters);
 	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_mutex)?;

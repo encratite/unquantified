@@ -31,17 +31,13 @@ export class WebUi {
 			candle: this.plotCandlestick.bind(this),
 			plot: this.plotLine.bind(this),
 			correlation: this.correlation.bind(this),
-			backtest: this.backtest.bind(this),
-			timezone: this.timezone.bind(this)
+			backtest: this.backtest.bind(this)
 		};
 		this.engine = new ScriptingEngine(callHandlers);
 		await this.engine.initialize();
 		const data = this.getLocalStorageData();
 		if (data.lastScript != null) {
 			this.editor.setValue(data.lastScript, 1);
-		}
-		if (data.timezone != null) {
-			this.engine.setTimezone(data.timezone);
 		}
 		if (data.variables != null) {
 			this.engine.deserializeVariables(data.variables);
@@ -558,18 +554,6 @@ export class WebUi {
 			timeFrame.getJsonValue(),
 		);
 		console.log(response);
-	}
-
-	async timezone(callArguments) {
-		this.validateArgumentCount(callArguments, 1, 1);
-		const timezoneArgument = callArguments[0];
-		if (!(timezoneArgument instanceof String)) {
-			throw new Error("Invalid timezone argument type");
-		}
-		const timezone = timezoneArgument.value;
-		const data = this.getLocalStorageData();
-		data.timezone = timezone;
-		this.engine.setTimezone(timezone);
 	}
 
 	validateArgumentCount(callArguments, min, max) {

@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, collections::HashSet, fs, path::{Path, PathBuf}
 use regex::Regex;
 use serde;
 use chrono::{NaiveDate, NaiveDateTime};
-use chrono_tz::Tz;
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
 use anyhow::{Result, anyhow};
@@ -12,7 +11,7 @@ use crate::{filter::ContractFilter, symbol::SymbolMapper};
 
 type OhlcTreeMap = BTreeMap<OhlcKey, RawOhlcRecord>;
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 struct CsvRecord {
 	symbol: String,
 	time: String,
@@ -24,14 +23,13 @@ struct CsvRecord {
 	open_interest: Option<u32>
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct OhlcKey {
 	symbol: String,
 	time: NaiveDateTime
 }
 
 pub struct CsvParser {
-	time_zone: Tz,
 	intraday_time_frame: u16,
 	input_directory: PathBuf,
 	output_directory: PathBuf,
@@ -40,9 +38,8 @@ pub struct CsvParser {
 }
 
 impl CsvParser {
-	pub fn new(time_zone: Tz, intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>, symbol_mapper: SymbolMapper) -> CsvParser {
+	pub fn new(intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>, symbol_mapper: SymbolMapper) -> CsvParser {
 		CsvParser {
-			time_zone,
 			intraday_time_frame,
 			input_directory,
 			output_directory,
@@ -112,12 +109,10 @@ impl CsvParser {
 		let (daily, daily_excluded) = self.parse_csv_files(ticker_directory, daily_filter, false);
 		let (intraday, intraday_excluded) = self.parse_csv_files(ticker_directory, intraday_filter, true);
 		let archive_path = self.get_archive_path(ticker_directory);
-		let time_zone = self.time_zone.to_string();
 		let archive = RawOhlcArchive {
 			daily,
 			intraday,
-			intraday_time_frame: self.intraday_time_frame,
-			time_zone
+			intraday_time_frame: self.intraday_time_frame
 		};
 		match write_archive(&archive_path, &archive) {
 			Ok(_) => {}
