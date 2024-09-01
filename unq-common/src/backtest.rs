@@ -10,6 +10,7 @@ use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}
 use crate::globex::GlobexCode;
 use crate::OhlcArchive;
 use crate::ohlc::{OhlcArc, TimeFrame};
+use crate::web::WebF64;
 
 const FOREX_USD: &str = "USD";
 const FOREX_EUR: &str = "EUR";
@@ -25,8 +26,6 @@ lazy_static! {
 		map
 	};
 }
-
-type EquityCurveTrades = Vec<f64>;
 
 #[derive(Clone, PartialEq, Display)]
 pub enum PositionSide {
@@ -69,7 +68,7 @@ pub struct Backtest<'a> {
 	// Daily equity curve data
 	equity_curve_daily: Vec<EquityCurveData>,
 	// Equity curve, by trades
-	equity_curve_trades: EquityCurveTrades,
+	equity_curve_trades: Vec<WebF64>,
 	// Indicates whether the backtest is still running or not
 	terminated: bool
 }
@@ -135,18 +134,18 @@ pub struct BacktestEvent {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestResult {
-	starting_cash: f64,
-	final_cash: f64,
+	starting_cash: WebF64,
+	final_cash: WebF64,
 	events: Vec<BacktestEvent>,
 	equity_curve_daily: Vec<EquityCurveData>,
-	equity_curve_trades: EquityCurveTrades
+	equity_curve_trades: Vec<WebF64>
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EquityCurveData {
 	pub date: NaiveDateTime,
-	pub account_value: f64
+	pub account_value: WebF64
 }
 
 impl<'a> Backtest<'a> {
@@ -157,10 +156,10 @@ impl<'a> Backtest<'a> {
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
 		let equity_curve_data = EquityCurveData {
 			date: from,
-			account_value: configuration.starting_cash
+			account_value: WebF64(configuration.starting_cash)
 		};
 		let equity_curve_daily = vec![equity_curve_data];
-		let equity_curve_trades = vec![configuration.starting_cash];
+		let equity_curve_trades = vec![WebF64(configuration.starting_cash)];
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
@@ -212,8 +211,8 @@ impl<'a> Backtest<'a> {
 
 	pub fn get_result(&self) -> BacktestResult {
 		BacktestResult {
-			starting_cash: self.configuration.starting_cash,
-			final_cash: self.cash,
+			starting_cash: WebF64(self.configuration.starting_cash),
+			final_cash: WebF64(self.cash),
 			events: self.events.clone(),
 			equity_curve_daily: self.equity_curve_daily.clone(),
 			equity_curve_trades: self.equity_curve_trades.clone()
@@ -339,7 +338,7 @@ impl<'a> Backtest<'a> {
 		}
 		if enable_equity_curve {
 			let account_value = self.get_account_value(true);
-			self.equity_curve_trades.push(account_value);
+			self.equity_curve_trades.push(WebF64(account_value));
 		}
 		Ok(())
 	}
@@ -618,7 +617,7 @@ impl<'a> Backtest<'a> {
 			let account_value = self.get_account_value(true);
 			let equity_curve_data = EquityCurveData {
 				date: self.now,
-				account_value
+				account_value: WebF64(account_value)
 			};
 			self.equity_curve_daily.push(equity_curve_data);
 		}
@@ -628,7 +627,7 @@ impl<'a> Backtest<'a> {
 	fn ruin_check(&mut self) -> Result<()> {
 		let last = self.equity_curve_daily.last()
 			.with_context(|| anyhow!("Unable to retrieve most recent equity curve value"))?;
-		if last.account_value < self.configuration.ruin_ratio * self.configuration.starting_cash {
+		if last.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
 			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
 			self.log_event(EventType::Ruin, message.to_string());
 			bail!(message);

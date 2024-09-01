@@ -3,6 +3,7 @@ pub mod manager;
 pub mod ohlc;
 pub mod globex;
 pub mod strategy;
+pub mod web;
 mod panama;
 
 use std::{fs::File, path::PathBuf};

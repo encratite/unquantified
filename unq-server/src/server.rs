@@ -12,6 +12,7 @@ use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcRecord, TimeFrame};
 use unq_common::strategy::{StrategyParameter, StrategyParameters};
+use unq_common::web::WebF64;
 use unq_strategy::get_strategy;
 use crate::correlation::{get_correlation_matrix, CorrelationData};
 use crate::datetime::RelativeDateTime;
@@ -62,10 +63,10 @@ struct RunBacktestRequest {
 struct OhlcRecordWeb {
 	pub symbol: String,
 	pub time: NaiveDateTime,
-	pub open: f64,
-	pub high: f64,
-	pub low: f64,
-	pub close: f64,
+	pub open: WebF64,
+	pub high: WebF64,
+	pub low: WebF64,
+	pub close: WebF64,
 	pub volume: u32,
 	pub open_interest: Option<u32>
 }
@@ -75,10 +76,10 @@ impl OhlcRecordWeb {
 		OhlcRecordWeb {
 			symbol: record.symbol.clone(),
 			time: record.time,
-			open: record.open,
-			high: record.high,
-			low: record.low,
-			close: record.close,
+			open: WebF64(record.open),
+			high: WebF64(record.high),
+			low: WebF64(record.low),
+			close: WebF64(record.close),
 			volume: record.volume,
 			open_interest: record.open_interest
 		}
@@ -239,10 +240,10 @@ fn merge_ohlc_records(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
 	let record = OhlcRecordWeb {
 		symbol,
 		time,
-		open,
-		high,
-		low,
-		close,
+		open: WebF64(open),
+		high: WebF64(high),
+		low: WebF64(low),
+		close: WebF64(close),
 		volume,
 		open_interest
 	};
