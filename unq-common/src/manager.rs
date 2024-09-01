@@ -37,15 +37,15 @@ impl AssetManager {
 		AssetManager {
 			ticker_directory,
 			tickers: DashMap::new(),
-			assets: assets
+			assets
 		}
 	}
 
 	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>> {
 		// Simple directory traversal check
-		let pattern = Regex::new("^[A-Z0-9]+$")?;
+		let pattern = Regex::new(r"^\^?[A-Z0-9]+$")?;
 		if !pattern.is_match(symbol) {
-			bail!("Unable to find an OHLC archive with that symbol");
+			bail!("Invalid characters in OHLC archive name");
 		}
 		if let Some(archive_ref) = self.tickers.get(symbol) {
 			Ok(archive_ref.value().clone())

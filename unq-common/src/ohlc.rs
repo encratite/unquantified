@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use chrono::NaiveDateTime;
 use rkyv::{Archive, Deserialize, Serialize};
 use crate::globex::GlobexCode;
@@ -82,16 +82,25 @@ pub struct OhlcRecord {
 }
 
 impl RawOhlcArchive {
-	pub fn to_archive(&self, skip_front_contract: bool) -> anyhow::Result<OhlcArchive> {
-		let (daily, offset_map_opt) = Self::get_data(&self.daily, None, skip_front_contract)?;
-		let Some(offset_map) = offset_map_opt else {
-			bail!("Missing offset map");
+	pub fn to_archive(&self, skip_front_contract: bool) -> Result<OhlcArchive> {
+		let is_contract = Self::is_contract(&self.daily);
+		let (daily, intraday) = if is_contract {
+			let (daily, offset_map_opt) = Self::get_data(&self.daily, None, skip_front_contract)?;
+			let Some(offset_map) = offset_map_opt else {
+				bail!("Missing offset map");
+			};
+			let Some(daily_adjusted) = &daily.adjusted else {
+				bail!("Missing daily adjusted records");
+			};
+			let daily_offset_map = Some((daily_adjusted, &offset_map));
+			let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, skip_front_contract)?;
+			(daily, intraday)
+		}
+		else {
+			let (daily, _) = Self::get_data(&self.daily, None, skip_front_contract)?;
+			let (intraday, _) = Self::get_data(&self.intraday, None, skip_front_contract)?;
+			(daily, intraday)
 		};
-		let Some(daily_adjusted) = &daily.adjusted else {
-			bail!("Missing daily adjusted records");
-		};
-		let daily_offset_map = Some((daily_adjusted, &offset_map));
-		let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, skip_front_contract)?;
 		let archive = OhlcArchive {
 			daily,
 			intraday,
@@ -100,7 +109,7 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	pub fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> anyhow::Result<Option<OhlcArc>> {
+	pub fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<Option<OhlcArc>> {
 		if records.is_empty() {
 			return Ok(None);
 		} else if records.len() == 1 {
@@ -146,7 +155,7 @@ impl RawOhlcArchive {
 		false
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, skip_front_contract: bool) -> anyhow::Result<(OhlcData, Option<OffsetMap>)> {
+	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, skip_front_contract: bool) -> Result<(OhlcData, Option<OffsetMap>)> {
 		let is_contract = Self::is_contract(records);
 		if is_contract {
 			// Futures contract
@@ -188,7 +197,7 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> anyhow::Result<OhlcVec> {
+	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec> {
 		if skip_front_contract && records.len() >= 2 {
 			let mut tuples: Vec<(GlobexCode, OhlcArc)> = records
 				.iter()
@@ -199,7 +208,7 @@ impl RawOhlcArchive {
 						Err(anyhow!("Failed to parse Globex code while filtering records"))
 					}
 				})
-				.collect::<anyhow::Result<Vec<(GlobexCode, OhlcArc)>>>()?;
+				.collect::<Result<Vec<(GlobexCode, OhlcArc)>>>()?;
 			tuples.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
 			let filtered_records: Vec<OhlcArc> = tuples
 				.iter()
@@ -219,7 +228,7 @@ impl RawOhlcArchive {
 		}).collect()
 	}
 
-	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> anyhow::Result<OhlcVec> {
+	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec> {
 		map.values()
 			.map(|records| {
 				Self::get_most_popular_record(records, skip_front_contract)
@@ -232,7 +241,7 @@ impl RawOhlcArchive {
 			.collect()
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> anyhow::Result<Option<(OhlcVec, OffsetMap)>> {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<(OhlcVec, OffsetMap)>> {
 		let Some(mut panama) = PanamaCanal::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};

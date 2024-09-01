@@ -235,12 +235,17 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
-		// Try to interpret the symbol as a futures root first
-		if let Ok(position_id) = self.open_by_root(symbol, count, side.clone()) {
-			return Ok(position_id);
+		let (root, symbol) = match parse_globex_code(&symbol) {
+			Some((root, _, _)) => (root, symbol.clone()),
+			None => {
+				// Try to interpret the symbol as a futures root
+				let root = symbol;
+				let Some(resolved_symbol) = self.get_symbol_from_root(root) else {
+					bail!("Unable to parse symbol {root}");
+				};
+				(root.clone(), resolved_symbol)
+			}
 		};
-		let (root, _, _) = parse_globex_code(&symbol)
-			.with_context(|| "Unable to parse Globex code")?;
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let current_record = self.get_current_record(&symbol)?;
@@ -327,8 +332,10 @@ impl<'a> Backtest<'a> {
 		Ok(())
 	}
 
-	fn open_by_root(&mut self, root: &String, count: u32, side: PositionSide) -> Result<u32> {
-		let archive = self.asset_manager.get_archive(root)?;
+	fn get_symbol_from_root(&mut self, root: &String) -> Option<String> {
+		let Ok(archive) = self.asset_manager.get_archive(root) else {
+			return None;
+		};
 		let data = archive.get_data(&self.time_frame);
 		let latest_record = if let Some(record) = data.time_map.get(&self.now) {
 			record
@@ -340,11 +347,11 @@ impl<'a> Backtest<'a> {
 				.filter(|x| x.time < self.now)
 				.next()
 			else {
-				bail!("Unable to determine contract to open position for root {root}");
+				return None
 			};
 			record
 		};
-		self.open_position(&latest_record.symbol, count, side)
+		Some(latest_record.symbol.clone())
 	}
 
 	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {

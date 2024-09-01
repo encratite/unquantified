@@ -3,7 +3,7 @@ mod filter;
 mod symbol;
 mod ini_file;
 
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use filter::ContractFilter;
 use parser::CsvParser;

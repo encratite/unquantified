@@ -7,7 +7,8 @@ YM,E-Mini Dow Jones Industrial Average,Futures,USD,1.0,5.0,7033.60,true,0.85,1.4
 MYM,Micro E-Mini Dow Jones Industrial Average,Futures,USD,1.0,0.5,703.36,true,0.25,0.37,false
 RTY,Russell 2000 E-Mini,Futures,USD,0.1,5.0,5277.26,true,0.85,1.40,false
 M2K,Micro Russell 2000 E-Mini,Futures,USD,0.1,0.5,527.726,true,0.25,0.37,false
-FDXM,Mini-DAX,Futures,EUR,1.0,5.0,4723.66,true,0.85,0.27,false
+FDAX,Mini-DAX,Futures,EUR,1.0,25,23618.30,true,0.85,0.26,false
+FDXM,Mini-DAX,Futures,EUR,1.0,5.0,4723.66,true,0.85,0.26,false
 FDXS,Micro-DAX,Futures,EUR,1.0,1.0,944.731,true,0.85,0.26,false
 6E,Euro FX,Futures,USD,0.000050,6.25,2730.51,false,0.50,0.26,false
 M6E,Micro EUR/USD,Futures,USD,0.0001,1.25,273.051,false,0.15,0.26,false
