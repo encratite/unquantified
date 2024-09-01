@@ -5,7 +5,7 @@ use serde::Serialize;
 use anyhow::{bail, Context, Result};
 use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct CorrelationData {
 	pub symbols: Vec<String>,
 	pub from: NaiveDateTime,
@@ -34,7 +34,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime,
 	let coefficients: Vec<(usize, usize, f64)> = pairs.par_iter().map(|(i, j)| {
 		let (x_samples, x_sqrt) = &delta_samples[*i];
 		let (y_samples, y_sqrt) = &delta_samples[*j];
-		assert!(x_samples.len() == y_samples.len());
+		assert_eq!(x_samples.len(), y_samples.len());
 		let mut sum = 0.0;
 		for k in 0..x_samples.len() {
 			let delta_x = x_samples[k];
@@ -51,8 +51,8 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime,
 	}
 	let output = CorrelationData {
 		symbols,
-		from: from,
-		to: to,
+		from,
+		to,
 		correlation: matrix
 	};
 	Ok(output)

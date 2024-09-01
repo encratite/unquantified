@@ -89,8 +89,8 @@ impl RelativeDateTime {
 }
 
 fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<OhlcArchive>) -> Result<NaiveDateTime> {
-	let mut time_values = archive.get_data(time_frame)
-		.unadjusted
+	let data = archive.get_data(time_frame);
+	let mut time_values = data.get_adjusted_fallback()
 		.iter()
 		.map(|x| x.time);
 	let get_some_time = |time: Option<NaiveDateTime>| match time {

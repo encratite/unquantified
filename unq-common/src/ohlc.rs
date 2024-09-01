@@ -69,7 +69,7 @@ pub struct OhlcData {
 	pub contract_map: Option<OhlcContractMap>
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OhlcRecord {
 	pub symbol: String,
 	pub time: NaiveDateTime,
