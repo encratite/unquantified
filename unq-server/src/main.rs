@@ -37,13 +37,15 @@ async fn main() -> Result<()> {
 	let futures_spread_ticks = get_u8(backtest_section, "futures_spread_ticks")?;
 	let initial_margin_ratio = get_f64(backtest_section, "initial_margin_ratio")?;
 	let overnight_margin_ratio = get_f64(backtest_section, "overnight_margin_ratio")?;
+	let ruin_ratio = get_f64(backtest_section, "ruin_ratio")?;
 	let backtest_configuration = BacktestConfiguration {
 		starting_cash,
 		forex_order_fee,
 		forex_spread,
 		futures_spread_ticks,
 		initial_margin_ratio,
-		overnight_margin_ratio
+		overnight_margin_ratio,
+		ruin_ratio
 	};
 	server::run(address, ticker_directory, assets_path, backtest_configuration).await;
 	Ok(())

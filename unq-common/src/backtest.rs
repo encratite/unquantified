@@ -1,6 +1,6 @@
-use std::{collections::{BTreeSet, HashMap, VecDeque}, sync::Arc};
+use std::{collections::{BTreeSet, HashMap, VecDeque}};
 use std::cmp::Ordering;
-use std::sync::Mutex;
+use std::sync::Arc;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
@@ -26,9 +26,7 @@ lazy_static! {
 	};
 }
 
-type BacktestEvents = Arc<Mutex<Vec<BacktestEvent>>>;
-type EquityCurveDaily = Arc<Mutex<Vec<EquityCurveData>>>;
-type EquityCurveTrades = Arc<Mutex<Vec<f64>>>;
+type EquityCurveTrades = Vec<f64>;
 
 #[derive(Clone, PartialEq, Display)]
 pub enum PositionSide {
@@ -44,6 +42,7 @@ pub enum EventType {
 	ClosePosition,
 	Rollover,
 	MarginCall,
+	Ruin,
 	Warning,
 	Error
 }
@@ -66,9 +65,9 @@ pub struct Backtest<'a> {
 	// Sequential ID used to uniquely identify positions
 	next_position_id: u32,
 	// Text-based event log, in ascending order
-	events: BacktestEvents,
+	events: Vec<BacktestEvent>,
 	// Daily equity curve data
-	equity_curve_daily: EquityCurveDaily,
+	equity_curve_daily: Vec<EquityCurveData>,
 	// Equity curve, by trades
 	equity_curve_trades: EquityCurveTrades,
 	// Indicates whether the backtest is still running or not
@@ -94,6 +93,8 @@ pub struct BacktestConfiguration {
 	// Overnight margin of index futures:
 	// overnight_margin = overnight_margin_ratio * asset.margin
 	pub overnight_margin_ratio: f64,
+	// When account value drops below ruin_ratio * starting_cash, the simulation terminates prematurely
+	pub ruin_ratio: f64
 }
 
 #[derive(Clone)]
@@ -124,6 +125,7 @@ pub struct Position {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BacktestEvent {
 	pub time: NaiveDateTime,
 	pub event_type: EventType,
@@ -135,12 +137,12 @@ pub struct BacktestEvent {
 pub struct BacktestResult {
 	starting_cash: f64,
 	final_cash: f64,
-	events: BacktestEvents,
-	equity_curve_daily: EquityCurveDaily,
+	events: Vec<BacktestEvent>,
+	equity_curve_daily: Vec<EquityCurveData>,
 	equity_curve_trades: EquityCurveTrades
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EquityCurveData {
 	pub date: NaiveDateTime,
@@ -157,8 +159,8 @@ impl<'a> Backtest<'a> {
 			date: from,
 			account_value: configuration.starting_cash
 		};
-		let equity_curve_daily = Arc::new(Mutex::new(vec![equity_curve_data]));
-		let equity_curve_trades = Arc::new(Mutex::new(vec![configuration.starting_cash]));
+		let equity_curve_daily = vec![equity_curve_data];
+		let equity_curve_trades = vec![configuration.starting_cash];
 		let backtest = Backtest {
 			configuration: configuration.clone(),
 			asset_manager,
@@ -168,7 +170,7 @@ impl<'a> Backtest<'a> {
 			time_frame,
 			time_sequence,
 			next_position_id: 1,
-			events: Arc::new(Mutex::new(Vec::new())),
+			events: Vec::new(),
 			equity_curve_daily,
 			equity_curve_trades,
 			terminated: false
@@ -191,19 +193,11 @@ impl<'a> Backtest<'a> {
 		if self.terminated {
 			bail!("Backtest has been terminated");
 		}
-		match self.time_sequence.pop_front() {
-			Some(now) => {
-				self.margin_call_check()?;
-				self.now = now;
-				self.rollover_contracts()?;
-				self.update_equity_curve()?;
-				Ok(false)
-			}
-			None => {
-				// Cash out
-				self.close_all_positions()?;
+		match self.next_internal() {
+			Ok(result) => Ok(result),
+			Err(error) => {
 				self.terminated = true;
-				Ok(true)
+				Err(error)
 			}
 		}
 	}
@@ -232,6 +226,25 @@ impl<'a> Backtest<'a> {
 			.find(|x| x.id == id)
 			.cloned()
 			.with_context(|| anyhow!("Unable to find position with ID {id}"))
+	}
+
+	fn next_internal(&mut self) -> Result<bool> {
+		match self.time_sequence.pop_front() {
+			Some(now) => {
+				self.margin_call_check()?;
+				self.now = now;
+				self.rollover_contracts()?;
+				self.update_equity_curve()?;
+				self.ruin_check()?;
+				Ok(false)
+			}
+			None => {
+				// Cash out
+				self.close_all_positions()?;
+				self.terminated = true;
+				Ok(true)
+			}
+		}
 	}
 
 	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
@@ -326,8 +339,7 @@ impl<'a> Backtest<'a> {
 		}
 		if enable_equity_curve {
 			let account_value = self.get_account_value(true);
-			let mut equity_curve_trades = self.equity_curve_trades.lock().unwrap();
-			equity_curve_trades.push(account_value);
+			self.equity_curve_trades.push(account_value);
 		}
 		Ok(())
 	}
@@ -548,8 +560,7 @@ impl<'a> Backtest<'a> {
 			event_type,
 			message
 		};
-		let mut events = self.events.lock().unwrap();
-		events.push(event);
+		self.events.push(event);
 	}
 
 	fn close_all_positions(&mut self) -> Result<()> {
@@ -596,8 +607,7 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn update_equity_curve(&mut self) -> Result<()> {
-		let mut equity_curve_daily = self.equity_curve_daily.lock().unwrap();
-		let last_date_opt: Option<NaiveDateTime> = equity_curve_daily
+		let last_date_opt: Option<NaiveDateTime> = self.equity_curve_daily
 			.last()
 			.map(|x| x.date);
 		let Some(last_date) = last_date_opt else {
@@ -610,7 +620,18 @@ impl<'a> Backtest<'a> {
 				date: self.now,
 				account_value
 			};
-			equity_curve_daily.push(equity_curve_data);
+			self.equity_curve_daily.push(equity_curve_data);
+		}
+		Ok(())
+	}
+
+	fn ruin_check(&mut self) -> Result<()> {
+		let last = self.equity_curve_daily.last()
+			.with_context(|| anyhow!("Unable to retrieve most recent equity curve value"))?;
+		if last.account_value < self.configuration.ruin_ratio * self.configuration.starting_cash {
+			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
+			self.log_event(EventType::Ruin, message.to_string());
+			bail!(message);
 		}
 		Ok(())
 	}
