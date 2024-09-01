@@ -69,6 +69,8 @@ pub struct Backtest<'a> {
 	equity_curve_daily: Vec<EquityCurveData>,
 	// Equity curve, by trades
 	equity_curve_trades: Vec<WebF64>,
+	// Total fees paid
+	fees: f64,
 	// Indicates whether the backtest is still running or not
 	terminated: bool
 }
@@ -138,7 +140,8 @@ pub struct BacktestResult {
 	final_cash: WebF64,
 	events: Vec<BacktestEvent>,
 	equity_curve_daily: Vec<EquityCurveData>,
-	equity_curve_trades: Vec<WebF64>
+	equity_curve_trades: Vec<WebF64>,
+	fees: WebF64
 }
 
 #[derive(Clone, Serialize)]
@@ -172,6 +175,7 @@ impl<'a> Backtest<'a> {
 			events: Vec::new(),
 			equity_curve_daily,
 			equity_curve_trades,
+			fees: 0f64,
 			terminated: false
 		};
 		Ok(backtest)
@@ -215,7 +219,8 @@ impl<'a> Backtest<'a> {
 			final_cash: WebF64(self.cash),
 			events: self.events.clone(),
 			equity_curve_daily: self.equity_curve_daily.clone(),
-			equity_curve_trades: self.equity_curve_trades.clone()
+			equity_curve_trades: self.equity_curve_trades.clone(),
+			fees: WebF64(self.fees)
 		}
 	}
 
@@ -276,6 +281,7 @@ impl<'a> Backtest<'a> {
 				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}");
 			}
 			self.cash -= cost;
+			self.fees += fees;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
 			let position = Position {
 				id: self.next_position_id,
@@ -313,9 +319,10 @@ impl<'a> Backtest<'a> {
 		let asset = &position.asset;
 		let bid;
 		if asset.asset_type == AssetType::Futures {
-			let (value, position_bid) = self.get_position_value(&position, count, enable_fees)?;
+			let (value, position_bid, fees) = self.get_position_value(&position, count, enable_fees)?;
 			bid = position_bid;
 			self.cash += value;
+			self.fees += fees;
 			let new_count = position.count - count;
 			if new_count == 0 {
 				// The entire position has been sold, remove it
@@ -472,14 +479,14 @@ impl<'a> Backtest<'a> {
 		let position_value: f64 = self.positions
 			.iter()
 			.map(|position| self.get_position_value(position, position.count, enable_fees)
-				.map(|(value, _)| value)
+				.map(|(value, _, _)| value)
 				.unwrap_or(0.0))
 			.sum();
 		let account_value = self.cash + position_value;
 		account_value
 	}
 
-	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64)> {
+	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64, f64)> {
 		let asset = &position.asset;
 		let record = self.get_current_record(&position.symbol)?;
 		let bid = record.close;
@@ -489,14 +496,14 @@ impl<'a> Backtest<'a> {
 			gain = - gain;
 		}
 		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
-		let cost = if enable_fees {
+		let fees = if enable_fees {
 			forex_fee + asset.broker_fee + asset.exchange_fee
 		} else {
 			0.0
 		};
 		let margin_released = (count as f64) * asset.margin;
-		let value = margin_released + gain_usd - cost;
-		Ok((value, bid))
+		let value = margin_released + gain_usd - fees;
+		Ok((value, bid, fees))
 	}
 
 	fn get_overnight_margin(&self) -> f64 {
@@ -590,7 +597,7 @@ impl<'a> Backtest<'a> {
 				let globex_new = Self::get_globex_code(&record_now.symbol)?;
 				if globex_current.cmp(&globex_new) == Ordering::Less {
 					self.close_position_internal(position.id, position.count, false, false, false)?;
-					let position_id = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, false, false)?;
+					let position_id = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, true, false)?;
 					let new_position = self.get_position(position_id)?;
 					let message = format!("Rolled over {} position: {} x {} @ {:.2} (ID {})", new_position.side, new_position.count, new_position.symbol, new_position.price, new_position.id);
 					self.log_event(EventType::Rollover, message);
