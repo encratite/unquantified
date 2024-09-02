@@ -266,20 +266,19 @@ impl<'a> Backtest<'a> {
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let current_record = self.get_current_record(&symbol)?;
-			let maintenance_margin_per_contract = self.get_margin(&asset, archive.clone())?;
-			let maintenance_margin = (count as f64) * maintenance_margin_per_contract;
+			let maintenance_margin = self.get_margin(&asset, archive.clone())?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
-			let initial_margin = self.configuration.initial_margin_ratio * maintenance_margin_usd;
+			let initial_margin = (count as f64) * self.configuration.initial_margin_ratio * maintenance_margin_usd;
 			let fees = if enable_fees {
 				forex_fee + asset.broker_fee + asset.exchange_fee
 			} else {
 				0.0
 			};
-			let cost = initial_margin + fees;
-			if cost >= self.cash {
+			if initial_margin + fees >= self.cash {
 				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}");
 			}
+			let cost = maintenance_margin_usd + fees;
 			self.cash -= cost;
 			self.fees += fees;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
@@ -489,6 +488,7 @@ impl<'a> Backtest<'a> {
 	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64, f64)> {
 		let asset = &position.asset;
 		let record = self.get_current_record(&position.symbol)?;
+		let margin = (position.count as f64) * position.margin;
 		let bid = record.close;
 		let ticks = (count as f64) * (bid - position.price) / asset.tick_size;
 		let mut gain = ticks * asset.tick_value;
@@ -501,8 +501,7 @@ impl<'a> Backtest<'a> {
 		} else {
 			0.0
 		};
-		let margin_released = (count as f64) * asset.margin;
-		let value = margin_released + gain_usd - fees;
+		let value = margin + gain_usd - fees;
 		Ok((value, bid, fees))
 	}
 
