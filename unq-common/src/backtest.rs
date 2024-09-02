@@ -278,7 +278,7 @@ impl<'a> Backtest<'a> {
 			if initial_margin + fees >= self.cash {
 				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}");
 			}
-			let cost = maintenance_margin_usd + fees;
+			let cost = (count as f64) * maintenance_margin_usd + fees;
 			self.cash -= cost;
 			self.fees += fees;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
