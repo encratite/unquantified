@@ -1,7 +1,6 @@
 import { UnquantifiedMode } from "./highlight-rules.js";
 import {
 	ScriptingEngine,
-	SecondsPerDay,
 	TimeParameter,
 	TimeFrame,
 	Offset,
@@ -9,10 +8,17 @@ import {
 	SymbolArray,
 	String,
 	Parameters,
+	SECONDS_PER_DAY,
 	Keyword
 } from "./engine.js";
 
-const LocalStorageKey = "unquantified";
+const LOCAL_STORAGE_KEY = "unquantified";
+
+const ChartMode = {
+	LINE: "line",
+	CANDLESTICK: "candlestick",
+	EQUITY_CURVE: "equityCurve"
+};
 
 export class WebUi {
 	constructor() {
@@ -58,9 +64,8 @@ export class WebUi {
 				.then(response => response.json())
 				.then(json => {
 					if (json.error == null) {
-						resolve(json);
-					}
-					else {
+						resolve(json.result);
+					} else {
 						reject(json.error);
 					}
 				})
@@ -119,7 +124,7 @@ export class WebUi {
 		this.content.appendChild(element);
 	}
 
-	createChart(history, isCandlestick, timeFrame) {
+	createChart(data, mode) {
 		const container = document.createElement("div");
 		container.className = "plot";
 		const canvas = document.createElement("canvas");
@@ -132,106 +137,35 @@ export class WebUi {
 		if (context === null) {
 			throw new Error("Failed to create 2D context");
 		}
-		const titleCallback = tooltipItems => {
-			const context = tooltipItems[0];
-			const dateTime = context.raw.time;
-			const short = timeFrame.value === SecondsPerDay;
-			const title = this.getDateFormat(dateTime, short);
-			return title;
-		};
-		const options = {
-			options: {
-				maintainAspectRatio: false,
-				plugins: {
-					zoom: {
-						pan: {
-							enabled: true
-						},
-						zoom: {
-							drag: {
-								enabled: true
-							},
-							mode: "x",
-						},
-					},
-					legend: {
-						position: "bottom"
-					},
-					tooltip: {
-						callbacks: {
-							title: titleCallback
-						}
-					}
-				},
-				transitions: {
-					zoom: {
-						animation: {
-							duration: 0
-						}
-					}
-				}
-			}
-		}
-		if (isCandlestick) {
+		const options = this.getBaseChartOptions();
+		if (mode === ChartMode.CANDLESTICK) {
+			let datasets = this.getCandlestickDatasets(data);
+			this.setTitleCallback(datasets, options);
 			options.type = "candlestick";
-			options.data = {
-				datasets: this.getCandlestickDatasets(history)
-			};
-		}
-		else {
-			const datasets = this.getLineDatasets(history);
-			options.type = "line";
 			options.data = {
 				datasets: datasets
 			};
-			const innerOptions = options.options;
-			innerOptions.scales = {
-				x: {
-					type: "timeseries",
-					offset: true,
-					ticks: {
-						major: {
-							enabled: true,
-						},
-						source: "data",
-						maxRotation: 0,
-						autoSkip: true,
-						autoSkipPadding: 75,
-						sampleSize: 100
-					}
-				},
-				y: {
-					type: "linear"
-				}
-			};
-			innerOptions.pointStyle = false;
-			innerOptions.borderJoinStyle = "bevel";
-			innerOptions.pointHitRadius = 3;
-			const multiMode = datasets.length > 1;
-			if (multiMode) {
-				innerOptions.scales.y.ticks = {
-					callback: value => {
-						return `${value.toFixed(1)}%`;
-					}
-				};
-				const labelCallback = context => {
-					return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
-				};
-				innerOptions.plugins.tooltip.callbacks.label = labelCallback;
-			}
+		} else if (mode === ChartMode.LINE) {
+			const datasets = this.getLineDatasets(data);
+			this.setChartOptions(datasets, options);
+		} else if (mode === ChartMode.EQUITY_CURVE) {
+			const datasets = this.getEquityCurveDailyDatasets(data.equityCurveDaily);
+			this.setChartOptions(datasets, options);
+		} else {
+			throw new Error("Unknown chart mode specified");
 		}
 		const chart = new Chart(context, options);
 		button.onclick = _ => chart.resetZoom();
 		$(container).resizable();
 	}
 
-	getCandlestickDatasets(history) {
-		const tickers = Object.keys(history.result);
+	getCandlestickDatasets(tickerMap) {
+		const tickers = Object.keys(tickerMap);
 		if (tickers.length != 1) {
 			throw new Error("Invalid ticker count");
 		}
 		const ticker = tickers[0];
-		const records = history.result[ticker];
+		const records = tickerMap[ticker];
 		const data = records.map(ohlc => {
 			const dateTime = this.getTime(ohlc.time);
 			return {
@@ -252,12 +186,12 @@ export class WebUi {
 		return datasets;
 	}
 
-	getLineDatasets(history) {
-		const tickers = Object.keys(history.result);
+	getLineDatasets(tickerMap) {
+		const tickers = Object.keys(tickerMap);
 		const multiMode = tickers.length > 1;
 		const datasets = tickers
 			.map(symbol => {
-				const records = history.result[symbol];
+				const records = tickerMap[symbol];
 				let firstClose = null;
 				if (records.length > 0) {
 					firstClose = records[0].close;
@@ -266,8 +200,7 @@ export class WebUi {
 					let value;
 					if (multiMode) {
 						value = ohlc.close / firstClose * 100.0;
-					}
-					else {
+					} else {
 						value = ohlc.close;
 					}
 					const dateTime = this.getTime(ohlc.time);
@@ -284,6 +217,131 @@ export class WebUi {
 				};
 			});
 		return datasets;
+	}
+
+	getEquityCurveDailyDatasets(equityCurveDaily) {
+		const data = equityCurveDaily.map(x => {
+			const dateTime = this.getTime(x.date);
+			return {
+				x: dateTime.valueOf(),
+				y: x.accountValue,
+				time: dateTime
+			};
+		});
+		const datasets = [
+			{
+				label: "Equity curve (daily)",
+				data: data
+			}
+		];
+		return datasets;
+	}
+
+	getShortFormat(datasets) {
+		for (let i = 0; i < datasets.length; i++) {
+			const dataset = datasets[i];
+			const data = dataset.data;
+			for (let j = 0; j < data.length; j++) {
+				const record = data[j];
+				const time = record.time;
+				if (
+					time.hour !== 0 ||
+					time.minute !== 0 ||
+					time.second !== 0
+				) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	setTitleCallback(datasets, options) {
+		const shortFormat = this.getShortFormat(datasets);
+		options.options.plugins.tooltip.callbacks.title = tooltipItems => {
+			const context = tooltipItems[0];
+			const dateTime = context.raw.time;
+			const title = this.getDateFormat(dateTime, shortFormat);
+			return title;
+		};
+	}
+
+	getBaseChartOptions() {
+		const options = {
+			options: {
+				maintainAspectRatio: false,
+				plugins: {
+					zoom: {
+						pan: {
+							enabled: true
+						},
+						zoom: {
+							drag: {
+								enabled: true
+							},
+							mode: "x",
+						},
+					},
+					legend: {
+						position: "bottom"
+					},
+					tooltip: {
+						callbacks: {}
+					}
+				},
+				transitions: {
+					zoom: {
+						animation: {
+							duration: 0
+						}
+					}
+				}
+			}
+		};
+		return options;
+	}
+
+	setChartOptions(datasets, options) {
+		this.setTitleCallback(datasets, options);
+		options.type = "line";
+		options.data = {
+			datasets: datasets
+		};
+		const innerOptions = options.options;
+		innerOptions.scales = {
+			x: {
+				type: "timeseries",
+				offset: true,
+				ticks: {
+					major: {
+						enabled: true,
+					},
+					source: "data",
+					maxRotation: 0,
+					autoSkip: true,
+					autoSkipPadding: 75,
+					sampleSize: 100
+				}
+			},
+			y: {
+				type: "linear"
+			}
+		};
+		innerOptions.pointStyle = false;
+		innerOptions.borderJoinStyle = "bevel";
+		innerOptions.pointHitRadius = 3;
+		const multiMode = datasets.length > 1;
+		if (multiMode) {
+			innerOptions.scales.y.ticks = {
+				callback: value => {
+					return `${value.toFixed(1)}%`;
+				}
+			};
+			const labelCallback = context => {
+				return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
+			};
+			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
+		}
 	}
 
 	createEditor() {
@@ -357,17 +415,14 @@ export class WebUi {
 		if (this.enableHistory && arrowUp) {
 			if (this.historyIndex === null) {
 				this.historyIndex = historyLast;
-			}
-			else {
+			} else {
 				incrementIndex(-1);
 			}
 			this.showHistory(event);
-		}
-		else if (this.enableHistory && arrowDown && this.historyIndex !== null) {
+		} else if (this.enableHistory && arrowDown && this.historyIndex !== null) {
 			incrementIndex(1);
 			this.showHistory(event);
-		}
-		else if (event.key !== "Enter") {
+		} else if (event.key !== "Enter") {
 			this.enableHistory = false;
 			this.historyIndex = null;
 		}
@@ -380,7 +435,7 @@ export class WebUi {
 	}
 
 	getLocalStorageData() {
-		const json = localStorage.getItem(LocalStorageKey);
+		const json = localStorage.getItem(LOCAL_STORAGE_KEY);
 		if (json == null) {
 			return {};
 		}
@@ -390,7 +445,7 @@ export class WebUi {
 
 	setLocalStorageData(data) {
 		const json = JSON.stringify(data);
-		localStorage.setItem(LocalStorageKey, json);
+		localStorage.setItem(LOCAL_STORAGE_KEY, json);
 	}
 
 	enableEditor(enable) {
@@ -474,33 +529,26 @@ export class WebUi {
 	async plot(callArguments, isCandlestick) {
 		this.validateArgumentCount(callArguments, 1, 4);
 		const symbolArgument = callArguments[0];
-		const from = callArguments[1] || new TimeParameter(Keyword.First);
-		const to = callArguments[2] || new TimeParameter(Keyword.Last);
-		const timeFrame = callArguments[3] || new TimeFrame(SecondsPerDay);
+		const from = callArguments[1] || new TimeParameter(Keyword.FIRST);
+		const to = callArguments[2] || new TimeParameter(Keyword.LAST);
+		const timeFrame = callArguments[3] || new TimeFrame(SECONDS_PER_DAY);
 		let symbols;
 		const invalidSymbol = "Invalid symbol argument type";
+		let mode;
 		if (isCandlestick) {
 			if (!(symbolArgument instanceof Symbol)) {
 				throw new Error(invalidSymbol);
 			}
 			symbols = [symbolArgument.getJsonValue()];
-		}
-		else {
-			if (symbolArgument instanceof Symbol) {
-				symbols = [symbolArgument.getJsonValue()];
-			}
-			else if (symbolArgument instanceof SymbolArray) {
-				this.validateSymbols(symbolArgument);
-				symbols = symbolArgument.getJsonValue();
-			}
-			else {
-				throw new Error(invalidSymbol);
-			}
+			mode = ChartMode.CANDLESTICK;
+		} else {
+			symbols = this.getSymbols(symbolArgument);
+			mode = ChartMode.LINE;
 		}
 		this.validateFromTo(from, to);
 		this.validateTimeFrame(timeFrame);
 		const history = await this.getHistory(symbols, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
-		this.createChart(history, isCandlestick, timeFrame);
+		this.createChart(history, mode);
 	}
 
 	async plotCandlestick(callArguments) {
@@ -514,22 +562,22 @@ export class WebUi {
 	async correlation(callArguments) {
 		this.validateArgumentCount(callArguments, 1, 3);
 		const symbols = callArguments[0];
-		const from = callArguments[1] || new TimeParameter(Keyword.First);
-		const to = callArguments[2] || new TimeParameter(Keyword.Last);
+		const from = callArguments[1] || new TimeParameter(Keyword.FIRST);
+		const to = callArguments[2] || new TimeParameter(Keyword.LAST);
 		this.validateSymbols(symbols);
 		this.validateFromTo(from, to);
-		const response = await this.getCorrelation(symbols.getJsonValue(), from.getJsonValue(), to.getJsonValue());
+		const correlation = await this.getCorrelation(symbols.getJsonValue(), from.getJsonValue(), to.getJsonValue());
 		let separators = null;
 		if (symbols instanceof SymbolArray) {
 			separators = symbols.value.map(x => x.separator);
 		}
-		this.renderCorrelationMatrix(response.result, separators);
+		this.renderCorrelationMatrix(correlation, separators);
 	}
 
 	async backtest(callArguments) {
 		this.validateArgumentCount(callArguments, 4, 6);
 		const strategy = callArguments[0];
-		const symbols = callArguments[1];
+		const symbolArgument = callArguments[1];
 		const from = callArguments[2];
 		const to = callArguments[3];
 		const parameters = callArguments[4] || new Parameters([]);
@@ -537,7 +585,7 @@ export class WebUi {
 		if (!(strategy instanceof String)) {
 			throw new Error("Invalid strategy argument type");
 		}
-		this.validateSymbols(symbols);
+		this.validateSymbols(symbolArgument);
 		this.validateFromTo(from, to);
 		if (!(parameters instanceof Parameters)) {
 			throw new Error("Invalid parameters argument type");
@@ -545,15 +593,16 @@ export class WebUi {
 		if (!(timeFrame instanceof String)) {
 			throw new Error("Invalid time frame argument type");
 		}
-		const response = await this.runBacktest(
+		const symbols = this.getSymbols(symbolArgument);
+		const backtestResult = await this.runBacktest(
 			strategy.getJsonValue(),
-			symbols.getJsonValue(),
+			symbols,
 			from.getJsonValue(),
 			to.getJsonValue(),
 			parameters.getJsonValue(),
 			timeFrame.getJsonValue(),
 		);
-		console.log(response);
+		this.createChart(backtestResult, ChartMode.EQUITY_CURVE);
 	}
 
 	validateArgumentCount(callArguments, min, max) {
@@ -569,8 +618,7 @@ export class WebUi {
 					throw new Error("Encountered an invalid data type in a ticker array");
 				}
 			}
-		}
-		else if (!(tickers instanceof Symbol)) {
+		} else if (!(tickers instanceof Symbol)) {
 			throw new Error("Invalid symbol argument type");
 		}
 	}
@@ -604,10 +652,21 @@ export class WebUi {
 		if (
 			!(timeFrame instanceof TimeFrame) ||
 			timeFrame.value < 1 ||
-			timeFrame.value > SecondsPerDay ||
+			timeFrame.value > SECONDS_PER_DAY ||
 			!Number.isInteger(timeFrame.value)
 		) {
 			throw new Error("Invalid time frame specified");
+		}
+	}
+
+	getSymbols(symbolArgument) {
+		if (symbolArgument instanceof Symbol) {
+			return [symbolArgument.getJsonValue()];
+		} else if (symbolArgument instanceof SymbolArray) {
+			this.validateSymbols(symbolArgument);
+			return symbolArgument.getJsonValue();
+		} else {
+			throw new Error(invalidSymbol);
 		}
 	}
 }

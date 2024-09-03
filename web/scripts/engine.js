@@ -1,13 +1,13 @@
-export const SecondsPerDay = 1440;
+export const SECONDS_PER_DAY = 1440;
 
 export const Keyword = {
-	True: "true",
-	False: "false",
-	First: "first",
-	Last: "last",
-	Now: "now",
-	Daily: "daily",
-	All: "all"
+	TRUE: "true",
+	FALSE: "false",
+	FIRST: "first",
+	LAST: "last",
+	NOW: "now",
+	DAILY: "daily",
+	ALL: "all"
 };
 
 export class Assignment {
@@ -72,8 +72,7 @@ export class TimeParameter extends BasicValue {
 				offsetUnit: null,
 				specialKeyword: null
 			};
-		}
-		else {
+		} else {
 			return {
 				date: null,
 				offset: null,
@@ -119,10 +118,9 @@ export class Symbol extends BasicValue {
 	}
 
 	getJsonValue() {
-		if (this.value === Keyword.All) {
+		if (this.value === Keyword.ALL) {
 			return [this.value];
-		}
-		else {
+		} else {
 			return this.value;
 		}
 	}
@@ -277,17 +275,17 @@ export class ScriptingEngine {
 			keyword: keyword => {
 				const string = keyword.sourceString;
 				switch (string) {
-					case Keyword.True:
+					case Keyword.TRUE:
 						return new Bool(true);
-					case Keyword.False:
+					case Keyword.FALSE:
 						return new Bool(false);
-					case Keyword.First:
-					case Keyword.Last:
-					case Keyword.Now:
+					case Keyword.FIRST:
+					case Keyword.LAST:
+					case Keyword.NOW:
 						return new TimeParameter(string);
-					case Keyword.Daily:
-						return new TimeFrame(SecondsPerDay);
-					case Keyword.All:
+					case Keyword.DAILY:
+						return new TimeFrame(SECONDS_PER_DAY);
+					case Keyword.ALL:
 						return new Symbol(string);
 				}
 				throw new Error(`Unknown keyword: ${keyword.sourceString}`);
@@ -342,16 +340,14 @@ export class ScriptingEngine {
 			if (statement instanceof Assignment) {
 				const values = this.substituteVariables([statement.value]);
 				this.variables[statement.variable] = values[0];
-			}
-			else if (statement instanceof Call) {
+			} else if (statement instanceof Call) {
 				const handler = this.callHandlers[statement.name];
 				if (handler == null) {
 					throw new Error(`Unknown call: ${statement.name}`);
 				}
 				const callArguments = this.substituteVariables(statement.callArguments);
 				await handler(callArguments);
-			}
-			else {
+			} else {
 				throw new Error("Unknown statement");
 			}
 		}
@@ -373,8 +369,7 @@ export class ScriptingEngine {
 					throw new Error(`Unknown variable: ${x.name}`);
 				}
 				return value;
-			}
-			else {
+			} else {
 				return x;
 			}
 		});
