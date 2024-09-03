@@ -140,23 +140,55 @@ export class WebUi {
 		const options = this.getBaseChartOptions();
 		if (mode === ChartMode.CANDLESTICK) {
 			let datasets = this.getCandlestickDatasets(data);
-			this.setTitleCallback(datasets, options);
+			this.setTitleCallback(datasets, options, true);
 			options.type = "candlestick";
 			options.data = {
 				datasets: datasets
 			};
 		} else if (mode === ChartMode.LINE) {
 			const datasets = this.getLineDatasets(data);
-			this.setChartOptions(datasets, options);
+			this.setChartOptions(datasets, options, true);
 		} else if (mode === ChartMode.EQUITY_CURVE) {
-			const datasets = this.getEquityCurveDailyDatasets(data.equityCurveDaily);
-			this.setChartOptions(datasets, options);
+			const datasets = this.getEquityCurveDaily(data.equityCurveDaily);
+			this.setChartOptions(datasets, options, true);
+			const form = document.createElement("form");
+			form.className = "equity-curve";
+			container.insertBefore(form, container.firstChild);
+			const onChangeDaily = () => this.updateEquityCurve(chart, data, true);
+			const onChangeTrades = () => this.updateEquityCurve(chart, data, false);
+			this.createRadioButton("Equity curve (daily)", form, true, onChangeDaily);
+			this.createRadioButton("Equity curve (by trade)", form, false, onChangeTrades);
 		} else {
 			throw new Error("Unknown chart mode specified");
 		}
 		const chart = new Chart(context, options);
 		button.onclick = _ => chart.resetZoom();
 		$(container).resizable();
+	}
+
+	updateEquityCurve(chart, data, daily) {
+		let datasets;
+		if (daily === true) {
+			datasets = this.getEquityCurveDaily(data.equityCurveDaily);
+		} else {
+			datasets = this.getEquityCurveTrades(data.equityCurveTrades);
+		}
+		this.setChartOptions(datasets, chart.options, daily);
+		chart.data.datasets = datasets;
+		chart.update();
+	}
+
+	createRadioButton(labelText, container, checked, onChange) {
+		const label = document.createElement("label");
+		container.appendChild(label);
+		const input = document.createElement("input");
+		input.type = "radio";
+		input.name = "mode";
+		input.checked = checked;
+		input.onchange = onChange;
+		label.appendChild(input);
+		const text = document.createTextNode(labelText);
+		label.appendChild(text);
 	}
 
 	getCandlestickDatasets(tickerMap) {
@@ -219,18 +251,35 @@ export class WebUi {
 		return datasets;
 	}
 
-	getEquityCurveDailyDatasets(equityCurveDaily) {
-		const data = equityCurveDaily.map(x => {
-			const dateTime = this.getTime(x.date);
+	getEquityCurveDaily(equityCurveDaily) {
+		const data = equityCurveDaily.map(record => {
+			const dateTime = this.getTime(record.date);
 			return {
 				x: dateTime.valueOf(),
-				y: x.accountValue,
+				y: record.accountValue,
 				time: dateTime
 			};
 		});
 		const datasets = [
 			{
 				label: "Equity curve (daily)",
+				data: data
+			}
+		];
+		return datasets;
+	}
+
+	getEquityCurveTrades(equityCurveByTrade) {
+		let x = 1;
+		const data = equityCurveByTrade.map(y => {
+			return {
+				x: x++,
+				y: y
+			};
+		});
+		const datasets = [
+			{
+				label: "Equity curve (by trade)",
 				data: data
 			}
 		];
@@ -256,12 +305,20 @@ export class WebUi {
 		return true;
 	}
 
-	setTitleCallback(datasets, options) {
-		const shortFormat = this.getShortFormat(datasets);
+	setTitleCallback(datasets, options, timeSeries) {
+		let shortFormat = null;
+		if (timeSeries === true) {
+			shortFormat = this.getShortFormat(datasets);
+		}
 		options.options.plugins.tooltip.callbacks.title = tooltipItems => {
 			const context = tooltipItems[0];
-			const dateTime = context.raw.time;
-			const title = this.getDateFormat(dateTime, shortFormat);
+			let title;
+			if (timeSeries === true) {
+				const dateTime = context.raw.time;
+				title = this.getDateFormat(dateTime, shortFormat);
+			} else {
+				title = `Trade #${context.raw.x}`;
+			}
 			return title;
 		};
 	}
@@ -301,16 +358,22 @@ export class WebUi {
 		return options;
 	}
 
-	setChartOptions(datasets, options) {
-		this.setTitleCallback(datasets, options);
+	setChartOptions(datasets, options, timeSeries) {
 		options.type = "line";
 		options.data = {
 			datasets: datasets
 		};
+		options.options = {
+			plugins: {
+				tooltip: {
+					callbacks: {}
+				}
+			}
+		};
 		const innerOptions = options.options;
 		innerOptions.scales = {
 			x: {
-				type: "timeseries",
+				type: timeSeries === true ? "timeseries" : "line",
 				offset: true,
 				ticks: {
 					major: {
@@ -342,6 +405,7 @@ export class WebUi {
 			};
 			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
 		}
+		this.setTitleCallback(datasets, options, timeSeries);
 	}
 
 	createEditor() {
