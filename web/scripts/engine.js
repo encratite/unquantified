@@ -149,12 +149,13 @@ export class Parameters extends BasicValue {
 }
 
 export class Parameter extends Value {
-	constructor(name, value, limit, increment) {
+	constructor(name, value, limit, increment, values) {
 		super();
 		this.name = name;
 		this.value = value;
 		this.limit = limit;
 		this.increment = increment;
+		this.values = values;
 	}
 }
 
@@ -188,11 +189,23 @@ export class ScriptingEngine {
 				return call;
 			},
 			Parameters: (_, __, first, ___, ____, others, _____, ______) => {
-				const parameters = new Parameters([first.eval()].concat(others.eval()));
+				const parameterArray = [first.eval()].concat(others.eval());
+				const parameters = new Parameters(parameterArray);
 				return parameters;
 			},
-			Parameter: (identifier, _, from, __, to, ___, step) => {
-				const parameter = new Parameter(identifier.eval(), from.eval(), to.eval(), step.eval());
+			Parameter: (identifier, _, parameterValue) => {
+				const parameter = parameterValue.eval();
+				parameter.name = identifier.eval();
+				return parameter;
+			},
+			ValueRangeParameter: (value, __, limit, ___, increment) => {
+				const getValue = x => x.sourceString !== "" ? x.eval() : null;
+				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null);
+				return parameter;
+			},
+			MultiValueParameter: (_, first, __, others, ___) => {
+				const values = [first.eval()].concat(others.eval());
+				const parameter = new Parameter(null, null, null, null, values);
 				return parameter;
 			},
 			SymbolArray: (_, first, others, __) => {

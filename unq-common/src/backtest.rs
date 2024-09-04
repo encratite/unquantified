@@ -252,6 +252,9 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
+		if count == 0 {
+			bail!("Invalid count");
+		}
 		let (root, symbol) = match parse_globex_code(&symbol) {
 			Some((root, _, _)) => (root, symbol.clone()),
 			None => {
@@ -307,6 +310,9 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn close_position_internal(&mut self, position_id: u32, count: u32, enable_fees: bool, enable_logging: bool, enable_equity_curve: bool) -> Result<()> {
+		if count == 0 {
+			bail!("Invalid count");
+		}
 		let position = self.positions
 			.iter()
 			.find(|x| x.id == position_id)

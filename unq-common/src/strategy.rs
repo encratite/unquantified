@@ -1,29 +1,83 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde::Deserialize;
 
 pub trait Strategy {
 	fn next(&mut self) -> Result<()>;
 }
 
+/*
+Strategy parameters specified in the "backtest" command.
+
+{parameter1: 12.34} corresponds to:
+- name: "parameter1"
+- value: Some(12.34)
+- limit: None
+- increment: None
+- values: None
+
+{parameter2: 1 to 5 step 1} corresponds to:
+- name: "parameter2"
+- value: Some(1)
+- limit: Some(5)
+- increment: Some(1)
+- values: None
+
+{parameter3: [1.2, 3.4, 4.5]} corresponds to:
+- name: "parameter3"
+- value: None
+- limit: None
+- increment: None
+- values: Some({1.2, 3.4, 4.5})
+*/
 #[derive(Deserialize)]
 pub struct StrategyParameter {
 	pub name: String,
-	pub values: Option<Vec<f64>>,
-	pub min: Option<f64>,
-	pub max: Option<f64>,
-	pub step: Option<f64>
+	pub value: Option<f64>,
+	pub limit: Option<f64>,
+	pub increment: Option<f64>,
+	pub values: Option<Vec<f64>>
 }
 
 pub struct StrategyParameters(pub Vec<StrategyParameter>);
+
+impl StrategyParameter {
+	pub fn sanity_check(&self) -> Result<()> {
+		let tuple = (self.value.is_some(), self.limit.is_some(), self.increment.is_some(), self.values.is_some());
+		match tuple {
+			(true, false, false, false) |
+			(true, true, false, false) |
+			(true, true, true, false) |
+			(false, false, false, true) => Ok(()),
+			_ => bail!("Invalid combination of values in strategy parameter")
+		}
+	}
+}
 
 impl StrategyParameters {
 	pub fn new(params: Vec<StrategyParameter>) -> Self {
 		StrategyParameters(params)
 	}
 
+	pub fn get_value(&self, name: &str) -> Result<Option<f64>> {
+		match self.get_parameter(name) {
+			Some(parameter) => {
+				if parameter.values.is_some() {
+					bail!("Cannot specify multiple values for parameter \"{name}\"");
+				}
+				Ok(parameter.value)
+			}
+			None => Ok(None)
+		}
+	}
+
 	pub fn get_values(&self, name: &str) -> Option<Vec<f64>> {
 		match self.get_parameter(name) {
-			Some(parameter) => parameter.values.clone(),
+			Some(parameter) => {
+				match parameter.value {
+					Some(value) => Some(vec![value]),
+					None => parameter.values.clone()
+				}
+			}
 			None => None
 		}
 	}
