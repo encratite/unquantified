@@ -1,12 +1,12 @@
 body {
-	padding: 64px 16px 0px 16px;
+	padding: 3em;
 	font-family: system-ui, -apple-system, blinkmacsystemfont, "Segoe UI", helvetica, arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
 }
 
 .editor {
 	border: 1px solid #bbb;
-	margin: 0 16px 32px 16px;
-	max-width: 650px;
+	margin-bottom: 1.8em;
+	max-width: 40em;
 
 	.read-only {
 		background-color: #f8f8f8;
@@ -15,23 +15,26 @@ body {
 
 .plot {
 	text-align: right;
-	width: 1000px;
-	height: 500px;
-	padding: 0 16px 16px 0;
-	margin-bottom: 16px;
+	width: 60em;
+	height: 35em;
+	margin-bottom: 2em;
+
+	canvas {
+		margin-bottom: 3em;
+	}
 
 	button {
 		position: relative;
-		bottom: 26px;
-		right: 0;
+		bottom: 4.1em;
+		right: 1em;
 		transition: background 0.25s, border-color 0.25s;
 		background: rgba(40, 44, 52, 0.05);
 		border: 1px solid transparent;
-		border-radius: 6px;
+		border-radius: 0.3em;
 		color: #3080d0;
 		text-decoration: none !important;
-		font-size: 0.8rem;
-		padding: 6px 12px;
+		font-size: 1em;
+		padding: 0.3em 0.6em;
 		cursor: pointer;
 		-webkit-user-select: none;
 		-moz-user-select: none;
@@ -58,7 +61,7 @@ body {
 
 .correlation {
 	display: inline-block;
-	margin-bottom: 30px;
+	margin-bottom: 1.5em;
 
 	table {
 		border-collapse: collapse;
@@ -67,7 +70,7 @@ body {
 	}
 
 	td {
-		padding: 2px 6px 2px 6px;
+		padding: 0.125em 0.25em 0.125em 0.25em;
 	}
 
 	tr:first-child {
@@ -98,7 +101,7 @@ body {
 	
 	div:last-child {
 		text-align: right;
-		font-size: 80%;
+		font-size: 0.8em;
 		color: #666;
 	}
 
@@ -108,5 +111,17 @@ body {
 
 	.separator-left {
 		border-top: 1px solid black;
+	}
+}
+
+.equity-curve {
+	font-size: 0.9em;
+
+	input, span {
+		vertical-align: middle;
+	}
+
+	span {
+		margin-right: 0.5em;
 	}
 }

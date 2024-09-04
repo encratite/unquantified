@@ -138,6 +138,10 @@ export class WebUi {
 			throw new Error("Failed to create 2D context");
 		}
 		const options = this.getBaseChartOptions();
+		const initializeChart = () => {
+			const chart = new Chart(context, options);
+			button.onclick = _ => chart.resetZoom();
+		};
 		if (mode === ChartMode.CANDLESTICK) {
 			let datasets = this.getCandlestickDatasets(data);
 			this.setTitleCallback(datasets, options, true);
@@ -145,37 +149,37 @@ export class WebUi {
 			options.data = {
 				datasets: datasets
 			};
+			initializeChart();
 		} else if (mode === ChartMode.LINE) {
 			const datasets = this.getLineDatasets(data);
 			this.setChartOptions(datasets, options, true);
+			initializeChart();
 		} else if (mode === ChartMode.EQUITY_CURVE) {
-			const datasets = this.getEquityCurveDaily(data.equityCurveDaily);
-			this.setChartOptions(datasets, options, true);
 			const form = document.createElement("form");
 			form.className = "equity-curve";
 			container.insertBefore(form, container.firstChild);
-			const onChangeDaily = () => this.updateEquityCurve(chart, data, true);
-			const onChangeTrades = () => this.updateEquityCurve(chart, data, false);
-			this.createRadioButton("Equity curve (daily)", form, true, onChangeDaily);
-			this.createRadioButton("Equity curve (by trade)", form, false, onChangeTrades);
+			const chartContext = new ChartContext(context, button, data);
+			const onChangeDaily = () => this.updateEquityCurve(chartContext, true);
+			const onChangeTrades = () => this.updateEquityCurve(chartContext, false);
+			this.createRadioButton("By day", form, true, onChangeDaily);
+			this.createRadioButton("By trade", form, false, onChangeTrades);
+			this.updateEquityCurve(chartContext, true);
 		} else {
 			throw new Error("Unknown chart mode specified");
 		}
-		const chart = new Chart(context, options);
-		button.onclick = _ => chart.resetZoom();
 		$(container).resizable();
 	}
 
-	updateEquityCurve(chart, data, daily) {
+	updateEquityCurve(chartContext, daily) {
 		let datasets;
 		if (daily === true) {
-			datasets = this.getEquityCurveDaily(data.equityCurveDaily);
+			datasets = this.getEquityCurveDaily(chartContext.data.equityCurveDaily);
 		} else {
-			datasets = this.getEquityCurveTrades(data.equityCurveTrades);
+			datasets = this.getEquityCurveTrades(chartContext.data.equityCurveTrades);
 		}
-		this.setChartOptions(datasets, chart.options, daily);
-		chart.data.datasets = datasets;
-		chart.update();
+		const options = this.getBaseChartOptions();
+		this.setChartOptions(datasets, options, daily);
+		chartContext.render(options);
 	}
 
 	createRadioButton(labelText, container, checked, onChange) {
@@ -187,8 +191,9 @@ export class WebUi {
 		input.checked = checked;
 		input.onchange = onChange;
 		label.appendChild(input);
-		const text = document.createTextNode(labelText);
-		label.appendChild(text);
+		const span = document.createElement("span");
+		span.textContent = labelText;
+		label.appendChild(span);
 	}
 
 	getCandlestickDatasets(tickerMap) {
@@ -270,7 +275,7 @@ export class WebUi {
 	}
 
 	getEquityCurveTrades(equityCurveByTrade) {
-		let x = 1;
+		let x = 0;
 		const data = equityCurveByTrade.map(y => {
 			return {
 				x: x++,
@@ -279,7 +284,7 @@ export class WebUi {
 		});
 		const datasets = [
 			{
-				label: "Equity curve (by trade)",
+				label: "Equity curve (trades)",
 				data: data
 			}
 		];
@@ -317,7 +322,12 @@ export class WebUi {
 				const dateTime = context.raw.time;
 				title = this.getDateFormat(dateTime, shortFormat);
 			} else {
-				title = `Trade #${context.raw.x}`;
+				const x = context.raw.x;
+				if (x > 0) {
+					title = `Trade #${x}`;
+				} else {
+					title = "Start";
+				}
 			}
 			return title;
 		};
@@ -363,17 +373,10 @@ export class WebUi {
 		options.data = {
 			datasets: datasets
 		};
-		options.options = {
-			plugins: {
-				tooltip: {
-					callbacks: {}
-				}
-			}
-		};
 		const innerOptions = options.options;
 		innerOptions.scales = {
 			x: {
-				type: timeSeries === true ? "timeseries" : "line",
+				type: timeSeries === true ? "timeseries" : "linear",
 				offset: true,
 				ticks: {
 					major: {
@@ -390,6 +393,13 @@ export class WebUi {
 				type: "linear"
 			}
 		};
+		if (timeSeries === false) {
+			const ticks = innerOptions.scales.x.ticks;
+			ticks.stepSize = 1;
+			ticks.callback = value => {
+				return Number.isInteger(value) ? value : null;
+			};
+		}
 		innerOptions.pointStyle = false;
 		innerOptions.borderJoinStyle = "bevel";
 		innerOptions.pointHitRadius = 3;
@@ -416,7 +426,7 @@ export class WebUi {
 		this.append(container);
 		const editor = ace.edit(container);
 		editor.setOptions({
-			fontSize: "14px",
+			fontSize: "0.9em",
 			useWorker: false,
 			autoScrollEditorIntoView: true
 		});
@@ -561,7 +571,7 @@ export class WebUi {
 		const correlationMax = 1;
 		for (let i = 0; i < symbols.length; i++) {
 			const symbol = symbols[i];
-			const data = correlation.result[i];
+			const data = correlation.correlation[i];
 			const row = createRow();
 			const cell = createCell(symbol, row);
 			setSeparatorStyle(cell, i, false);
@@ -732,5 +742,22 @@ export class WebUi {
 		} else {
 			throw new Error(invalidSymbol);
 		}
+	}
+}
+
+class ChartContext {
+	constructor(context, button, data) {
+		this.context = context;
+		this.button = button;
+		this.data = data;
+		this.chart = null;
+	}
+
+	render(options) {
+		if (this.chart != null) {
+			this.chart.destroy();
+		}
+		this.chart = new Chart(this.context, options);
+		this.button.onclick = _ => this.chart.resetZoom();
 	}
 }

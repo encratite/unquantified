@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use chrono::{Duration, Local, Months, NaiveDateTime, TimeDelta};
+use chrono::{Duration, Local, Months, NaiveDateTime, TimeDelta, Timelike};
 use serde::Deserialize;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Context};
 use unq_common::ohlc::{OhlcArchive, TimeFrame};
 
 #[derive(Deserialize, Clone)]
@@ -107,7 +107,12 @@ fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &Arc<Ohlc
 fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 	if special_keyword == SpecialDateTime::Now {
 		let now = Local::now();
-		let time = now.naive_local();
+		let time = now
+			.with_minute(0)
+			.and_then(|x| x.with_second(0))
+			.and_then(|x| x.with_nanosecond(0))
+			.with_context(|| anyhow!("Failed to adjust time"))?
+			.naive_local();
 		Ok(time)
 	} else {
 		let is_first = special_keyword == SpecialDateTime::First;
