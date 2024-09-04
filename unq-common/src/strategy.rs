@@ -30,26 +30,42 @@ Strategy parameters specified in the "backtest" command.
 - values: Some({1.2, 3.4, 4.5})
 */
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StrategyParameter {
 	pub name: String,
 	pub value: Option<f64>,
 	pub limit: Option<f64>,
 	pub increment: Option<f64>,
-	pub values: Option<Vec<f64>>
+	pub values: Option<Vec<f64>>,
+	pub bool_value: Option<bool>
 }
 
 pub struct StrategyParameters(pub Vec<StrategyParameter>);
 
 impl StrategyParameter {
 	pub fn sanity_check(&self) -> Result<()> {
-		let tuple = (self.value.is_some(), self.limit.is_some(), self.increment.is_some(), self.values.is_some());
+		let tuple = (
+			self.value.is_some(),
+			self.limit.is_some(),
+			self.increment.is_some(),
+			self.values.is_some(),
+			self.bool_value.is_some()
+		);
 		match tuple {
-			(true, false, false, false) |
-			(true, true, false, false) |
-			(true, true, true, false) |
-			(false, false, false, true) => Ok(()),
+			(true, false, false, false, false) |
+			(true, true, false, false, false) |
+			(true, true, true, false, false) |
+			(false, false, false, true, false) |
+			(false, false, false, false, true) => Ok(()),
 			_ => bail!("Invalid combination of values in strategy parameter")
 		}
+	}
+
+	pub fn not_bool_check(&self) -> Result<()> {
+		if self.bool_value.is_some() {
+			bail!("Parameter \"{}\" cannot take a boolean value", self.name);
+		}
+		Ok(())
 	}
 }
 
@@ -64,21 +80,35 @@ impl StrategyParameters {
 				if parameter.values.is_some() {
 					bail!("Cannot specify multiple values for parameter \"{name}\"");
 				}
+				parameter.not_bool_check()?;
 				Ok(parameter.value)
 			}
 			None => Ok(None)
 		}
 	}
 
-	pub fn get_values(&self, name: &str) -> Option<Vec<f64>> {
+	pub fn get_values(&self, name: &str) -> Result<Option<Vec<f64>>> {
 		match self.get_parameter(name) {
 			Some(parameter) => {
+				parameter.not_bool_check()?;
 				match parameter.value {
-					Some(value) => Some(vec![value]),
-					None => parameter.values.clone()
+					Some(value) => Ok(Some(vec![value])),
+					None => Ok(parameter.values.clone())
 				}
 			}
-			None => None
+			None => Ok(None)
+		}
+	}
+
+	pub fn get_bool(&self, name: &str) -> Result<Option<bool>> {
+		match self.get_parameter(name) {
+			Some(parameter) => {
+				if parameter.value.is_some() || parameter.values.is_some() {
+					bail!("Invalid value specified for boolean parameter \"{name}\"");
+				}
+				Ok(parameter.bool_value)
+			}
+			None => Ok(None)
 		}
 	}
 

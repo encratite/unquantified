@@ -4,7 +4,7 @@ Unquantified {
 	Assignment = variable "=" (Value | Parameters)
 	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | string | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
-	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter)
+	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter | bool)
 	ValueRangeParameter = numeric ("to" numeric ("step" numeric)?)?
 	MultiValueParameter = "[" numeric ("," numeric)* "]"
 	Call = identifier Value ("," Value)*
@@ -22,6 +22,7 @@ Unquantified {
 	stringDelimiter = "\""
 	string = stringDelimiter (~stringDelimiter any)* stringDelimiter
 	keyword = "true" | "false" | "first" | "last" | "now" | "daily" | "all"
+	bool = "true" | "false"
 	space := " " | "\t"
 	whitespace = " " | "\t" | "\r" | "\n"
 	eol = "\r"? "\n"

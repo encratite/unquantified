@@ -149,13 +149,14 @@ export class Parameters extends BasicValue {
 }
 
 export class Parameter extends Value {
-	constructor(name, value, limit, increment, values) {
+	constructor(name, value, limit, increment, values, boolValue) {
 		super();
 		this.name = name;
 		this.value = value;
 		this.limit = limit;
 		this.increment = increment;
 		this.values = values;
+		this.boolValue = boolValue;
 	}
 }
 
@@ -200,12 +201,12 @@ export class ScriptingEngine {
 			},
 			ValueRangeParameter: (value, __, limit, ___, increment) => {
 				const getValue = x => x.sourceString !== "" ? x.eval() : null;
-				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null);
+				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null, null);
 				return parameter;
 			},
 			MultiValueParameter: (_, first, __, others, ___) => {
 				const values = [first.eval()].concat(others.eval());
-				const parameter = new Parameter(null, null, null, null, values);
+				const parameter = new Parameter(null, null, null, null, values, null);
 				return parameter;
 			},
 			SymbolArray: (_, first, others, __) => {
@@ -302,6 +303,11 @@ export class ScriptingEngine {
 						return new Symbol(string);
 				}
 				throw new Error(`Unknown keyword: ${keyword.sourceString}`);
+			},
+			bool: value => {
+				const boolValue = value.sourceString === "true";
+				const parameter = new Parameter(null, null, null, null, null, boolValue);
+				return parameter;
 			},
 			whitespace: _ => {
 				return null;

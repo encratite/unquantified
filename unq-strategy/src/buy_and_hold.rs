@@ -7,19 +7,23 @@ use unq_common::strategy::{Strategy, StrategyParameters};
 
 pub struct BuyAndHoldStrategy<'a> {
 	remaining_symbols: HashMap<String, u32>,
+	side: PositionSide,
 	backtest: &'a Mutex<Backtest<'a>>
 }
 
 /*
 Buys and holds one or multiple long positions of the specified symbols until the end of the backtest.
 If there is no price data available due to missing price data, the strategy will keep on trying to purchase them.
-By default, one contract of each asset is held, but the number can be customized like this:
+Parameters:
+- contracts: array of integers that determines the number of contracts for each symbol
+- short: boolean value that that makes all positions short rather than long
+By default, all positions are long and one contract of each asset is held, but the number can be customized like this:
 - symbols: [GC, NG, CL]
 - parameters: {contracts: [1, 2, 2]}
 This would change the number of contracts for NG and CL to 2 each.
 */
 impl<'a> BuyAndHoldStrategy<'a> {
-	fn new(symbols: Vec<String>, contracts: Vec<u32>, backtest: &'a Mutex<Backtest<'a>>) -> Result<BuyAndHoldStrategy<'a>> {
+	fn new(symbols: Vec<String>, contracts: Vec<u32>, side: PositionSide, backtest: &'a Mutex<Backtest<'a>>) -> Result<BuyAndHoldStrategy<'a>> {
 		if symbols.is_empty() {
 			bail!("Need at least one symbol");
 		}
@@ -36,13 +40,14 @@ impl<'a> BuyAndHoldStrategy<'a> {
 		}
 		let strategy = BuyAndHoldStrategy {
 			remaining_symbols,
+			side,
 			backtest
 		};
 		Ok(strategy)
 	}
 
 	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a Mutex<Backtest<'a>>) -> Result<BuyAndHoldStrategy<'a>> {
-		let contracts: Vec<u32> = match parameters.get_values("contracts") {
+		let contracts: Vec<u32> = match parameters.get_values("contracts")? {
 			Some(count) => count
 				.iter()
 				.map(|x| *x as u32)
@@ -51,7 +56,17 @@ impl<'a> BuyAndHoldStrategy<'a> {
 				.take(symbols.len())
 				.collect()
 		};
-		Self::new(symbols, contracts, backtest)
+		let side = match parameters.get_bool("short")? {
+			Some(value) => {
+				if value {
+					PositionSide::Short
+				} else {
+					PositionSide::Long
+				}
+			},
+			None => PositionSide::Long
+		};
+		Self::new(symbols, contracts, side, backtest)
 	}
 }
 
@@ -60,7 +75,7 @@ impl<'a> Strategy for BuyAndHoldStrategy<'a> {
 		let mut backtest = self.backtest.lock().unwrap();
 		// Try to create all positions in each iteration, just in case we're dealing with illiquid assets and intraday data
 		for (symbol, contract_count) in self.remaining_symbols.clone() {
-			let result = backtest.open_position(&symbol, contract_count, PositionSide::Long);
+			let result = backtest.open_position(&symbol, contract_count, self.side.clone());
 			if result.is_ok() {
 				self.remaining_symbols.remove(&symbol);
 			}
