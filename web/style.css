@@ -25,7 +25,7 @@ body {
 
 	button {
 		position: relative;
-		bottom: 4.1em;
+		bottom: 4.3em;
 		right: 1em;
 		transition: background 0.25s, border-color 0.25s;
 		background: rgba(40, 44, 52, 0.05);
@@ -33,7 +33,7 @@ body {
 		border-radius: 0.3em;
 		color: #3080d0;
 		text-decoration: none !important;
-		font-size: 1em;
+		font-size: 0.9em;
 		padding: 0.3em 0.6em;
 		cursor: pointer;
 		-webkit-user-select: none;

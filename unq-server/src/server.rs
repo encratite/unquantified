@@ -281,6 +281,6 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	}
 	let result;
 	let backtest = backtest_mutex.lock().unwrap();
-	result = backtest.get_result();
+	result = backtest.get_result()?;
 	Ok(result)
 }
