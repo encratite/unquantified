@@ -71,9 +71,13 @@ pub struct Backtest<'a> {
 	// Text-based event log, in ascending order
 	events: Vec<BacktestEvent>,
 	// Daily equity curve data
-	equity_curve_daily: Vec<EquityCurveData>,
+	equity_curve_daily: Vec<EquityCurveDataDaily>,
 	// Equity curve, by trades
-	equity_curve_trades: Vec<WebF64>,
+	equity_curve_trades: Vec<EquityCurveData>,
+	// Maximum account value, used to track drawdowns for equity/drawdown curves
+	max_account_value: f64,
+	// Maximum drawdown, ranging from 0.0 to -1.0, which technically makes it the minimum... whatever
+	max_drawdown: f64,
 	// Total fees paid
 	fees: f64,
 	// Statistics for profits and losses and bars spent in trades specific to long/short side
@@ -148,8 +152,8 @@ pub struct BacktestResult {
 	starting_cash: WebF64,
 	final_cash: WebF64,
 	events: Vec<BacktestEvent>,
-	equity_curve_daily: Vec<EquityCurveData>,
-	equity_curve_trades: Vec<WebF64>,
+	equity_curve_daily: Vec<EquityCurveDataDaily>,
+	equity_curve_trades: Vec<EquityCurveData>,
 	fees: WebF64,
 	profit: WebF64,
 	annual_average_profit: WebF64,
@@ -178,8 +182,14 @@ pub struct TradeResults {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EquityCurveData {
+	account_value: WebF64,
+	drawdown: WebF64
+}
+
+#[derive(Clone, Serialize)]
+pub struct EquityCurveDataDaily {
 	date: NaiveDateTime,
-	account_value: WebF64
+	data: EquityCurveData
 }
 
 struct ProfitDurationStats {
@@ -195,11 +205,15 @@ impl<'a> Backtest<'a> {
 		}
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
 		let equity_curve_data = EquityCurveData {
-			date: from,
-			account_value: WebF64(configuration.starting_cash)
+			account_value: WebF64(configuration.starting_cash),
+			drawdown: WebF64(0.0)
 		};
-		let equity_curve_daily = vec![equity_curve_data];
-		let equity_curve_trades = vec![WebF64(configuration.starting_cash)];
+		let equity_curve_data_daily = EquityCurveDataDaily {
+			date: from,
+			data: equity_curve_data.clone()
+		};
+		let equity_curve_daily = vec![equity_curve_data_daily];
+		let equity_curve_trades = vec![equity_curve_data];
 		let backtest = Backtest {
 			from,
 			to,
@@ -214,6 +228,8 @@ impl<'a> Backtest<'a> {
 			events: Vec::new(),
 			equity_curve_daily,
 			equity_curve_trades,
+			max_account_value: configuration.starting_cash,
+			max_drawdown: 0.0,
 			fees: 0.0,
 			profit_duration_stats: Vec::new(),
 			terminated: false
@@ -263,7 +279,7 @@ impl<'a> Backtest<'a> {
 		let annual_average_return = total_return / years;
 		let compound_annual_growth_rate = total_return.powf(1.0 / years);
 		let equity_curve_daily = self.equity_curve_daily.clone();
-		let (sharpe_ratio, sortino_ratio, calmar_ratio, max_drawdown) = Self::get_ratios(annual_average_return, &equity_curve_daily)?;
+		let (sharpe_ratio, sortino_ratio, calmar_ratio) = Self::get_ratios(annual_average_return, self.max_drawdown, &equity_curve_daily)?;
 		let all_trades = self.get_trade_results(true, true)?;
 		let long_trades = self.get_trade_results(true, false)?;
 		let short_trades = self.get_trade_results(false, true)?;
@@ -282,7 +298,7 @@ impl<'a> Backtest<'a> {
 			sharpe_ratio: WebF64(sharpe_ratio),
 			sortino_ratio: WebF64(sortino_ratio),
 			calmar_ratio: WebF64(calmar_ratio),
-			max_drawdown: WebF64(max_drawdown),
+			max_drawdown: WebF64(self.max_drawdown),
 			all_trades,
 			long_trades,
 			short_trades
@@ -305,7 +321,7 @@ impl<'a> Backtest<'a> {
 				self.now = now;
 				self.update_position_bars();
 				self.rollover_contracts()?;
-				self.update_equity_curve()?;
+				self.update_daily_equity_curve()?;
 				self.ruin_check()?;
 				Ok(false)
 			}
@@ -423,10 +439,25 @@ impl<'a> Backtest<'a> {
 			self.log_event(EventType::ClosePosition, message);
 		}
 		if enable_equity_curve {
-			let account_value = self.get_account_value(true);
-			self.equity_curve_trades.push(WebF64(account_value));
+			let equity_curve_data = self.update_equity_curve();
+			self.equity_curve_trades.push(equity_curve_data);
 		}
 		Ok(())
+	}
+
+	fn update_equity_curve(&mut self) -> EquityCurveData {
+		let account_value = self.get_account_value(true);
+		if account_value > self.max_account_value {
+			self.max_account_value = account_value;
+		}
+		let drawdown = 1.0 - account_value / self.max_account_value;
+		if drawdown < self.max_drawdown {
+			self.max_drawdown = drawdown;
+		}
+		EquityCurveData {
+			account_value: WebF64(account_value),
+			drawdown: WebF64(drawdown)
+		}
 	}
 
 	fn get_symbol_from_root(&mut self, root: &String) -> Option<String> {
@@ -691,7 +722,7 @@ impl<'a> Backtest<'a> {
 			.with_context(|| anyhow!("Unable to parse Globex code {symbol}"))
 	}
 
-	fn update_equity_curve(&mut self) -> Result<()> {
+	fn update_daily_equity_curve(&mut self) -> Result<()> {
 		let last_date_opt: Option<NaiveDateTime> = self.equity_curve_daily
 			.last()
 			.map(|x| x.date);
@@ -700,12 +731,12 @@ impl<'a> Backtest<'a> {
 		};
 		// Only update the equity curve
 		if self.now > last_date {
-			let account_value = self.get_account_value(true);
-			let equity_curve_data = EquityCurveData {
+			let equity_curve_data = self.update_equity_curve();
+			let equity_curve_daily = EquityCurveDataDaily {
 				date: self.now,
-				account_value: WebF64(account_value)
+				data: equity_curve_data
 			};
-			self.equity_curve_daily.push(equity_curve_data);
+			self.equity_curve_daily.push(equity_curve_daily);
 		}
 		Ok(())
 	}
@@ -713,7 +744,7 @@ impl<'a> Backtest<'a> {
 	fn ruin_check(&mut self) -> Result<()> {
 		let last = self.equity_curve_daily.last()
 			.with_context(|| anyhow!("Unable to retrieve most recent equity curve value"))?;
-		if last.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
+		if last.data.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
 			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
 			self.log_event(EventType::Ruin, message.to_string());
 			bail!(message);
@@ -744,13 +775,13 @@ impl<'a> Backtest<'a> {
 		Ok(standard_deviation)
 	}
 
-	fn get_daily_returns(equity_curve_daily: &Vec<EquityCurveData>) -> Vec<f64> {
+	fn get_daily_returns(equity_curve_daily: &Vec<EquityCurveDataDaily>) -> Vec<f64> {
 		equity_curve_daily
 			.windows(2)
 			.filter_map(|window| {
-				if let [data1, data2] = window {
-					let value2 = data2.account_value.get();
-					let value1 = data1.account_value.get();
+				if let [daily1, daily2] = window {
+					let value2 = daily2.data.account_value.get();
+					let value1 = daily1.data.account_value.get();
 					// Filter out the final pathological values of a failed run
 					if value1 > 0.0 && value2 > 0.0 {
 						let daily_return = value2 / value1 - 1.0;
@@ -763,29 +794,6 @@ impl<'a> Backtest<'a> {
 				}
 			})
 			.collect()
-	}
-
-	fn get_max_drawdown(equity_curve_daily: &Vec<EquityCurveData>) -> Result<f64> {
-		let account_values: Vec<f64> = equity_curve_daily
-			.iter()
-			.map(|x| x.account_value.get())
-			.collect();
-		let mut max = account_values
-			.first()
-			.cloned()
-			.with_context(|| anyhow!("Unable to initialize maximum"))?;
-		let mut max_drawdown = 0.0;
-		for x in account_values {
-			if x > max {
-				max = x;
-			} else {
-				let drawdown = 1.0 - x / max;
-				if drawdown > max_drawdown {
-					max_drawdown = drawdown;
-				}
-			}
-		}
-		Ok(max_drawdown)
 	}
 
 	fn get_trade_results(&self, long: bool, short: bool) -> Result<TradeResults> {
@@ -828,7 +836,7 @@ impl<'a> Backtest<'a> {
 		Ok(results)
 	}
 
-	fn get_ratios(annual_average_return: f64, equity_curve_daily: &Vec<EquityCurveData>) -> Result<(f64, f64, f64, f64)> {
+	fn get_ratios(annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<EquityCurveDataDaily>) -> Result<(f64, f64, f64)> {
 		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
 		// Placeholder, will be replaced by TB3MS
 		const RISK_FREE_RATE: f64 = 0.02;
@@ -844,9 +852,8 @@ impl<'a> Backtest<'a> {
 		let daily_downside_standard_deviation = Self::standard_deviation(downside_daily_returns)?;
 		let downside_standard_deviation = daily_downside_standard_deviation * standard_deviation_factor;
 		let sortino_ratio = excess_returns / downside_standard_deviation;
-		let max_drawdown = Self::get_max_drawdown(equity_curve_daily)?;
 		let calmar_ratio = annual_average_return / max_drawdown.abs();
-		let result = (sharpe_ratio, sortino_ratio, calmar_ratio, max_drawdown);
+		let result = (sharpe_ratio, sortino_ratio, calmar_ratio);
 		Ok(result)
 	}
 
