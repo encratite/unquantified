@@ -71,7 +71,7 @@ pub struct Backtest<'a> {
 	// Text-based event log, in ascending order
 	events: Vec<BacktestEvent>,
 	// Daily equity curve data
-	equity_curve_daily: Vec<EquityCurveDataDaily>,
+	equity_curve_daily: Vec<DailyStats>,
 	// Equity curve, by trades
 	equity_curve_trades: Vec<EquityCurveData>,
 	// Maximum account value, used to track drawdowns for equity/drawdown curves
@@ -152,7 +152,7 @@ pub struct BacktestResult {
 	starting_cash: WebF64,
 	final_cash: WebF64,
 	events: Vec<BacktestEvent>,
-	equity_curve_daily: Vec<EquityCurveDataDaily>,
+	equity_curve_daily: Vec<DailyStats>,
 	equity_curve_trades: Vec<EquityCurveData>,
 	fees: WebF64,
 	profit: WebF64,
@@ -187,9 +187,12 @@ pub struct EquityCurveData {
 }
 
 #[derive(Clone, Serialize)]
-pub struct EquityCurveDataDaily {
+#[serde(rename_all = "camelCase")]
+pub struct DailyStats {
 	date: NaiveDateTime,
-	data: EquityCurveData
+	equity_curve: EquityCurveData,
+	maintenance_margin: WebF64,
+	overnight_margin: WebF64
 }
 
 struct ProfitDurationStats {
@@ -208,9 +211,11 @@ impl<'a> Backtest<'a> {
 			account_value: WebF64(configuration.starting_cash),
 			drawdown: WebF64(0.0)
 		};
-		let equity_curve_data_daily = EquityCurveDataDaily {
+		let equity_curve_data_daily = DailyStats {
 			date: from,
-			data: equity_curve_data.clone()
+			equity_curve: equity_curve_data.clone(),
+			maintenance_margin: WebF64(0.0),
+			overnight_margin: WebF64(0.0)
 		};
 		let equity_curve_daily = vec![equity_curve_data_daily];
 		let equity_curve_trades = vec![equity_curve_data];
@@ -321,7 +326,7 @@ impl<'a> Backtest<'a> {
 				self.now = now;
 				self.update_position_bars();
 				self.rollover_contracts()?;
-				self.update_daily_equity_curve()?;
+				self.update_daily_stats()?;
 				self.ruin_check()?;
 				Ok(false)
 			}
@@ -352,7 +357,7 @@ impl<'a> Backtest<'a> {
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let current_record = self.get_current_record(&symbol)?;
-			let maintenance_margin = self.get_margin(&asset, archive.clone())?;
+			let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
 			let initial_margin = (count as f64) * self.configuration.initial_margin_ratio * maintenance_margin_usd;
@@ -482,7 +487,7 @@ impl<'a> Backtest<'a> {
 		Some(latest_record.symbol.clone())
 	}
 
-	fn get_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
+	fn get_asset_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
 		let current_record = archive.daily.time_map.get(&self.now)
 			.with_context(|| anyhow!("Unable to find current record for symbol {} at {}", asset.symbol, self.now))?;
 		let last_record = archive.daily.unadjusted.last()
@@ -616,12 +621,12 @@ impl<'a> Backtest<'a> {
 		Ok((value, bid, fees))
 	}
 
-	fn get_overnight_margin(&self) -> f64 {
+	fn get_account_margin(&self, overnight: bool) -> f64 {
 		self.positions
 			.iter()
 			.map(|x| {
 				let mut margin = (x.count as f64) * x.margin;
-				if x.asset.overnight_margin {
+				if overnight && x.asset.overnight_margin {
 					margin *= self.configuration.overnight_margin_ratio;
 				}
 				margin
@@ -641,7 +646,7 @@ impl<'a> Backtest<'a> {
 			1. It doesn't differentiate between different time zones (US session vs. European session vs. Asian session)
 			2. Positions are liquidated at the next close, which is particularly incorrect when using daily rather than intraday data
 			*/
-			let overnight_margin = self.get_overnight_margin();
+			let overnight_margin = self.get_account_margin(true);
 			if overnight_margin > account_value {
 				// Keep on closing positions until there's enough collateral
 				if log_margin_call {
@@ -722,19 +727,23 @@ impl<'a> Backtest<'a> {
 			.with_context(|| anyhow!("Unable to parse Globex code {symbol}"))
 	}
 
-	fn update_daily_equity_curve(&mut self) -> Result<()> {
+	fn update_daily_stats(&mut self) -> Result<()> {
 		let last_date_opt: Option<NaiveDateTime> = self.equity_curve_daily
 			.last()
 			.map(|x| x.date);
 		let Some(last_date) = last_date_opt else {
 			bail!("Equity curve daily data missing");
 		};
-		// Only update the equity curve
+		// Only update stats if at least one day passed since the last update
 		if self.now > last_date {
 			let equity_curve_data = self.update_equity_curve();
-			let equity_curve_daily = EquityCurveDataDaily {
+			let maintenance_margin = self.get_account_margin(false);
+			let overnight_margin = self.get_account_margin(true);
+			let equity_curve_daily = DailyStats {
 				date: self.now,
-				data: equity_curve_data
+				equity_curve: equity_curve_data,
+				maintenance_margin: WebF64(maintenance_margin),
+				overnight_margin: WebF64(overnight_margin)
 			};
 			self.equity_curve_daily.push(equity_curve_daily);
 		}
@@ -744,7 +753,7 @@ impl<'a> Backtest<'a> {
 	fn ruin_check(&mut self) -> Result<()> {
 		let last = self.equity_curve_daily.last()
 			.with_context(|| anyhow!("Unable to retrieve most recent equity curve value"))?;
-		if last.data.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
+		if last.equity_curve.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
 			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
 			self.log_event(EventType::Ruin, message.to_string());
 			bail!(message);
@@ -775,13 +784,13 @@ impl<'a> Backtest<'a> {
 		Ok(standard_deviation)
 	}
 
-	fn get_daily_returns(equity_curve_daily: &Vec<EquityCurveDataDaily>) -> Vec<f64> {
+	fn get_daily_returns(equity_curve_daily: &Vec<DailyStats>) -> Vec<f64> {
 		equity_curve_daily
 			.windows(2)
 			.filter_map(|window| {
 				if let [daily1, daily2] = window {
-					let value2 = daily2.data.account_value.get();
-					let value1 = daily1.data.account_value.get();
+					let value2 = daily2.equity_curve.account_value.get();
+					let value1 = daily1.equity_curve.account_value.get();
 					// Filter out the final pathological values of a failed run
 					if value1 > 0.0 && value2 > 0.0 {
 						let daily_return = value2 / value1 - 1.0;
@@ -836,7 +845,7 @@ impl<'a> Backtest<'a> {
 		Ok(results)
 	}
 
-	fn get_ratios(annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<EquityCurveDataDaily>) -> Result<(f64, f64, f64)> {
+	fn get_ratios(annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
 		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
 		// Placeholder, will be replaced by TB3MS
 		const RISK_FREE_RATE: f64 = 0.02;
