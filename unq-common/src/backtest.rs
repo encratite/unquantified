@@ -9,7 +9,7 @@ use strum_macros::Display;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
 use crate::globex::GlobexCode;
 use crate::OhlcArchive;
-use crate::ohlc::{OhlcArc, TimeFrame};
+use crate::ohlc::{OhlcRecord, TimeFrame};
 use crate::web::WebF64;
 
 const FOREX_USD: &str = "USD";
@@ -533,14 +533,14 @@ impl<'a> Backtest<'a> {
 		}
 	}
 
-	fn get_current_record(&self, symbol: &String) -> Result<OhlcArc> {
+	fn get_current_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now)
 	}
 
-	fn get_record(&self, symbol: &String, time: NaiveDateTime) -> Result<OhlcArc> {
+	fn get_record(&self, symbol: &String, time: NaiveDateTime) -> Result<OhlcRecord> {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
-		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcArc> {
+		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcRecord> {
 			let source = archive.get_data(&self.time_frame);
 			let record = source.time_map.get(&time)
 				.with_context(map_error)?

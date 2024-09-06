@@ -10,7 +10,7 @@ use tokio::task;
 use tokio::task::JoinError;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
-use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcRecord, TimeFrame};
+use unq_common::ohlc::{OhlcArchive, OhlcRecord, TimeFrame};
 use unq_common::strategy::{StrategyParameter, StrategyParameters};
 use unq_common::web::WebF64;
 use unq_strategy::get_strategy;
@@ -197,9 +197,9 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 
 fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
 	if time_frame >= MINUTES_PER_DAY {
-		return Ok(get_raw_records_from_archive(from, to, archive.daily.get_adjusted_fallback()));
+		return Ok(get_unprocessed_records(from, to, archive.daily.get_adjusted_fallback()));
 	} else if time_frame == archive.intraday_time_frame {
-		return Ok(get_raw_records_from_archive(from, to, archive.intraday.get_adjusted_fallback()));
+		return Ok(get_unprocessed_records(from, to, archive.intraday.get_adjusted_fallback()));
 	} else if time_frame < archive.intraday_time_frame {
 		return Err(anyhow!("Requested time frame too small for intraday data in archive"));
 	} else if time_frame % archive.intraday_time_frame != 0 {
@@ -218,7 +218,7 @@ fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, a
 		.collect()
 }
 
-fn merge_ohlc_records(data: &[&OhlcArc]) -> Result<OhlcRecordWeb> {
+fn merge_ohlc_records(data: &[&OhlcRecord]) -> Result<OhlcRecordWeb> {
 	let first = data.first().unwrap();
 	let last = data.last().unwrap();
 	let symbol = first.symbol.clone();
@@ -254,14 +254,14 @@ fn matches_from_to(from: &NaiveDateTime, to: &NaiveDateTime, record: &OhlcRecord
 	record.time >= *from && record.time < *to
 }
 
-fn get_raw_records_from_archive<'a, T>(from: &NaiveDateTime, to: &NaiveDateTime, records: T) -> Vec<OhlcRecordWeb>
+fn get_unprocessed_records<'a, T>(from: &NaiveDateTime, to: &NaiveDateTime, records: T) -> Vec<OhlcRecordWeb>
 where
-	T: IntoIterator<Item = &'a OhlcArc>,
+	T: IntoIterator<Item = &'a OhlcRecord>,
 {
 	records
 		.into_iter()
 		.filter(|x| matches_from_to(from, to, x))
-		.map(|x| OhlcRecordWeb::new(&**x))
+		.map(|x| OhlcRecordWeb::new(&*x))
 		.collect()
 }
 

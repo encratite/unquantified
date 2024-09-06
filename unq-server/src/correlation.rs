@@ -3,7 +3,7 @@ use chrono::NaiveDateTime;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
 use anyhow::{bail, Context, Result};
-use unq_common::ohlc::{OhlcArc, OhlcArchive, OhlcVec};
+use unq_common::ohlc::{OhlcArchive, OhlcRecord, OhlcVec};
 
 #[derive(Serialize)]
 pub struct CorrelationData {
@@ -63,7 +63,7 @@ fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime,
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
-			let get_time = |x: &OhlcArc| Some(x.time);
+			let get_time = |x: &OhlcRecord| Some(x.time);
 			let records = get_records(archive);
 			let first = records
 				.first()

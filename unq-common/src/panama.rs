@@ -1,8 +1,8 @@
-use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, sync::Arc, cmp::Ordering};
+use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, cmp::Ordering};
 use chrono::{Duration, NaiveDate, NaiveDateTime, Timelike};
 use anyhow::{Result, anyhow, bail, Context};
 use crate::{globex::GlobexCode, RawOhlcArchive};
-use crate::ohlc::{OhlcArc, OhlcContractMap, OhlcVec};
+use crate::ohlc::{OhlcContractMap, OhlcRecord, OhlcVec};
 
 type BoundaryMap<'a> = BTreeMap<&'a String, (NaiveDateTime, NaiveDateTime)>;
 pub type OffsetMap = HashMap<String, f64>;
@@ -56,7 +56,7 @@ impl<'a> PanamaCanal<'a> {
 			}
 			if let Some(next_record) = self.get_next_record(time, records)? {
 				let adjusted_record = next_record.apply_offset(self.offset);
-				output.push_front(Arc::new(adjusted_record));
+				output.push_front(adjusted_record);
 			}
 		}
 		let output_vec = Vec::from(output);
@@ -94,7 +94,7 @@ impl<'a> PanamaCanal<'a> {
 			if let Some(contract_record) = records.iter().find(|x| x.symbol == *current_contract) {
 				let mut adjusted_record = contract_record.apply_offset(offset);
 				adjusted_record.symbol = current_contract.clone();
-				output.push(Arc::new(adjusted_record));
+				output.push(adjusted_record);
 			}
 		}
 		Ok(output)
@@ -155,8 +155,8 @@ impl<'a> PanamaCanal<'a> {
 		boundary_map
 	}
 
-	fn get_next_record(&mut self, time: &NaiveDateTime, records: &OhlcVec) -> Result<Option<OhlcArc>> {
-		let get_output = |record: &OhlcArc| Ok(Some(record.clone()));
+	fn get_next_record(&mut self, time: &NaiveDateTime, records: &OhlcVec) -> Result<Option<OhlcRecord>> {
+		let get_output = |record: &OhlcRecord| Ok(Some(record.clone()));
 		let filtered_records = self.filter_records(records);
 		let Some(new_record) = RawOhlcArchive::get_most_popular_record(&filtered_records, self.skip_front_contract)? else {
 			return self.perform_time_check(time);
@@ -229,7 +229,7 @@ impl<'a> PanamaCanal<'a> {
 			.collect()
 	}
 
-	fn perform_time_check(&self, time: &NaiveDateTime) -> Result<Option<OhlcArc>> {
+	fn perform_time_check(&self, time: &NaiveDateTime) -> Result<Option<OhlcRecord>> {
 		let (first, _) = self.get_boundaries(&self.current_contract)?;
 		if first < time {
 			// There is still more data available for that contract, just not for the current point in time

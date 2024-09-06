@@ -1,14 +1,12 @@
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use chrono::NaiveDateTime;
 use rkyv::{Archive, Deserialize, Serialize};
 use crate::globex::GlobexCode;
 use crate::panama::{OffsetMap, PanamaCanal};
 
-pub type OhlcArc = Arc<OhlcRecord>;
-pub type OhlcVec = Vec<OhlcArc>;
-pub type OhlcTimeMap = BTreeMap<NaiveDateTime, OhlcArc>;
+pub type OhlcVec = Vec<OhlcRecord>;
+pub type OhlcTimeMap = BTreeMap<NaiveDateTime, OhlcRecord>;
 pub type OhlcContractMap = BTreeMap<NaiveDateTime, OhlcVec>;
 
 #[derive(Clone, PartialEq, Archive, Serialize, serde::Deserialize)]
@@ -109,7 +107,7 @@ impl RawOhlcArchive {
 		Ok(archive)
 	}
 
-	pub fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<Option<OhlcArc>> {
+	pub fn get_most_popular_record(records: &OhlcVec, skip_front_contract: bool) -> Result<Option<OhlcRecord>> {
 		if records.is_empty() {
 			return Ok(None);
 		} else if records.len() == 1 {
@@ -199,7 +197,7 @@ impl RawOhlcArchive {
 
 	fn filter_records_by_contract(records: &OhlcVec, skip_front_contract: bool) -> Result<OhlcVec> {
 		if skip_front_contract && records.len() >= 2 {
-			let mut tuples: Vec<(GlobexCode, OhlcArc)> = records
+			let mut tuples: Vec<(GlobexCode, OhlcRecord)> = records
 				.iter()
 				.map(|record| {
 					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
@@ -208,9 +206,9 @@ impl RawOhlcArchive {
 						Err(anyhow!("Failed to parse Globex code while filtering records"))
 					}
 				})
-				.collect::<Result<Vec<(GlobexCode, OhlcArc)>>>()?;
+				.collect::<Result<Vec<(GlobexCode, OhlcRecord)>>>()?;
 			tuples.sort_by(|(globex_code1, _), (globex_code2, _)| globex_code1.cmp(globex_code2));
-			let filtered_records: Vec<OhlcArc> = tuples
+			let filtered_records: Vec<OhlcRecord> = tuples
 				.iter()
 				.skip(1)
 				.map(|(_, record)| record.clone())
@@ -223,8 +221,7 @@ impl RawOhlcArchive {
 
 	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>) -> OhlcVec {
 		records.iter().map(|x| {
-			let record = x.to_archive();
-			Arc::new(record)
+			x.to_archive()
 		}).collect()
 	}
 
@@ -253,11 +250,10 @@ impl RawOhlcArchive {
 		let mut map = OhlcContractMap::new();
 		records.iter().for_each(|x| {
 			let record = x.to_archive();
-			let value = Arc::new(record);
 			if let Some(records) = map.get_mut(&x.time) {
-				records.push(value);
+				records.push(record);
 			} else {
-				let records = vec![value];
+				let records = vec![record];
 				map.insert(x.time, records);
 			}
 		});
