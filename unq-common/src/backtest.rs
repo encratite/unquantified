@@ -76,10 +76,8 @@ pub struct Backtest<'a> {
 	equity_curve_trades: Vec<WebF64>,
 	// Total fees paid
 	fees: f64,
-	// Profits and losses from long side trades
-	long_profits: Vec<f64>,
-	// Profits and losses from short side trades
-	short_profits: Vec<f64>,
+	// Statistics for profits and losses and bars spent in trades specific to long/short side
+	profit_duration_stats: Vec<ProfitDurationStats>,
 	// Indicates whether the backtest is still running (terminated = false) or not (terminated = true)
 	terminated: bool
 }
@@ -128,8 +126,10 @@ pub struct Position {
 	pub margin: f64,
 	// Underlying OHLC archive of the asset
 	pub archive: Arc<OhlcArchive>,
-	// Time the position was created
-	pub time: NaiveDateTime,
+	// Time the position was opened, doesn't get updated when it's partially sold off
+	pub time_opened: NaiveDateTime,
+	// Number of bars spent in the trade, relevant for statistics
+	pub bars_in_trade: u32,
 	// Only used for futures, determines if the position should be automatically rolled over
 	pub automatic_rollover: Option<bool>
 }
@@ -171,7 +171,8 @@ pub struct TradeResults {
 	profit: WebF64,
 	profit_per_trade: WebF64,
 	win_rate: WebF64,
-	profit_factor: WebF64
+	profit_factor: WebF64,
+	bars_in_trade: WebF64
 }
 
 #[derive(Clone, Serialize)]
@@ -179,6 +180,12 @@ pub struct TradeResults {
 pub struct EquityCurveData {
 	date: NaiveDateTime,
 	account_value: WebF64
+}
+
+struct ProfitDurationStats {
+	side: PositionSide,
+	profit: f64,
+	bars_in_trade: u32
 }
 
 impl<'a> Backtest<'a> {
@@ -208,8 +215,7 @@ impl<'a> Backtest<'a> {
 			equity_curve_daily,
 			equity_curve_trades,
 			fees: 0.0,
-			long_profits: Vec::new(),
-			short_profits: Vec::new(),
+			profit_duration_stats: Vec::new(),
 			terminated: false
 		};
 		Ok(backtest)
@@ -249,9 +255,6 @@ impl<'a> Backtest<'a> {
 
 	pub fn get_result(&self) -> Result<BacktestResult> {
 		const DAYS_PER_YEAR: f64 = 365.25;
-		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
-		// Placeholder, will be replaced by TB3MS
-		const RISK_FREE_RATE: f64 = 0.02;
 		let profit = self.cash - self.configuration.starting_cash;
 		let time_difference = self.to - self.from;
 		let years = (time_difference.num_days() as f64) / DAYS_PER_YEAR;
@@ -260,20 +263,7 @@ impl<'a> Backtest<'a> {
 		let annual_average_return = total_return / years;
 		let compound_annual_growth_rate = total_return.powf(1.0 / years);
 		let equity_curve_daily = self.equity_curve_daily.clone();
-		let daily_returns = Self::get_daily_returns(&equity_curve_daily);
-		let daily_standard_deviation = Self::standard_deviation(daily_returns.iter())?;
-		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
-		let standard_deviation = daily_standard_deviation * standard_deviation_factor;
-		let excess_returns = annual_average_return - RISK_FREE_RATE;
-		let sharpe_ratio = excess_returns / standard_deviation;
-		let downside_daily_returns = daily_returns
-			.iter()
-			.filter(|x| **x < 0.0);
-		let daily_downside_standard_deviation = Self::standard_deviation(downside_daily_returns)?;
-		let downside_standard_deviation = daily_downside_standard_deviation * standard_deviation_factor;
-		let sortino_ratio = excess_returns / downside_standard_deviation;
-		let max_drawdown = Self::get_max_drawdown(&equity_curve_daily)?;
-		let calmar_ratio = annual_average_return / max_drawdown.abs();
+		let (sharpe_ratio, sortino_ratio, calmar_ratio, max_drawdown) = Self::get_ratios(annual_average_return, &equity_curve_daily)?;
 		let all_trades = self.get_trade_results(true, true)?;
 		let long_trades = self.get_trade_results(true, false)?;
 		let short_trades = self.get_trade_results(false, true)?;
@@ -313,6 +303,7 @@ impl<'a> Backtest<'a> {
 			Some(now) => {
 				self.margin_call_check()?;
 				self.now = now;
+				self.update_position_bars();
 				self.rollover_contracts()?;
 				self.update_equity_curve()?;
 				self.ruin_check()?;
@@ -370,7 +361,8 @@ impl<'a> Backtest<'a> {
 				price: ask,
 				margin: maintenance_margin_usd,
 				archive,
-				time: self.now.clone(),
+				time_opened: self.now.clone(),
+				bars_in_trade: 0,
 				automatic_rollover
 			};
 			self.next_position_id += 1;
@@ -404,11 +396,12 @@ impl<'a> Backtest<'a> {
 			bid = position_bid;
 			self.cash += value;
 			self.fees += fees;
-			if position.side == PositionSide::Long {
-				self.long_profits.push(value);
-			} else {
-				self.short_profits.push(value);
-			}
+			let profit_duration_stats = ProfitDurationStats {
+				side: position.side.clone(),
+				profit: value,
+				bars_in_trade: position.bars_in_trade
+			};
+			self.profit_duration_stats.push(profit_duration_stats);
 			let new_count = position.count - count;
 			if new_count == 0 {
 				// The entire position has been sold, remove it
@@ -796,40 +789,70 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn get_trade_results(&self, long: bool, short: bool) -> Result<TradeResults> {
-		let source: Box<dyn Iterator<Item = &f64>> = match (long, short) {
-			(false, false) => bail!("Invalid arguments for get_trade_results"),
-			(false, true) => Box::new(self.short_profits.iter()),
-			(true, false) => Box::new(self.long_profits.iter()),
-			(true, true) => Box::new(
-				self.long_profits
-				.iter()
-				.chain(self.short_profits.iter()))
-		};
+		let source = self.profit_duration_stats
+			.iter()
+			.filter(|x|
+				(!long || x.side == PositionSide::Long) &&
+				(!short || x.side == PositionSide::Short)
+			);
 		let mut profits_only = 0.0;
 		let mut profits_count = 0u32;
 		let mut losses_only = 0.0;
 		let mut losses_count = 0u32;
+		let mut bars_in_trade_sum = 0u32;
 		for x in source {
-			if *x >= 0.0 {
-				profits_only += x;
+			let profit = x.profit;
+			if profit >= 0.0 {
+				profits_only += profit;
 				profits_count += 1;
 			} else {
-				losses_only += x;
+				losses_only += profit;
 				losses_count += 1;
 			}
+			bars_in_trade_sum += x.bars_in_trade;
 		}
 		let trades = profits_count + losses_count;
 		let profit = profits_only + losses_only;
 		let profit_per_trade = profit / (trades as f64);
 		let win_rate = (profits_count as f64) / (trades as f64);
 		let profit_factor = (profits_only / losses_only).abs();
+		let bars_in_trade = (bars_in_trade_sum as f64) / (trades as f64);
 		let results = TradeResults {
 			trades,
 			profit: WebF64(profit),
 			profit_per_trade: WebF64(profit_per_trade),
 			win_rate: WebF64(win_rate),
-			profit_factor: WebF64(profit_factor)
+			profit_factor: WebF64(profit_factor),
+			bars_in_trade: WebF64(bars_in_trade)
 		};
 		Ok(results)
+	}
+
+	fn get_ratios(annual_average_return: f64, equity_curve_daily: &Vec<EquityCurveData>) -> Result<(f64, f64, f64, f64)> {
+		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
+		// Placeholder, will be replaced by TB3MS
+		const RISK_FREE_RATE: f64 = 0.02;
+		let daily_returns = Self::get_daily_returns(equity_curve_daily);
+		let daily_standard_deviation = Self::standard_deviation(daily_returns.iter())?;
+		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
+		let standard_deviation = daily_standard_deviation * standard_deviation_factor;
+		let excess_returns = annual_average_return - RISK_FREE_RATE;
+		let sharpe_ratio = excess_returns / standard_deviation;
+		let downside_daily_returns = daily_returns
+			.iter()
+			.filter(|x| **x < 0.0);
+		let daily_downside_standard_deviation = Self::standard_deviation(downside_daily_returns)?;
+		let downside_standard_deviation = daily_downside_standard_deviation * standard_deviation_factor;
+		let sortino_ratio = excess_returns / downside_standard_deviation;
+		let max_drawdown = Self::get_max_drawdown(equity_curve_daily)?;
+		let calmar_ratio = annual_average_return / max_drawdown.abs();
+		let result = (sharpe_ratio, sortino_ratio, calmar_ratio, max_drawdown);
+		Ok(result)
+	}
+
+	fn update_position_bars(&mut self) {
+		for position in self.positions.iter_mut() {
+			position.bars_in_trade += 1;
+		}
 	}
 }
