@@ -1,11 +1,12 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use std::sync::Mutex;
+use std::time::Instant;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use anyhow::{Result, anyhow, Error};
+use anyhow::{Result, anyhow, Error, Context};
 use tokio::task;
 use tokio::task::JoinError;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
@@ -86,9 +87,12 @@ impl OhlcRecordWeb {
 	}
 }
 
-pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) {
+pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) -> Result<()> {
+	println!("Loading assets");
+	let timer = Instant::now();
+	let asset_manager = AssetManager::new(ticker_directory, assets_path)?;
+	println!("Loaded assets in {} ms", timer.elapsed().as_millis());
 	println!("Running server on {}", address);
-	let asset_manager = AssetManager::new(ticker_directory, assets_path);
 	let server_state = ServerState {
 		asset_manager,
 		backtest_configuration
@@ -101,8 +105,11 @@ pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: Str
 		.route("/backtest", post(run_backtest))
 		.with_state(state_arc)
 		.fallback_service(serve_dir);
-	let listener = TcpListener::bind(address).await.unwrap();
-	axum::serve(listener, app).await.unwrap();
+	let listener = TcpListener::bind(address).await
+		.with_context(|| "Failed to bind address")?;
+	axum::serve(listener, app).await
+		.with_context(|| "Failed to launch axum server")?;
+	Ok(())
 }
 
 async fn get_response<A, B>(state: Arc<ServerState>, request: A, get_data: Box<dyn FnOnce(A, Arc<ServerState>) -> Result<B> + Send>) -> impl IntoResponse
@@ -179,7 +186,7 @@ fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) ->
 	}
 }
 
-fn get_ticker_archives(symbols: &Vec<String>, asset_manager: &AssetManager) -> Result<Vec<Arc<OhlcArchive>>> {
+fn get_ticker_archives<'a>(symbols: &Vec<String>, asset_manager: &'a AssetManager) -> Result<Vec<&'a OhlcArchive>> {
 	symbols
 		.iter()
 		.map(|x| asset_manager.get_archive(&x))
@@ -192,10 +199,10 @@ fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetMan
 	let time_frame = TimeFrame::Daily;
 	let from = request.from.resolve(&request.to, &time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &time_frame, &archives)?;
-	get_correlation_matrix(resolved_symbols, from, to, archives)
+	get_correlation_matrix(resolved_symbols, from, to, &archives)
 }
 
-fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, archive: &Arc<OhlcArchive>) -> Result<Vec<OhlcRecordWeb>> {
+fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, archive: &OhlcArchive) -> Result<Vec<OhlcRecordWeb>> {
 	if time_frame >= MINUTES_PER_DAY {
 		return Ok(get_unprocessed_records(from, to, archive.daily.get_adjusted_fallback()));
 	} else if time_frame == archive.intraday_time_frame {

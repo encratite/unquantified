@@ -1,6 +1,5 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}};
 use std::cmp::Ordering;
-use std::sync::Arc;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
@@ -59,7 +58,7 @@ pub struct Backtest<'a> {
 	// Buying or selling securities that are traded in other currencies cause implicit conversion.
 	cash: f64,
 	// Long and short positions held by the account
-	positions: Vec<Position>,
+	positions: Vec<Position<'a>>,
 	// The current point in time
 	now: NaiveDateTime,
 	// Controls the speed of the event loop, specified by the strategy
@@ -110,7 +109,7 @@ pub struct BacktestConfiguration {
 }
 
 #[derive(Clone)]
-pub struct Position {
+pub struct Position<'a> {
 	// Positions are uniquely identified by a sequential ID
 	pub id: u32,
 	// In case of futures this is the full name of the contract, i.e. a Globex code such as "ESU24"
@@ -129,7 +128,7 @@ pub struct Position {
 	// This amount is later re-added to the account when the position is closed.
 	pub margin: f64,
 	// Underlying OHLC archive of the asset
-	pub archive: Arc<OhlcArchive>,
+	pub archive: &'a OhlcArchive,
 	// Time the position was opened, doesn't get updated when it's partially sold off
 	pub time_opened: NaiveDateTime,
 	// Number of bars spent in the trade, relevant for statistics
@@ -357,7 +356,7 @@ impl<'a> Backtest<'a> {
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let current_record = self.get_current_record(&symbol)?;
-			let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
+			let maintenance_margin = self.get_asset_margin(&asset, archive)?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
 			let initial_margin = (count as f64) * self.configuration.initial_margin_ratio * maintenance_margin_usd;
@@ -487,7 +486,7 @@ impl<'a> Backtest<'a> {
 		Some(latest_record.symbol.clone())
 	}
 
-	fn get_asset_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
+	fn get_asset_margin(&self, asset: &Asset, archive: &OhlcArchive) -> Result<f64> {
 		let current_record = archive.daily.time_map.get(&self.now)
 			.with_context(|| anyhow!("Unable to find current record for symbol {} at {}", asset.symbol, self.now))?;
 		let last_record = archive.daily.unadjusted.last()
@@ -540,7 +539,7 @@ impl<'a> Backtest<'a> {
 	fn get_record(&self, symbol: &String, time: NaiveDateTime) -> Result<OhlcRecord> {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
-		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcRecord> {
+		let get_record = |archive: &OhlcArchive| -> Result<OhlcRecord> {
 			let source = archive.get_data(&self.time_frame);
 			let record = source.time_map.get(&time)
 				.with_context(map_error)?

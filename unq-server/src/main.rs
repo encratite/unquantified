@@ -47,6 +47,6 @@ async fn main() -> Result<()> {
 		overnight_margin_ratio,
 		ruin_ratio
 	};
-	server::run(address, ticker_directory, assets_path, backtest_configuration).await;
+	server::run(address, ticker_directory, assets_path, backtest_configuration).await?;
 	Ok(())
 }

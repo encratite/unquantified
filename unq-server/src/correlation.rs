@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use chrono::NaiveDateTime;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
@@ -13,11 +13,11 @@ pub struct CorrelationData {
 	pub correlation: Vec<Vec<f64>>,
 }
 
-pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime, request_to: NaiveDateTime, archives: Vec<Arc<OhlcArchive>>) -> Result<CorrelationData> {
+pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime, request_to: NaiveDateTime, archives: &Vec<&OhlcArchive>) -> Result<CorrelationData> {
 	// Determine smallest overlapping time range across all OHLC records
-	let (from, to) = get_common_time_range(request_from, request_to, &archives)?;
+	let (from, to) = get_common_time_range(request_from, request_to, archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
-	let delta_samples = get_delta_samples(&from, &to, &archives)?;
+	let delta_samples = get_delta_samples(&from, &to, archives)?;
 	// Create a square a matrix, default to 1.0 for diagonal elements
 	let count = archives.len();
 	let mut matrix = vec![vec![1f64; count]; count];
@@ -58,7 +58,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime,
 	Ok(output)
 }
 
-fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime, archives: &Vec<Arc<OhlcArchive>>)
+fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime, archives: &Vec<&OhlcArchive>)
 	-> Result<(NaiveDateTime, NaiveDateTime)> {
 	let mut from = request_from;
 	let mut to = request_to;
@@ -82,7 +82,7 @@ fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime,
 	Ok((from, to))
 }
 
-fn get_delta_samples(from: &NaiveDateTime, to: &NaiveDateTime, archives: &Vec<Arc<OhlcArchive>>) -> Result<Vec<(Vec<f64>, f64)>> {
+fn get_delta_samples(from: &NaiveDateTime, to: &NaiveDateTime, archives: &Vec<&OhlcArchive>) -> Result<Vec<(Vec<f64>, f64)>> {
 	// Create an index map to make sure that each cell in the matrix corresponds to the same point in time
 	let in_range = |fixed_time| fixed_time >= *from && fixed_time <= *to;
 	let mut indexes = HashMap::new();
@@ -133,6 +133,6 @@ fn get_delta_samples(from: &NaiveDateTime, to: &NaiveDateTime, archives: &Vec<Ar
 	Ok(delta_samples)
 }
 
-fn get_records(archive: &Arc<OhlcArchive>) -> &OhlcVec {
+fn get_records(archive: &OhlcArchive) -> &OhlcVec {
 	archive.daily.get_adjusted_fallback()
 }

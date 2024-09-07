@@ -1,9 +1,9 @@
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
-use dashmap::DashMap;
-use regex::Regex;
+use std::{collections::HashMap, fs};
+use std::path::PathBuf;
 use serde::Deserialize;
-use anyhow::{Context, Result, bail};
-use crate::{get_archive_file_name, read_archive, read_csv, OhlcArchive};
+use anyhow::{Context, Result, bail, Error, anyhow};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use crate::{read_archive, read_csv, OhlcArchive};
 
 #[derive(Deserialize, Clone, PartialEq)]
 pub enum AssetType {
@@ -26,63 +26,43 @@ pub struct Asset {
 }
 
 pub struct AssetManager {
-	ticker_directory: String,
-	tickers: DashMap<String, Arc<OhlcArchive>>,
+	tickers: HashMap<String, OhlcArchive>,
 	assets: HashMap<String, Asset>
 }
 
 impl AssetManager {
-	pub fn new(ticker_directory: String, asset_path: String) -> AssetManager {
+	pub fn new(ticker_directory: String, asset_path: String) -> Result<AssetManager> {
 		let assets = Self::load_assets(asset_path);
-		AssetManager {
-			ticker_directory,
-			tickers: DashMap::new(),
+		let tickers = Self::load_archives(ticker_directory, &assets)?;
+		let manager = AssetManager {
+			tickers,
 			assets
-		}
+		};
+		Ok(manager)
 	}
 
-	pub fn get_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>> {
-		// Simple directory traversal check
-		let pattern = Regex::new(r"^\^?[A-Z0-9]+$")?;
-		if !pattern.is_match(symbol) {
-			bail!("Invalid characters in OHLC archive name");
-		}
-		if let Some(archive_ref) = self.tickers.get(symbol) {
-			Ok(archive_ref.value().clone())
+	pub fn get_archive(&self, symbol: &String) -> Result<&OhlcArchive> {
+		if let Some(archive) = self.tickers.get(symbol) {
+			Ok(archive)
 		} else {
-			let file_name = get_archive_file_name(symbol);
-			let archive_path = Path::new(&self.ticker_directory).join(file_name);
-			let physical_delivery = self.physical_delivery(symbol);
-			let archive = read_archive(&archive_path, physical_delivery)?;
-			let archive_arc = Arc::new(archive);
-			self.tickers.insert(symbol.to_string(), archive_arc.clone());
-			Ok(archive_arc)
+			bail!("Unable to find an archive for ticker {symbol}");
 		}
 	}
 
 	pub fn resolve_symbols(&self, symbols: &Vec<String>) -> Result<Vec<String>> {
 		let all_keyword = "all";
 		if symbols.iter().any(|x| x == all_keyword) {
-			let data_directory = &self.ticker_directory;
-			let entries = fs::read_dir(data_directory)
-				.expect("Unable to get list of archives");
-			let result = entries
-				.filter_map(|x| x.ok())
-				.map(|x| x.path())
-				.filter(|x| x.is_file())
-				.filter(|x| x.extension()
-					.and_then(|x| x.to_str()) == Some("zrk"))
-				.filter_map(|x| x.file_stem()
-					.and_then(|x| x.to_str())
-					.map(|x| x.to_string()))
+			let output = self.tickers
+				.keys()
+				.cloned()
 				.collect();
-			Ok(result)
+			Ok(output)
 		} else {
 			Ok(symbols.clone())
 		}
 	}
 
-	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, Arc<OhlcArchive>)> {
+	pub fn get_asset(&self, symbol: &String) -> Result<(Asset, &OhlcArchive)> {
 		let asset = self.assets.get(symbol)
 			.with_context(|| "Unable to find a matching asset definition")?;
 		let archive = self.get_archive(symbol)?;
@@ -97,8 +77,34 @@ impl AssetManager {
 		return assets;
 	}
 
-	fn physical_delivery(&self, symbol: &String) -> bool {
-		self.assets.values().any(|x|
+	fn load_archives(ticker_directory: String, assets: &HashMap<String, Asset>) -> Result<HashMap<String, OhlcArchive>> {
+		let entries = fs::read_dir(&ticker_directory)
+			.map_err(Error::msg)
+			.with_context(|| anyhow!("Unable to get list of archives from {ticker_directory}"))?;
+		let paths: Vec<PathBuf> = entries
+			.filter_map(|x| x.ok())
+			.map(|x| x.path())
+			.filter(|x| x.is_file())
+			.filter(|x| x.extension()
+				.and_then(|x| x.to_str()) == Some("zrk"))
+			.collect();
+		let tuples = paths.par_iter().map(|path| {
+			let Some(file_stem) = path.file_stem() else {
+				bail!("Unable to determine file stem");
+			};
+			let Some(symbol) = file_stem.to_str() else {
+				bail!("OsPath conversion failed");
+			};
+			let physical_delivery = Self::physical_delivery(symbol.to_string(), assets);
+			let archive = read_archive(path, physical_delivery)?;
+			Ok((symbol.to_string(), archive))
+		}).collect::<Result<Vec<(String, OhlcArchive)>>>()?;
+		let map: HashMap<String, OhlcArchive> = tuples.into_iter().collect();
+		Ok(map)
+	}
+
+	fn physical_delivery(symbol: String, assets: &HashMap<String, Asset>) -> bool {
+		assets.values().any(|x|
 			x.symbol == *symbol &&
 			x.asset_type == AssetType::Futures &&
 			x.physical_delivery)
