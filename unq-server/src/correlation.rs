@@ -18,7 +18,7 @@ pub fn get_correlation_matrix(symbols: Vec<String>, request_from: NaiveDateTime,
 	let (from, to) = get_common_time_range(request_from, request_to, archives)?;
 	// Retrieve pre-calculated x_i - x_mean values for each ticker
 	let delta_samples = get_delta_samples(&from, &to, archives)?;
-	// Create a square a matrix, default to 1.0 for diagonal elements
+	// Create a square matrix, default to 1.0 for diagonal elements
 	let count = archives.len();
 	let mut matrix = vec![vec![1f64; count]; count];
 	// Generate a list of pairs (i, j) of indices for one half of the matrix, excluding the diagonal, for parallel processing

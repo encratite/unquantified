@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
 	let address: SocketAddr = address_string.parse()
 		.with_context(|| "Unable to parse server address")?;
 	let ticker_directory = get_string(server_section, "ticker_directory")?;
+	let csv_directory = get_string(server_section, "csv_directory")?;
 	let assets_path = get_string(server_section, "assets")?;
 	let backtest_section = "backtest";
 	let starting_cash = get_f64(backtest_section, "starting_cash")?;
@@ -47,6 +48,6 @@ async fn main() -> Result<()> {
 		overnight_margin_ratio,
 		ruin_ratio
 	};
-	server::run(address, ticker_directory, assets_path, backtest_configuration).await?;
+	server::run(address, ticker_directory, csv_directory, assets_path, backtest_configuration).await?;
 	Ok(())
 }

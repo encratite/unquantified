@@ -4,8 +4,8 @@ use serde;
 use chrono::{NaiveDate, NaiveDateTime};
 use stopwatch::Stopwatch;
 use rayon::prelude::*;
-use anyhow::{Result, anyhow};
-use unq_common::{get_archive_file_name, ohlc::RawOhlcArchive, read_csv, write_archive};
+use anyhow::{Result, anyhow, Context, bail};
+use unq_common::{get_archive_file_name, ohlc::RawOhlcArchive, read_csv, write_archive, PathDisplay};
 use unq_common::ohlc::RawOhlcRecord;
 use crate::{filter::ContractFilter, symbol::SymbolMapper};
 
@@ -61,56 +61,59 @@ impl CsvParser {
 			.to_string()
 	}
 
-	fn get_directories(path: &PathBuf) -> impl Iterator<Item = PathBuf> {
-		fs::read_dir(path)
-			.expect(format!("Unable to read directory \"{}\"", path.to_str().unwrap()).as_str())
+	fn get_directories(path: &PathBuf) -> Result<impl Iterator<Item = PathBuf>> {
+		let iterator = fs::read_dir(path)
+			.with_context(|| anyhow!("Unable to read directory \"{}\"", path.to_string()))?
 			.filter(|x| x.is_ok())
 			.map(|x| x.unwrap().path())
-			.filter(|x| x.is_dir())
+			.filter(|x| x.is_dir());
+		Ok(iterator)
 	}
 
-	fn get_csv_paths(path: &PathBuf, filter: Regex) -> impl Iterator<Item = PathBuf> {
-		fs::read_dir(path.clone())
-			.expect("Unable to get list of .csv files")
+	fn get_csv_paths(path: &PathBuf, filter: Regex) -> Result<impl Iterator<Item = PathBuf>> {
+		let iterator = fs::read_dir(path.clone())
+			.with_context(|| anyhow!("Unable to get list of .csv files from \"{}\"", path.to_string()))?
 			.filter_map(|x| x.ok())
 			.map(|x| x.path())
 			.filter(move |x|
 				x.is_file() &&
 				x.file_name()
 					.and_then(|x| x.to_str())
-					.map_or(false, |x| filter.is_match(x)))
+					.map_or(false, |x| filter.is_match(x)));
+		Ok(iterator)
 	}
 
 	fn parse_date_time(time_string: &str) -> Result<NaiveDateTime>  {
 		match NaiveDateTime::parse_from_str(time_string, "%Y-%m-%d %H:%M") {
 			Ok(datetime) => Ok(datetime),
-			Err(_) => match NaiveDate::parse_from_str(time_string, "%Y-%m-%d") {
+			_ => match NaiveDate::parse_from_str(time_string, "%Y-%m-%d") {
 				Ok(date) => Ok(date.and_hms_opt(0, 0, 0).unwrap()),
-				Err(_) => Err(anyhow!("Failed to parse date time"))
+				_ => bail!("Failed to parse date time")
 			}
 		}
 	}
 
-	pub fn run(&self) {
+	pub fn run(&self) -> Result<()> {
 		let stopwatch = Stopwatch::start_new();
-		Self::get_directories(&self.input_directory)
+		let results: Result<Vec<()>> = Self::get_directories(&self.input_directory)?
 			.collect::<Vec<PathBuf>>()
 			.par_iter()
-			.for_each(|ticker_directory| {
-				self.process_ticker_directory(ticker_directory);
-			});
+			.map(|ticker_directory| {
+				self.process_ticker_directory(ticker_directory)
+			})
+			.collect();
+		results?;
 		println!("Processed all directories in {} ms", stopwatch.elapsed_ms());
+		Ok(())
 	}
 
-	fn process_ticker_directory(&self, ticker_directory: &PathBuf) {
+	fn process_ticker_directory(&self, ticker_directory: &PathBuf) -> Result<()> {
 		let stopwatch = Stopwatch::start_new();
-		let get_regex = |x| Regex::new(x)
-			.expect("Invalid regex"); 
-		let daily_filter = get_regex(r"D1\.csv$");
-		let intraday_filter = get_regex(r"(H1|M\d+)\.csv$");
-		let (daily, daily_excluded) = self.parse_csv_files(ticker_directory, daily_filter, false);
+		let daily_filter = Regex::new(r"D1\.csv$")?;
+		let intraday_filter = Regex::new(r"(H1|M\d+)\.csv$")?;
+		let (daily, daily_excluded) = self.parse_csv_files(ticker_directory, daily_filter, false)?;
 		let (intraday, intraday_excluded) = if self.enable_intraday {
-			self.parse_csv_files(ticker_directory, intraday_filter, true)
+			self.parse_csv_files(ticker_directory, intraday_filter, true)?
 		} else {
 			(Vec::new(), 0)
 		};
@@ -120,13 +123,7 @@ impl CsvParser {
 			intraday,
 			intraday_time_frame: self.intraday_time_frame
 		};
-		match write_archive(&archive_path, &archive) {
-			Ok(_) => {}
-			Err(error) => {
-				eprintln!("Failed to write archive: {}", error);
-				return;
-			}
-		}
+		write_archive(&archive_path, &archive)?;
 		if daily_excluded + intraday_excluded > 0 {
 			println!(
 				"Loaded {} records from \"{}\", excluded {} daily contracts, {} intraday contracts and wrote them to \"{}\" in {} ms",
@@ -146,10 +143,11 @@ impl CsvParser {
 				stopwatch.elapsed_ms()
 			);
 		}
+		Ok(())
 	}
 
-	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> (Vec<RawOhlcRecord>, usize) {
-		let csv_paths = Self::get_csv_paths(path, filter);
+	fn parse_csv_files(&self, path: &PathBuf, filter: Regex, sort_by_symbol: bool) -> Result<(Vec<RawOhlcRecord>, usize)> {
+		let csv_paths = Self::get_csv_paths(path, filter)?;
 		let mut ohlc_map = OhlcTreeMap::new();
 		let symbol_path = Path::new(path);
 		let mut current_filter: Option<ContractFilter> = None;
@@ -169,13 +167,13 @@ impl CsvParser {
 					}
 				}
 				self.add_ohlc_record(&record, &mut ohlc_map);
-			});
+			})?;
 			if let Some(filter) = current_filter.as_mut() {
 				filter.reset();
 			}
 		}
 		if ohlc_map.values().len() < 250 {
-			panic!("Missing data in {}", path.to_str().unwrap());
+			panic!("Missing data in {}", path.to_string());
 		}
 		let mut records: Vec<RawOhlcRecord> = ohlc_map.into_values().collect();
 		records.sort_by(|a, b| {
@@ -185,7 +183,7 @@ impl CsvParser {
 				a.time.cmp(&b.time)
 			}
 		});
-		return (records, excluded_contracts.len());
+		Ok((records, excluded_contracts.len()))
 	}
 
 	fn add_ohlc_record(&self, record: &CsvRecord, ohlc_map: &mut OhlcTreeMap) {

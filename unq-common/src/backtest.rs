@@ -528,7 +528,7 @@ impl<'a> Backtest<'a> {
 		} else if to == FOREX_USD {
 			get_record(from, false)
 		} else {
-			Err(anyhow!("Invalid currency pair"))
+			bail!("Invalid currency pair")
 		}
 	}
 

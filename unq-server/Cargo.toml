@@ -17,6 +17,7 @@ rayon = "1.10.0"
 serde = { version = "1.0.203", features = ["derive"] }
 tokio = { version = "1.38.0", features = ["full"] }
 tower-http = { version = "0.5.2", features = ["fs"] }
+stopwatch = "0.0.7"
 
 [[bin]]
 name = "unq-server"

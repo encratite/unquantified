@@ -4,7 +4,7 @@ mod symbol;
 mod ini_file;
 
 use std::path::PathBuf;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use filter::ContractFilter;
 use parser::CsvParser;
 use symbol::SymbolMapper;
@@ -16,7 +16,7 @@ fn main() -> Result<()> {
 	let get_value = |key| -> Result<String> {
 		match ini.get(section, key) {
 			Some(value) => Ok(value),
-			None => Err(anyhow!("Missing value \"{key}\" in configuration file"))
+			None => bail!("Missing value \"{key}\" in configuration file")
 		}
 	};
 	let enable_intraday_string = get_value("enable_intraday")?;
@@ -28,6 +28,6 @@ fn main() -> Result<()> {
 	let filters = ContractFilter::from_ini(&ini)?;
 	let symbol_mapper = SymbolMapper::new(&ini)?;
 	let parser = CsvParser::new(enable_intraday, intraday_time_frame, input_directory, output_directory, filters, symbol_mapper);
-	parser.run();
+	parser.run()?;
 	Ok(())
 }

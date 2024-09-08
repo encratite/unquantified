@@ -1,6 +1,6 @@
 use chrono::{Duration, Local, Months, NaiveDateTime, TimeDelta, Timelike};
 use serde::Deserialize;
-use anyhow::{Result, anyhow, Context};
+use anyhow::{Result, anyhow, Context, bail};
 use unq_common::ohlc::{OhlcArchive, TimeFrame};
 
 #[derive(Deserialize, Clone)]
@@ -64,14 +64,14 @@ impl RelativeDateTime {
 			(false, true, true, false) => {
 				let other_time = other.to_fixed(time_frame, archives)?;
 				let offset_time = get_offset_date_time(&other_time, self.offset.unwrap(), self.offset_unit.clone().unwrap())
-					.expect("Invalid offset calculation".into());
+					.with_context(|| anyhow!("Invalid offset calculation"))?;
 				Ok(offset_time)
 			},
 			(false, false, false, true) => {
 				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), time_frame, archives)?;
 				Ok(special_time)
 			},
-			_ => Err(anyhow!("Invalid relative date time"))
+			_ => bail!("Invalid relative date time")
 		}
 	}
 
@@ -82,7 +82,7 @@ impl RelativeDateTime {
 				let special_time = resolve_keyword(self.special_keyword.clone().unwrap(), time_frame, archives)?;
 				Ok(special_time)
 			},
-			_ => Err(anyhow!("Invalid combination of relative date time parameters"))
+			_ => bail!("Invalid combination of relative date time parameters")
 		}
 	}
 }
@@ -92,10 +92,7 @@ fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &OhlcArch
 	let mut time_values = data.get_adjusted_fallback()
 		.iter()
 		.map(|x| x.time);
-	let get_some_time = |time: Option<NaiveDateTime>| match time {
-		Some(x) => Ok(x),
-		None => Err(anyhow!("No records available"))
-	};
+	let get_some_time = |time: Option<NaiveDateTime>| time.with_context(|| anyhow!("No records available"));
 	if is_first {
 		get_some_time(time_values.next())
 	} else {
@@ -126,7 +123,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, arc
 		};
 		match time {
 			Some(x) => Ok(*x),
-			None => Err(anyhow!("No records available"))
+			None => bail!("No records available")
 		}
 	}
 }

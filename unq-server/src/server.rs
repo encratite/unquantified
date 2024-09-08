@@ -1,12 +1,12 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use std::sync::Mutex;
-use std::time::Instant;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use anyhow::{Result, anyhow, Error, Context};
+use anyhow::{Result, anyhow, Error, Context, bail};
+use stopwatch::Stopwatch;
 use tokio::task;
 use tokio::task::JoinError;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
@@ -87,11 +87,11 @@ impl OhlcRecordWeb {
 	}
 }
 
-pub async fn run(address: SocketAddr, ticker_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) -> Result<()> {
+pub async fn run(address: SocketAddr, ticker_directory: String, csv_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) -> Result<()> {
 	println!("Loading assets");
-	let timer = Instant::now();
-	let asset_manager = AssetManager::new(ticker_directory, assets_path)?;
-	println!("Loaded assets in {} ms", timer.elapsed().as_millis());
+	let stopwatch = Stopwatch::start_new();
+	let asset_manager = AssetManager::new(ticker_directory, csv_directory, assets_path)?;
+	println!("Loaded assets in {} ms", stopwatch.elapsed_ms());
 	println!("Running server on {}", address);
 	let server_state = ServerState {
 		asset_manager,
@@ -208,10 +208,10 @@ fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, a
 	} else if time_frame == archive.intraday_time_frame {
 		return Ok(get_unprocessed_records(from, to, archive.intraday.get_adjusted_fallback()));
 	} else if time_frame < archive.intraday_time_frame {
-		return Err(anyhow!("Requested time frame too small for intraday data in archive"));
+		bail!("Requested time frame too small for intraday data in archive");
 	} else if time_frame % archive.intraday_time_frame != 0 {
 		let message = format!("Requested time frame must be a multiple of {}", archive.intraday_time_frame);
-		return Err(anyhow!(message));
+		bail!(message);
 	}
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
 	archive.intraday

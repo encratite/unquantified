@@ -122,7 +122,7 @@ impl<'a> PanamaCanal<'a> {
 				return Ok((current_contract, first_date));
 			}
 		}
-		Err(anyhow!("Unable to determine first contract"))
+		bail!("Unable to determine first contract");
 	}
 
 	fn deref<T>(opt: Option<&T>) -> Option<T>

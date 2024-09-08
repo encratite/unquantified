@@ -1,9 +1,11 @@
-use std::{collections::HashMap, fs};
+use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use serde::Deserialize;
 use anyhow::{Context, Result, bail, Error, anyhow};
+use chrono::NaiveDate;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
-use crate::{read_archive, read_csv, OhlcArchive};
+use crate::{get_files_by_extension, read_archive, read_csv, OhlcArchive, PathDisplay};
 
 #[derive(Deserialize, Clone, PartialEq)]
 pub enum AssetType {
@@ -25,18 +27,25 @@ pub struct Asset {
 	pub physical_delivery: bool
 }
 
+pub struct CsvTimeSeries {
+	time_series: BTreeMap<NaiveDate, f64>
+}
+
 pub struct AssetManager {
 	tickers: HashMap<String, OhlcArchive>,
-	assets: HashMap<String, Asset>
+	assets: HashMap<String, Asset>,
+	time_series: HashMap<String, CsvTimeSeries>
 }
 
 impl AssetManager {
-	pub fn new(ticker_directory: String, asset_path: String) -> Result<AssetManager> {
-		let assets = Self::load_assets(asset_path);
+	pub fn new(ticker_directory: String, csv_directory: String, asset_path: String) -> Result<AssetManager> {
+		let assets = Self::load_assets(asset_path)?;
+		let time_series = Self::load_csv_files(csv_directory)?;
 		let tickers = Self::load_archives(ticker_directory, &assets)?;
 		let manager = AssetManager {
 			tickers,
-			assets
+			assets,
+			time_series
 		};
 		Ok(manager)
 	}
@@ -69,35 +78,20 @@ impl AssetManager {
 		Ok((asset.clone(), archive))
 	}
 
-	fn load_assets(csv_path: String) -> HashMap<String, Asset> {
+	fn load_assets(csv_path: String) -> Result<HashMap<String, Asset>> {
 		let mut assets = HashMap::new();
 		read_csv::<Asset>(csv_path.into(), |record| {
 			assets.insert(record.symbol.clone(), record);
-		});
-		return assets;
+		})?;
+		Ok(assets)
 	}
 
 	fn load_archives(ticker_directory: String, assets: &HashMap<String, Asset>) -> Result<HashMap<String, OhlcArchive>> {
-		let entries = fs::read_dir(&ticker_directory)
-			.map_err(Error::msg)
-			.with_context(|| anyhow!("Unable to get list of archives from {ticker_directory}"))?;
-		let paths: Vec<PathBuf> = entries
-			.filter_map(|x| x.ok())
-			.map(|x| x.path())
-			.filter(|x| x.is_file())
-			.filter(|x| x.extension()
-				.and_then(|x| x.to_str()) == Some("zrk"))
-			.collect();
-		let tuples = paths.par_iter().map(|path| {
-			let Some(file_stem) = path.file_stem() else {
-				bail!("Unable to determine file stem");
-			};
-			let Some(symbol) = file_stem.to_str() else {
-				bail!("OsPath conversion failed");
-			};
+		let stem_paths = get_files_by_extension(ticker_directory, "zrk")?;
+		let tuples = stem_paths.par_iter().map(|(symbol, path)| {
 			let physical_delivery = Self::physical_delivery(symbol.to_string(), assets);
 			let archive = read_archive(path, physical_delivery)?;
-			Ok((symbol.to_string(), archive))
+			Ok((symbol.clone(), archive))
 		}).collect::<Result<Vec<(String, OhlcArchive)>>>()?;
 		let map: HashMap<String, OhlcArchive> = tuples.into_iter().collect();
 		Ok(map)
@@ -108,5 +102,40 @@ impl AssetManager {
 			x.symbol == *symbol &&
 			x.asset_type == AssetType::Futures &&
 			x.physical_delivery)
+	}
+
+	fn load_csv_files(csv_directory: String) -> Result<HashMap<String, CsvTimeSeries>> {
+		let stem_paths = get_files_by_extension(csv_directory, "csv")?;
+		let tuples = stem_paths.par_iter().map(|(key, path)| {
+			let time_series = CsvTimeSeries::new(path)?;
+			Ok((key.clone(), time_series))
+		}).collect::<Result<Vec<(String, CsvTimeSeries)>>>()?;
+		let map: HashMap<String, CsvTimeSeries> = tuples.into_iter().collect();
+		Ok(map)
+	}
+}
+
+impl CsvTimeSeries {
+	pub fn new(path: &PathBuf) -> Result<CsvTimeSeries> {
+		let path_string = path.to_string();
+		let mut reader = csv::Reader::from_path(path.clone())
+			.with_context(|| anyhow!("Unable to read .csv file from \"{}\"", path_string))?;
+		let mut string_record = csv::StringRecord::new();
+		let mut map: BTreeMap<NaiveDate, f64> = BTreeMap::new();
+		reader.headers()?;
+		while reader.read_record(&mut string_record).is_ok() && string_record.len() > 0  {
+			let get_string = |i| string_record.get(i)
+				.with_context(|| anyhow!("Missing column in .csv file \"{}\"", path_string));
+			let date_string = get_string(0)?;
+			let date = NaiveDate::parse_from_str(date_string, "%Y-%m-%d")
+				.map_err(Error::msg)?;
+			let value_string = get_string(1)?;
+			let value = value_string.parse::<f64>()?;
+			map.insert(date, value);
+		}
+		let time_series = CsvTimeSeries {
+			time_series: map
+		};
+		Ok(time_series)
 	}
 }

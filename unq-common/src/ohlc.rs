@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use chrono::NaiveDateTime;
 use rkyv::{Archive, Deserialize, Serialize};
 use crate::globex::GlobexCode;
@@ -203,7 +203,7 @@ impl RawOhlcArchive {
 					if let Some(globex_code) = GlobexCode::new(&record.symbol) {
 						Ok((globex_code, record.clone()))
 					} else {
-						Err(anyhow!("Failed to parse Globex code while filtering records"))
+						bail!("Failed to parse Globex code while filtering records")
 					}
 				})
 				.collect::<Result<Vec<(GlobexCode, OhlcRecord)>>>()?;
