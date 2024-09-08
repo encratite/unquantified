@@ -30,6 +30,7 @@ struct OhlcKey {
 }
 
 pub struct CsvParser {
+	enable_intraday: bool,
 	intraday_time_frame: u16,
 	input_directory: PathBuf,
 	output_directory: PathBuf,
@@ -38,8 +39,9 @@ pub struct CsvParser {
 }
 
 impl CsvParser {
-	pub fn new(intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>, symbol_mapper: SymbolMapper) -> CsvParser {
+	pub fn new(enable_intraday: bool, intraday_time_frame: u16, input_directory: PathBuf, output_directory: PathBuf, filters: Vec<ContractFilter>, symbol_mapper: SymbolMapper) -> CsvParser {
 		CsvParser {
+			enable_intraday,
 			intraday_time_frame,
 			input_directory,
 			output_directory,
@@ -107,7 +109,11 @@ impl CsvParser {
 		let daily_filter = get_regex(r"D1\.csv$");
 		let intraday_filter = get_regex(r"(H1|M\d+)\.csv$");
 		let (daily, daily_excluded) = self.parse_csv_files(ticker_directory, daily_filter, false);
-		let (intraday, intraday_excluded) = self.parse_csv_files(ticker_directory, intraday_filter, true);
+		let (intraday, intraday_excluded) = if self.enable_intraday {
+			self.parse_csv_files(ticker_directory, intraday_filter, true)
+		} else {
+			(Vec::new(), 0)
+		};
 		let archive_path = self.get_archive_path(ticker_directory);
 		let archive = RawOhlcArchive {
 			daily,

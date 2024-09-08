@@ -19,13 +19,15 @@ fn main() -> Result<()> {
 			None => Err(anyhow!("Missing value \"{key}\" in configuration file"))
 		}
 	};
+	let enable_intraday_string = get_value("enable_intraday")?;
+	let enable_intraday = enable_intraday_string.parse::<bool>()?;
 	let intraday_time_frame_string = get_value("intraday_time_frame")?;
 	let intraday_time_frame = intraday_time_frame_string.parse::<u16>()?;
 	let input_directory = PathBuf::from(get_value("input_directory")?);
 	let output_directory = PathBuf::from(get_value("output_directory")?);
 	let filters = ContractFilter::from_ini(&ini)?;
 	let symbol_mapper = SymbolMapper::new(&ini)?;
-	let parser = CsvParser::new(intraday_time_frame, input_directory, output_directory, filters, symbol_mapper);
+	let parser = CsvParser::new(enable_intraday, intraday_time_frame, input_directory, output_directory, filters, symbol_mapper);
 	parser.run();
 	Ok(())
 }
