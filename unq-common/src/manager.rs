@@ -78,6 +78,13 @@ impl AssetManager {
 		Ok((asset.clone(), archive))
 	}
 
+	pub fn get_time_series(&self, name: &String) -> Result<&CsvTimeSeries> {
+		let Some(time_series) = self.time_series.get(name) else {
+			bail!("Unable to find time series \"{name}\"");
+		};
+		Ok(time_series)
+	}
+
 	fn load_assets(csv_path: String) -> Result<HashMap<String, Asset>> {
 		let mut assets = HashMap::new();
 		read_csv::<Asset>(csv_path.into(), |record| {
@@ -137,5 +144,12 @@ impl CsvTimeSeries {
 			time_series: map
 		};
 		Ok(time_series)
+	}
+
+	pub fn get(&self, date: &NaiveDate) -> Result<f64> {
+		let Some((_, value))  = self.time_series.range(..=date).next_back() else {
+			bail!("Unable to find a matching value for date {}", date);
+		};
+		Ok(*value)
 	}
 }

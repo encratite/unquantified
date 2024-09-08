@@ -1,5 +1,5 @@
 use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, cmp::Ordering};
-use chrono::{Duration, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{NaiveDate, NaiveDateTime, Timelike};
 use anyhow::{Result, anyhow, bail, Context};
 use crate::{globex::GlobexCode, RawOhlcArchive};
 use crate::ohlc::{OhlcContractMap, OhlcRecord, OhlcVec};
@@ -66,7 +66,7 @@ impl<'a> PanamaCanal<'a> {
 	// Generate a continuous contract with intraday data from the rollovers that had previously been calculated from daily data
 	pub fn from_offset_map(intraday: &OhlcContractMap, daily: &OhlcVec, offset_map: &OffsetMap) -> Result<OhlcVec> {
 		let mut output = OhlcVec::new();
-		let mut daily_map = HashMap::new();
+		let mut daily_map = BTreeMap::new();
 		for x in daily {
 			daily_map.insert(x.time.date(), &x.symbol);
 		}
@@ -100,7 +100,7 @@ impl<'a> PanamaCanal<'a> {
 		Ok(output)
 	}
 
-	fn get_current_contract<'b>(intraday: &OhlcContractMap, daily: &OhlcVec, daily_map: &HashMap<NaiveDate, &'b String>) -> Result<(&'b String, NaiveDate)> {
+	fn get_current_contract<'b>(intraday: &OhlcContractMap, daily: &OhlcVec, daily_map: &BTreeMap<NaiveDate, &'b String>) -> Result<(&'b String, NaiveDate)> {
 		let first_intraday_date_opt = intraday
 			.keys()
 			.map(|x| x.date())
@@ -116,13 +116,10 @@ impl<'a> PanamaCanal<'a> {
 			bail!("Unable to get first daily date");
 		};
 		let first_date = first_intraday_date.max(first_daily_date);
-		for i in 0..30 {
-			let try_date = first_daily_date - Duration::days(i);
-			if let Some(current_contract) = Self::deref(daily_map.get(&try_date)) {
-				return Ok((current_contract, first_date));
-			}
-		}
-		bail!("Unable to determine first contract");
+		let Some((_, current_contract)) = daily_map.range(..=first_daily_date).next_back() else {
+			bail!("Unable to determine first contract");
+		};
+		Ok((current_contract, first_date))
 	}
 
 	fn deref<T>(opt: Option<&T>) -> Option<T>
