@@ -900,17 +900,38 @@ impl<'a> Backtest<'a> {
 
 	fn gain_interest(&mut self) -> Result<()> {
 		// This is an approximation of the interest formula used by Interactive Brokers
-		const BENCHMARK_OFFSET: f64 = 0.005;
-		const TIER1_CUTOFF: f64 = 10_000.0;
-		const TIER1_SCALE: f64 = 0.9;
-		const TIER2_CUTOFF: f64 = 100_000.0;
+		// Multi-currency interest is currently not supported
+		let interpolation_table = vec![
+			(       0, 0.0000),
+			(   10_000, 0.0000),
+			(   20_000, 0.1000),
+			(  100_000, 0.9000),
+			(  110_000, 0.9091),
+			(  120_000, 0.9168),
+			(  150_000, 0.9333),
+			(  200_000, 0.9501),
+			(1_000_000, 0.9901)
+		];
 		if self.configuration.enable_interest {
 			let date = self.now.date();
-			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - BENCHMARK_OFFSET).max(0.0);
+			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - 0.005).max(0.0);
 			let daily_rate = annual_rate.powf(1.0 / TRADING_DAYS_PER_YEAR);
-			let tier1 = TIER1_SCALE * daily_rate * (self.cash - TIER1_CUTOFF).max(0.0) / (TIER2_CUTOFF - TIER1_CUTOFF);
-			let tier2 = daily_rate * (self.cash - TIER2_CUTOFF).max(0.0);
-			let interest = tier1 + tier2;
+			let Some((_, maximum_ratio)) = interpolation_table.last() else {
+				bail!("Empty interpolation table");
+			};
+			let mut blended_ratio = *maximum_ratio;
+			for window in interpolation_table.windows(2) {
+				if let [(cash1_int, rate1), (cash2_int, rate2)] = window {
+					let cash1 = *cash1_int as f64;
+					let cash2 = *cash2_int as f64;
+					if self.cash >= cash1 && self.cash < cash2 {
+						blended_ratio = (self.cash - cash1) / (cash2 - cash1) * (*rate2 - *rate1) + *rate1;
+						break;
+					}
+				}
+			}
+			let blended_rate = blended_ratio * daily_rate;
+			let interest = blended_rate * self.cash;
 			self.cash += interest;
 			self.interest += interest;
 		}
