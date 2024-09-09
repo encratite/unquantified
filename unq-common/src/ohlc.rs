@@ -312,7 +312,6 @@ impl OhlcArchive {
 		} else {
 			&self.intraday
 		}
-
 	}
 }
 

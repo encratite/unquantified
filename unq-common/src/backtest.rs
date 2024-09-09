@@ -370,7 +370,7 @@ impl<'a> Backtest<'a> {
 		};
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
-			let current_record = self.get_current_record(&symbol)?;
+			let current_record = self.current_record(&symbol)?;
 			let maintenance_margin = self.get_asset_margin(&asset, archive)?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
@@ -524,7 +524,7 @@ impl<'a> Backtest<'a> {
 		let get_record = |currency, reciprocal| -> Result<(f64, f64)> {
 			let symbol = FOREX_MAP.get(currency)
 					.with_context(|| "Unable to find currency")?;
-			let record = self.get_current_record(symbol)?;
+			let record = self.current_record(symbol)?;
 			let value = if reciprocal {
 				amount / record.close
 			} else {
@@ -547,11 +547,15 @@ impl<'a> Backtest<'a> {
 		}
 	}
 
-	fn get_current_record(&self, symbol: &String) -> Result<OhlcRecord> {
-		self.get_record(symbol, self.now)
+	fn current_record(&self, symbol: &String) -> Result<OhlcRecord> {
+		self.get_record(symbol, self.now, false)
 	}
 
-	fn get_record(&self, symbol: &String, time: NaiveDateTime) -> Result<OhlcRecord> {
+	fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
+		self.get_record(symbol, self.now, true)
+	}
+
+	fn get_record(&self, symbol: &String, time: NaiveDateTime, most_recent: bool) -> Result<OhlcRecord> {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
 		let get_record = |archive: &OhlcArchive| -> Result<OhlcRecord> {
@@ -567,8 +571,14 @@ impl<'a> Backtest<'a> {
 			let contract_map = source.contract_map
 				.as_ref()
 				.with_context(|| anyhow!("Archive for {symbol} lacks a contract map"))?;
-			let contracts = contract_map.get(&time)
-				.with_context(map_error)?;
+			let contracts_opt = if most_recent {
+				contract_map.range(..=time)
+					.next_back()
+					.map(|(_, value)| value)
+			} else {
+				contract_map.get(&time)
+			};
+			let contracts = contracts_opt.with_context(map_error)?;
 			record = contracts.iter().find(|&x| x.symbol == *symbol)
 				.with_context(|| anyhow!("Unable to find a record for contract {symbol}"))?
 				.clone();
@@ -617,7 +627,12 @@ impl<'a> Backtest<'a> {
 
 	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64, f64)> {
 		let asset = &position.asset;
-		let record = self.get_current_record(&position.symbol)?;
+		/*
+		This is a questionable workaround for holidays on which lots of CME futures are not being traded,
+		while ES is still available and causes the core event loop to iterate over those dates.
+		If we used current_record rather than most_recent_record, the equity curve would erroneously show a massive drawdown.
+		*/
+		let record = self.most_recent_record(&position.symbol)?;
 		let margin = (position.count as f64) * position.margin;
 		let bid = record.close;
 		let ticks = (count as f64) * (bid - position.price) / asset.tick_size;
@@ -717,7 +732,7 @@ impl<'a> Backtest<'a> {
 			);
 		for position in futures {
 			let symbol = &position.asset.symbol;
-			let Ok(record_now) = self.get_current_record(symbol) else {
+			let Ok(record_now) = self.current_record(symbol) else {
 				continue;
 			};
 			if record_now.symbol != position.symbol {
