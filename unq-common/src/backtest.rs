@@ -217,14 +217,14 @@ impl<'a> Backtest<'a> {
 		}
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
 		let equity_curve_data = EquityCurveData {
-			account_value: WebF64(configuration.starting_cash),
-			drawdown: WebF64(0.0)
+			account_value: WebF64::new(configuration.starting_cash),
+			drawdown: WebF64::precise(0.0)
 		};
 		let equity_curve_data_daily = DailyStats {
 			date: from,
 			equity_curve: equity_curve_data.clone(),
-			maintenance_margin: WebF64(0.0),
-			overnight_margin: WebF64(0.0)
+			maintenance_margin: WebF64::new(0.0),
+			overnight_margin: WebF64::new(0.0)
 		};
 		let equity_curve_daily = vec![equity_curve_data_daily];
 		let equity_curve_trades = vec![equity_curve_data];
@@ -296,27 +296,27 @@ impl<'a> Backtest<'a> {
 		let annual_average_return = total_return / years;
 		let compound_annual_growth_rate = total_return.powf(1.0 / years);
 		let equity_curve_daily = self.equity_curve_daily.clone();
-		let (sharpe_ratio, sortino_ratio, calmar_ratio) = self.get_ratios(annual_average_return, self.max_drawdown, &equity_curve_daily)?;
+		let (sharpe_ratio, sortino_ratio, calmar_ratio) = self.get_ratios(self.max_drawdown, &equity_curve_daily)?;
 		let all_trades = self.get_trade_results(true, true)?;
 		let long_trades = self.get_trade_results(true, false)?;
 		let short_trades = self.get_trade_results(false, true)?;
 		let result = BacktestResult {
-			starting_cash: WebF64(self.configuration.starting_cash),
-			final_cash: WebF64(self.cash),
+			starting_cash: WebF64::new(self.configuration.starting_cash),
+			final_cash: WebF64::new(self.cash),
 			events: self.events.clone(),
 			equity_curve_daily,
 			equity_curve_trades: self.equity_curve_trades.clone(),
-			fees: WebF64(self.fees),
-			interest: WebF64(self.interest),
-			profit: WebF64(profit),
-			annual_average_profit: WebF64(annual_average_profit),
-			total_return: WebF64(total_return),
-			annual_average_return: WebF64(annual_average_return),
-			compound_annual_growth_rate: WebF64(compound_annual_growth_rate),
-			sharpe_ratio: WebF64(sharpe_ratio),
-			sortino_ratio: WebF64(sortino_ratio),
-			calmar_ratio: WebF64(calmar_ratio),
-			max_drawdown: WebF64(self.max_drawdown),
+			fees: WebF64::new(self.fees),
+			interest: WebF64::new(self.interest),
+			profit: WebF64::precise(profit),
+			annual_average_profit: WebF64::precise(annual_average_profit),
+			total_return: WebF64::precise(total_return),
+			annual_average_return: WebF64::precise(annual_average_return),
+			compound_annual_growth_rate: WebF64::precise(compound_annual_growth_rate),
+			sharpe_ratio: WebF64::new(sharpe_ratio),
+			sortino_ratio: WebF64::new(sortino_ratio),
+			calmar_ratio: WebF64::new(calmar_ratio),
+			max_drawdown: WebF64::precise(self.max_drawdown),
 			all_trades,
 			long_trades,
 			short_trades
@@ -469,13 +469,13 @@ impl<'a> Backtest<'a> {
 		if account_value > self.max_account_value {
 			self.max_account_value = account_value;
 		}
-		let drawdown = 1.0 - account_value / self.max_account_value;
+		let drawdown = account_value / self.max_account_value - 1.0;
 		if drawdown < self.max_drawdown {
 			self.max_drawdown = drawdown;
 		}
 		EquityCurveData {
-			account_value: WebF64(account_value),
-			drawdown: WebF64(drawdown)
+			account_value: WebF64::new(account_value),
+			drawdown: WebF64::precise(drawdown)
 		}
 	}
 
@@ -756,8 +756,8 @@ impl<'a> Backtest<'a> {
 			let equity_curve_daily = DailyStats {
 				date: self.now,
 				equity_curve: equity_curve_data,
-				maintenance_margin: WebF64(maintenance_margin),
-				overnight_margin: WebF64(overnight_margin)
+				maintenance_margin: WebF64::new(maintenance_margin),
+				overnight_margin: WebF64::new(overnight_margin)
 			};
 			self.equity_curve_daily.push(equity_curve_daily);
 		}
@@ -775,26 +775,27 @@ impl<'a> Backtest<'a> {
 		Ok(())
 	}
 
-	fn standard_deviation<'b, I>(iter: I) -> Result<f64>
-	where
-		I: Iterator<Item = &'b f64> + Clone
-	{
-		let mut n = 0u32;
-		let mut sum = 0.0;
-		for x in iter.clone() {
-			sum += x;
-			n += 1;
-		}
-		if n < 2 {
-			bail!("Not enough samples to calculate standard deviation");
+	fn mean(samples: &Vec<f64>) -> Result<f64> {
+		let sum: f64 = samples.iter().sum();
+		let n = samples.len();
+		if n < 1 {
+			bail!("Not enough samples to calculate mean");
 		}
 		let mean = sum / (n as f64);
+		Ok(mean)
+	}
+
+	fn standard_deviation(samples: &Vec<f64>, mean: f64) -> Result<f64> {
 		let mut delta_sum = 0.0;
-		for x in iter {
+		for x in samples {
 			let delta = x - mean;
 			delta_sum += delta * delta;
 		}
-		let standard_deviation = delta_sum / ((n - 1) as f64);
+		let n = samples.len();
+		if n < 2 {
+			bail!("Not enough samples to calculate standard deviation");
+		}
+		let standard_deviation = (delta_sum / ((n - 1) as f64)).sqrt();
 		Ok(standard_deviation)
 	}
 
@@ -850,30 +851,35 @@ impl<'a> Backtest<'a> {
 		let bars_in_trade = (bars_in_trade_sum as f64) / (trades as f64);
 		let results = TradeResults {
 			trades,
-			profit: WebF64(profit),
-			profit_per_trade: WebF64(profit_per_trade),
-			win_rate: WebF64(win_rate),
-			profit_factor: WebF64(profit_factor),
-			bars_in_trade: WebF64(bars_in_trade)
+			profit: WebF64::new(profit),
+			profit_per_trade: WebF64::new(profit_per_trade),
+			win_rate: WebF64::precise(win_rate),
+			profit_factor: WebF64::new(profit_factor),
+			bars_in_trade: WebF64::new(bars_in_trade)
 		};
 		Ok(results)
 	}
 
-	fn get_ratios(&self, annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
+	fn get_ratios(&self, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
 		let daily_returns = Self::get_daily_returns(equity_curve_daily);
-		let daily_standard_deviation = Self::standard_deviation(daily_returns.iter())?;
+		let mean_daily_returns = Self::mean(&daily_returns)?;
+		let mean_annual_returns = TRADING_DAYS_PER_YEAR * mean_daily_returns;
+		let daily_standard_deviation = Self::standard_deviation(&daily_returns, mean_daily_returns)?;
 		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
-		let standard_deviation = daily_standard_deviation * standard_deviation_factor;
+		let standard_deviation = standard_deviation_factor * daily_standard_deviation;
 		let risk_fre_rate = self.get_risk_free_rate()?;
-		let excess_returns = annual_average_return - risk_fre_rate;
+		let excess_returns = mean_annual_returns - risk_fre_rate;
 		let sharpe_ratio = excess_returns / standard_deviation;
-		let downside_daily_returns = daily_returns
+		let downside_daily_returns: Vec<f64> = daily_returns
 			.iter()
-			.filter(|x| **x < 0.0);
-		let daily_downside_standard_deviation = Self::standard_deviation(downside_daily_returns)?;
-		let downside_standard_deviation = daily_downside_standard_deviation * standard_deviation_factor;
+			.filter(|x| **x < 0.0)
+			.cloned()
+			.collect();
+		let mean_downside_daily_returns = Self::mean(&downside_daily_returns)?;
+		let daily_downside_standard_deviation = Self::standard_deviation(&downside_daily_returns, mean_downside_daily_returns)?;
+		let downside_standard_deviation = standard_deviation_factor * daily_downside_standard_deviation;
 		let sortino_ratio = excess_returns / downside_standard_deviation;
-		let calmar_ratio = annual_average_return / max_drawdown.abs();
+		let calmar_ratio = mean_annual_returns / max_drawdown.abs();
 		let result = (sharpe_ratio, sortino_ratio, calmar_ratio);
 		Ok(result)
 	}

@@ -77,10 +77,10 @@ impl OhlcRecordWeb {
 		OhlcRecordWeb {
 			symbol: record.symbol.clone(),
 			time: record.time,
-			open: WebF64(record.open),
-			high: WebF64(record.high),
-			low: WebF64(record.low),
-			close: WebF64(record.close),
+			open: WebF64::new(record.open),
+			high: WebF64::new(record.high),
+			low: WebF64::new(record.low),
+			close: WebF64::new(record.close),
 			volume: record.volume,
 			open_interest: record.open_interest
 		}
@@ -247,10 +247,10 @@ fn merge_ohlc_records(data: &[&OhlcRecord]) -> Result<OhlcRecordWeb> {
 	let record = OhlcRecordWeb {
 		symbol,
 		time,
-		open: WebF64(open),
-		high: WebF64(high),
-		low: WebF64(low),
-		close: WebF64(close),
+		open: WebF64::new(open),
+		high: WebF64::new(high),
+		low: WebF64::new(low),
+		close: WebF64::new(close),
 		volume,
 		open_interest
 	};

@@ -261,7 +261,7 @@ export class WebUi {
 			const dateTime = this.getTime(record.date);
 			return {
 				x: dateTime.valueOf(),
-				y: record.accountValue,
+				y: record.equityCurve.accountValue,
 				time: dateTime
 			};
 		});
@@ -276,10 +276,10 @@ export class WebUi {
 
 	getEquityCurveTrades(equityCurveByTrade) {
 		let x = 0;
-		const data = equityCurveByTrade.map(y => {
+		const data = equityCurveByTrade.map(record => {
 			return {
 				x: x++,
-				y: y
+				y: record.accountValue
 			};
 		});
 		const datasets = [
@@ -677,6 +677,7 @@ export class WebUi {
 			timeFrame.getJsonValue(),
 		);
 		this.createChart(backtestResult, ChartMode.EQUITY_CURVE);
+		console.log(backtestResult);
 	}
 
 	validateArgumentCount(callArguments, min, max) {

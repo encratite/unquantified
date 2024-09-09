@@ -1,11 +1,28 @@
 use serde::{Serialize, Serializer};
 
 #[derive(Clone)]
-pub struct WebF64(pub f64);
+pub struct WebF64 {
+	value: f64,
+	precision: i32
+}
 
 impl WebF64 {
+	pub fn new(value: f64) -> WebF64 {
+		WebF64 {
+			value,
+			precision: 2
+		}
+	}
+
+	pub fn precise(value: f64) -> WebF64 {
+		WebF64 {
+			value,
+			precision: 3
+		}
+	}
+
 	pub fn get(&self) -> f64 {
-		self.0
+		self.value
 	}
 }
 
@@ -14,8 +31,8 @@ impl Serialize for WebF64 {
 	where
 		S: Serializer,
 	{
-		let precision = 100f64;
-		let rounded = (self.0 * precision).round() / precision;
+		let factor = 10f64.powi(self.precision);
+		let rounded = (self.value * factor).round() / factor;
 		serializer.serialize_f64(rounded)
 	}
 }
