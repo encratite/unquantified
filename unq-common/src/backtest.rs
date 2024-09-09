@@ -7,6 +7,7 @@ use serde::Serialize;
 use strum_macros::Display;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
 use crate::globex::GlobexCode;
+use crate::manager::CsvTimeSeries;
 use crate::OhlcArchive;
 use crate::ohlc::{OhlcRecord, TimeFrame};
 use crate::web::WebF64;
@@ -15,6 +16,8 @@ const FOREX_USD: &str = "USD";
 const FOREX_EUR: &str = "EUR";
 const FOREX_GBP: &str = "GBP";
 const FOREX_JPY: &str = "JPY";
+
+const TRADING_DAYS_PER_YEAR: f64 = 252.0;
 
 lazy_static! {
 	static ref FOREX_MAP: HashMap<String, String> = {
@@ -81,6 +84,10 @@ pub struct Backtest<'a> {
 	fees: f64,
 	// Statistics for profits and losses and bars spent in trades specific to long/short side
 	profit_duration_stats: Vec<ProfitDurationStats>,
+	// Interest rate time series for calculating interest
+	fed_funds_rate: &'a CsvTimeSeries,
+	// Total interest accumulated
+	interest: f64,
 	// Indicates whether the backtest is still running (terminated = false) or not (terminated = true)
 	terminated: bool
 }
@@ -105,7 +112,9 @@ pub struct BacktestConfiguration {
 	// overnight_margin = overnight_margin_ratio * asset.margin
 	pub overnight_margin_ratio: f64,
 	// When account value drops below ruin_ratio * starting_cash, the simulation terminates prematurely
-	pub ruin_ratio: f64
+	pub ruin_ratio: f64,
+	// If enabled, cash in the margin account will gain interest based on a fixed formula
+	pub enable_interest: bool
 }
 
 #[derive(Clone)]
@@ -154,6 +163,7 @@ pub struct BacktestResult {
 	equity_curve_daily: Vec<DailyStats>,
 	equity_curve_trades: Vec<EquityCurveData>,
 	fees: WebF64,
+	interest: WebF64,
 	profit: WebF64,
 	annual_average_profit: WebF64,
 	total_return: WebF64,
@@ -218,6 +228,7 @@ impl<'a> Backtest<'a> {
 		};
 		let equity_curve_daily = vec![equity_curve_data_daily];
 		let equity_curve_trades = vec![equity_curve_data];
+		let fed_funds_rate = asset_manager.get_time_series("FEDFUNDS")?;
 		let backtest = Backtest {
 			from,
 			to,
@@ -236,6 +247,8 @@ impl<'a> Backtest<'a> {
 			max_drawdown: 0.0,
 			fees: 0.0,
 			profit_duration_stats: Vec::new(),
+			fed_funds_rate,
+			interest: 0.0,
 			terminated: false
 		};
 		Ok(backtest)
@@ -294,6 +307,7 @@ impl<'a> Backtest<'a> {
 			equity_curve_daily,
 			equity_curve_trades: self.equity_curve_trades.clone(),
 			fees: WebF64(self.fees),
+			interest: WebF64(self.interest),
 			profit: WebF64(profit),
 			annual_average_profit: WebF64(annual_average_profit),
 			total_return: WebF64(total_return),
@@ -322,6 +336,7 @@ impl<'a> Backtest<'a> {
 		match self.time_sequence.pop_front() {
 			Some(now) => {
 				self.margin_call_check()?;
+				self.gain_interest()?;
 				self.now = now;
 				self.update_position_bars();
 				self.rollover_contracts()?;
@@ -845,7 +860,6 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn get_ratios(&self, annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
-		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
 		let daily_returns = Self::get_daily_returns(equity_curve_daily);
 		let daily_standard_deviation = Self::standard_deviation(daily_returns.iter())?;
 		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
@@ -882,5 +896,21 @@ impl<'a> Backtest<'a> {
 		}
 		let mean = sum / (days as f64);
 		Ok(mean)
+	}
+
+	fn gain_interest(&mut self) -> Result<()> {
+		// This is an approximation of the interest formula used by Interactive Brokers
+		const BENCHMARK_OFFSET: f64 = 0.005;
+		const SCALE_MINIMUM: f64 = 100000.0;
+		if self.configuration.enable_interest {
+			let date = self.now.date();
+			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - BENCHMARK_OFFSET).max(0.0);
+			let scaled_rate = self.cash.max(0.0).min(SCALE_MINIMUM) / SCALE_MINIMUM * annual_rate;
+			let daily_rate = scaled_rate.powf(1.0 / TRADING_DAYS_PER_YEAR);
+			let interest = daily_rate * self.cash;
+			self.cash += interest;
+			self.interest += interest;
+		}
+		Ok(())
 	}
 }
