@@ -283,7 +283,7 @@ impl<'a> Backtest<'a> {
 		let annual_average_return = total_return / years;
 		let compound_annual_growth_rate = total_return.powf(1.0 / years);
 		let equity_curve_daily = self.equity_curve_daily.clone();
-		let (sharpe_ratio, sortino_ratio, calmar_ratio) = Self::get_ratios(annual_average_return, self.max_drawdown, &equity_curve_daily)?;
+		let (sharpe_ratio, sortino_ratio, calmar_ratio) = self.get_ratios(annual_average_return, self.max_drawdown, &equity_curve_daily)?;
 		let all_trades = self.get_trade_results(true, true)?;
 		let long_trades = self.get_trade_results(true, false)?;
 		let short_trades = self.get_trade_results(false, true)?;
@@ -844,15 +844,14 @@ impl<'a> Backtest<'a> {
 		Ok(results)
 	}
 
-	fn get_ratios(annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
+	fn get_ratios(&self, annual_average_return: f64, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
 		const TRADING_DAYS_PER_YEAR: f64 = 252.0;
-		// Placeholder, will be replaced by TB3MS
-		const RISK_FREE_RATE: f64 = 0.02;
 		let daily_returns = Self::get_daily_returns(equity_curve_daily);
 		let daily_standard_deviation = Self::standard_deviation(daily_returns.iter())?;
 		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
 		let standard_deviation = daily_standard_deviation * standard_deviation_factor;
-		let excess_returns = annual_average_return - RISK_FREE_RATE;
+		let risk_fre_rate = self.get_risk_free_rate()?;
+		let excess_returns = annual_average_return - risk_fre_rate;
 		let sharpe_ratio = excess_returns / standard_deviation;
 		let downside_daily_returns = daily_returns
 			.iter()
@@ -869,5 +868,19 @@ impl<'a> Backtest<'a> {
 		for position in self.positions.iter_mut() {
 			position.bars_in_trade += 1;
 		}
+	}
+
+	fn get_risk_free_rate(&self) -> Result<f64> {
+		let tbills = self.asset_manager.get_time_series("TB3MS")?;
+		let from = self.from.date();
+		let to = self.to.date();
+		let days = (to - from).num_days().max(1);
+		let mut sum = 0.0;
+		for day in from.iter_days().take(days as usize) {
+			let rate = tbills.get(&day)?;
+			sum += rate;
+		}
+		let mean = sum / (days as f64);
+		Ok(mean)
 	}
 }

@@ -78,7 +78,7 @@ impl AssetManager {
 		Ok((asset.clone(), archive))
 	}
 
-	pub fn get_time_series(&self, name: &String) -> Result<&CsvTimeSeries> {
+	pub fn get_time_series(&self, name: &str) -> Result<&CsvTimeSeries> {
 		let Some(time_series) = self.time_series.get(name) else {
 			bail!("Unable to find time series \"{name}\"");
 		};
