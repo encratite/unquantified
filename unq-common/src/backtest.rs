@@ -877,7 +877,7 @@ impl<'a> Backtest<'a> {
 		let days = (to - from).num_days().max(1);
 		let mut sum = 0.0;
 		for day in from.iter_days().take(days as usize) {
-			let rate = tbills.get(&day)?;
+			let rate = tbills.get(&day)? / 100.0;
 			sum += rate;
 		}
 		let mean = sum / (days as f64);
