@@ -908,7 +908,7 @@ impl<'a> Backtest<'a> {
 			let date = self.now.date();
 			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - BENCHMARK_OFFSET).max(0.0);
 			let daily_rate = annual_rate.powf(1.0 / TRADING_DAYS_PER_YEAR);
-			let tier1 = TIER1_SCALE * daily_rate * (self.cash - TIER1_CUTOFF).max(0.0) / TIER2_CUTOFF;
+			let tier1 = TIER1_SCALE * daily_rate * (self.cash - TIER1_CUTOFF).max(0.0) / (TIER2_CUTOFF - TIER1_CUTOFF);
 			let tier2 = daily_rate * (self.cash - TIER2_CUTOFF).max(0.0);
 			let interest = tier1 + tier2;
 			self.cash += interest;
