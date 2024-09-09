@@ -901,11 +901,16 @@ impl<'a> Backtest<'a> {
 	fn gain_interest(&mut self) -> Result<()> {
 		// This is an approximation of the interest formula used by Interactive Brokers
 		const BENCHMARK_OFFSET: f64 = 0.005;
-		const SCALE_MINIMUM: f64 = 100000.0;
+		const SCALE_MINIMUM: f64 = 100_000.0;
+		const CASH_MINIMUM: f64 = 10_000.0;
 		if self.configuration.enable_interest {
 			let date = self.now.date();
 			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - BENCHMARK_OFFSET).max(0.0);
-			let scaled_rate = self.cash.max(0.0).min(SCALE_MINIMUM) / SCALE_MINIMUM * annual_rate;
+			let scaled_rate = if self.cash > CASH_MINIMUM {
+				self.cash.max(0.0).min(SCALE_MINIMUM) / SCALE_MINIMUM * annual_rate
+			} else {
+				0.0
+			};
 			let daily_rate = scaled_rate.powf(1.0 / TRADING_DAYS_PER_YEAR);
 			let interest = daily_rate * self.cash;
 			self.cash += interest;
