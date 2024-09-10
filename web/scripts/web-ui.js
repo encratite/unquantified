@@ -152,7 +152,7 @@ export class WebUi {
 			initializeChart();
 		} else if (mode === ChartMode.LINE) {
 			const datasets = this.getLineDatasets(data);
-			this.setChartOptions(datasets, options, true);
+			this.setChartOptions(datasets, options, true, true);
 			initializeChart();
 		} else if (mode === ChartMode.EQUITY_CURVE) {
 			const form = document.createElement("form");
@@ -161,8 +161,8 @@ export class WebUi {
 			const chartContext = new ChartContext(context, button, data);
 			const onChangeDaily = () => this.updateEquityCurve(chartContext, true);
 			const onChangeTrades = () => this.updateEquityCurve(chartContext, false);
-			this.createRadioButton("By day", form, true, onChangeDaily);
-			this.createRadioButton("By trade", form, false, onChangeTrades);
+			this.createRadioButton("Equity curve (daily)", form, true, onChangeDaily);
+			this.createRadioButton("Equity curve (trades)", form, false, onChangeTrades);
 			this.updateEquityCurve(chartContext, true);
 		} else {
 			throw new Error("Unknown chart mode specified");
@@ -178,7 +178,7 @@ export class WebUi {
 			datasets = this.getEquityCurveTrades(chartContext.data.equityCurveTrades);
 		}
 		const options = this.getBaseChartOptions();
-		this.setChartOptions(datasets, options, daily);
+		this.setChartOptions(datasets, options, daily, false);
 		chartContext.render(options);
 	}
 
@@ -257,35 +257,67 @@ export class WebUi {
 	}
 
 	getEquityCurveDaily(equityCurveDaily) {
-		const data = equityCurveDaily.map(record => {
-			const dateTime = this.getTime(record.date);
-			return {
-				x: dateTime.valueOf(),
-				y: record.equityCurve.accountValue,
-				time: dateTime
-			};
-		});
-		const datasets = [
-			{
-				label: "Equity curve (daily)",
-				data: data
-			}
-		];
+		const getData = drawdown => {
+			const data = equityCurveDaily.map(record => {
+				const dateTime = this.getTime(record.date);
+				const equityCurve = record.equityCurve;
+				let output = {
+					x: dateTime.valueOf(),
+					time: dateTime
+				};
+				if (drawdown === true) {
+					output.y = equityCurve.drawdown;
+					output.drawdownPercent = equityCurve.drawdownPercent;
+				} else {
+					output.y = equityCurve.accountValue;
+				}
+				return output;
+			});
+			return data;
+		};
+		const datasets = this.getEquityCurveDatasets(getData);
 		return datasets;
 	}
 
 	getEquityCurveTrades(equityCurveByTrade) {
-		let x = 0;
-		const data = equityCurveByTrade.map(record => {
-			return {
-				x: x++,
-				y: record.accountValue
-			};
-		});
+		const getData = drawdown => {
+			let x = 0;
+			const data = equityCurveByTrade.map(record => {
+				let output = {
+					x: x++,
+				};
+				if (drawdown === true) {
+					output.y = record.drawdown;
+					output.drawdownPercent = record.drawdownPercent;
+				}
+				else {
+					output.y = record.accountValue;
+				}
+				return output;
+			});
+			return data;
+		};
+		const datasets = this.getEquityCurveDatasets(getData);
+		return datasets;
+	}
+
+	getEquityCurveDatasets(getData) {
+		const equityCurve = getData(false);
+		const drawdown = getData(true);
+		const equityCurveColor = "#4bc0c0";
+		const drawdownColor = "#ff6384";
 		const datasets = [
 			{
-				label: "Equity curve (trades)",
-				data: data
+				label: "Equity curve",
+				data: equityCurve,
+				borderColor: equityCurveColor,
+				backgroundColor: equityCurveColor
+			},
+			{
+				label: "Drawdown",
+				data: drawdown,
+				borderColor: drawdownColor,
+				backgroundColor: drawdownColor
 			}
 		];
 		return datasets;
@@ -368,7 +400,7 @@ export class WebUi {
 		return options;
 	}
 
-	setChartOptions(datasets, options, timeSeries) {
+	setChartOptions(datasets, options, timeSeries, lineMode) {
 		options.type = "line";
 		options.data = {
 			datasets: datasets
@@ -393,6 +425,17 @@ export class WebUi {
 				type: "linear"
 			}
 		};
+		if (lineMode === false) {
+			innerOptions.scales.y.grid = {
+				color: context => {
+					if (context.tick.value === 0) {
+						return "#000";
+					} else {
+						return "rgba(0, 0, 0, 0.1)";
+					}
+				}
+			};
+		}
 		if (timeSeries === false) {
 			const ticks = innerOptions.scales.x.ticks;
 			ticks.stepSize = 1;
@@ -404,18 +447,42 @@ export class WebUi {
 		innerOptions.borderJoinStyle = "bevel";
 		innerOptions.pointHitRadius = 3;
 		const multiMode = datasets.length > 1;
-		if (multiMode) {
+		if (lineMode === true && multiMode) {
 			innerOptions.scales.y.ticks = {
 				callback: value => {
 					return `${value.toFixed(1)}%`;
 				}
 			};
 			const labelCallback = context => {
-				return `${context.dataset.label}: ${context.raw.c} (${context.raw.y.toFixed(1)}%)`;
+				const raw = context.raw;
+				const formatted = this.formatNumber(raw.c);
+				return `${context.dataset.label}: ${formatted} (${raw.y.toFixed(1)}%)`;
+			};
+			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
+		} else if (lineMode === false) {
+			const labelCallback = context => {
+				const raw = context.raw;
+				if (raw.drawdownPercent != null) {
+					const percentage = 100.0 * raw.drawdownPercent;
+					const formatted = this.formatNumber(raw.y);
+					return `${context.dataset.label}: ${formatted} (${percentage.toFixed(2)}%)`;
+				}
+				else {
+					const formatted = this.formatNumber(raw.y);
+					return `${context.dataset.label}: ${formatted}`;
+				}
 			};
 			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
 		}
 		this.setTitleCallback(datasets, options, timeSeries);
+	}
+
+	formatNumber(number) {
+		const formattedNumber = number.toLocaleString("en-US", {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
+		});
+		return formattedNumber;
 	}
 
 	createEditor() {

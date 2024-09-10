@@ -192,7 +192,8 @@ pub struct TradeResults {
 #[serde(rename_all = "camelCase")]
 pub struct EquityCurveData {
 	account_value: WebF64,
-	drawdown: WebF64
+	drawdown: WebF64,
+	drawdown_percent: WebF64
 }
 
 #[derive(Clone, Serialize)]
@@ -218,7 +219,8 @@ impl<'a> Backtest<'a> {
 		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
 		let equity_curve_data = EquityCurveData {
 			account_value: WebF64::new(configuration.starting_cash),
-			drawdown: WebF64::precise(0.0)
+			drawdown: WebF64::new(0.0),
+			drawdown_percent: WebF64::precise(0.0),
 		};
 		let equity_curve_data_daily = DailyStats {
 			date: from,
@@ -469,13 +471,15 @@ impl<'a> Backtest<'a> {
 		if account_value > self.max_account_value {
 			self.max_account_value = account_value;
 		}
-		let drawdown = account_value / self.max_account_value - 1.0;
-		if drawdown < self.max_drawdown {
-			self.max_drawdown = drawdown;
+		let drawdown = account_value - self.max_account_value;
+		let drawdown_percent = account_value / self.max_account_value - 1.0;
+		if drawdown_percent < self.max_drawdown {
+			self.max_drawdown = drawdown_percent;
 		}
 		EquityCurveData {
 			account_value: WebF64::new(account_value),
-			drawdown: WebF64::precise(drawdown)
+			drawdown: WebF64::new(drawdown),
+			drawdown_percent: WebF64::precise(drawdown_percent)
 		}
 	}
 
