@@ -64,7 +64,7 @@ impl RelativeDateTime {
 			(false, true, true, false) => {
 				let other_time = other.to_fixed(time_frame, archives)?;
 				let offset_time = get_offset_date_time(&other_time, self.offset.unwrap(), self.offset_unit.clone().unwrap())
-					.with_context(|| anyhow!("Invalid offset calculation"))?;
+					.with_context(|| "Invalid offset calculation")?;
 				Ok(offset_time)
 			},
 			(false, false, false, true) => {

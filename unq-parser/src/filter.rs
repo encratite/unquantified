@@ -1,11 +1,13 @@
-use anyhow::Result;
+use std::cmp::Ordering;
+use anyhow::{Context, Result};
 use configparser::ini::Ini;
-use unq_common::globex::parse_globex_code;
+use unq_common::globex::GlobexCode;
 use crate::ini_file::get_ini_sections;
 
 #[derive(Clone)]
 pub struct ContractFilter {
 	pub root: String,
+	legacy_cutoff: Option<GlobexCode>,
 	first_contract: Option<String>,
 	last_contract: Option<String>,
 	include_months: Option<Vec<String>>,
@@ -15,7 +17,7 @@ pub struct ContractFilter {
 }
 
 impl ContractFilter {
-	pub fn new(root: &String, ini: &Ini) -> Option<ContractFilter> {
+	pub fn new(root: &String, ini: &Ini) -> Result<Option<ContractFilter>> {
 		let get_filter = |key| -> Option<Vec<String>> {
 			ini.get(root, key)
 				.map(move |x|
@@ -23,6 +25,14 @@ impl ContractFilter {
 					.map(|x| x.trim().to_string())
 					.collect()
 				)
+		};
+		let legacy_cutoff = match ini.get(root, "legacy_cutoff") {
+			Some(string) => {
+				let globex_code = GlobexCode::new(&string)
+					.with_context(|| "Invalid Globex code in parser configuration")?;
+				Some(globex_code)
+			},
+			None => None
 		};
 		let first_contract = ini.get(root, "first_contract");
 		let last_contract = ini.get(root, "last_contract");
@@ -33,6 +43,7 @@ impl ContractFilter {
 		if include_valid && first_last_contract_valid {
 			let mut filter = ContractFilter {
 				root: root.to_uppercase(),
+				legacy_cutoff,
 				first_contract,
 				last_contract,
 				include_months,
@@ -41,24 +52,35 @@ impl ContractFilter {
 				previous_symbol: None
 			};
 			filter.reset();
-			Some(filter)
+			Ok(Some(filter))
 		} else {
-			None
+			Ok(None)
 		}
 	}
 
 	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>> {
 		let config_map = get_ini_sections(ini)?;
 		let filters = config_map.keys()
-			.filter_map(|symbol| ContractFilter::new(symbol, &ini))
+			.map(|symbol| ContractFilter::new(symbol, &ini))
+			.collect::<Result<Vec<Option<_>>>>()?
+			.into_iter()
+			.filter_map(|x| x)
 			.collect();
 		Ok(filters)
 	}
 
 	pub fn is_included(&mut self, symbol: &String) -> bool {
-		let Some((_, month, _)) = parse_globex_code(symbol) else {
+		let Some(globex_code) = GlobexCode::new(symbol) else {
+			// It isn't a futures contract, bypass all checks
 			return true;
 		};
+		if let Some(legacy_cutoff) = &self.legacy_cutoff {
+			if globex_code.cmp(legacy_cutoff) == Ordering::Less {
+				// The parser has a legacy cutoff Globex code specified and this contract is too old
+				// This feature is meant to exclude data with missing volume data from prior to 2003 - 2006
+				return false;
+			};
+		}
 		if let Some(first_contract) = &self.first_contract {
 			if symbol == first_contract {
 				self.active = true;
@@ -74,9 +96,9 @@ impl ContractFilter {
 		self.previous_symbol = Some(symbol.clone());
 		if self.active {
 			if let Some(include_months) = &self.include_months {
-				include_months.contains(&month)
+				include_months.contains(&globex_code.month)
 			} else if let Some(exclude_months) = &self.exclude_months {
-				!exclude_months.contains(&month)
+				!exclude_months.contains(&globex_code.month)
 			} else {
 				false
 			}

@@ -304,20 +304,20 @@ export class WebUi {
 	getEquityCurveDatasets(getData) {
 		const equityCurve = getData(false);
 		const drawdown = getData(true);
-		const equityCurveColor = "#4bc0c0";
-		const drawdownColor = "#ff6384";
 		const datasets = [
 			{
 				label: "Equity curve",
 				data: equityCurve,
-				borderColor: equityCurveColor,
-				backgroundColor: equityCurveColor
+				borderColor: "#4bc0c0",
+				backgroundColor: "#4bc0c0a0",
+				fill: "origin"
 			},
 			{
 				label: "Drawdown",
 				data: drawdown,
-				borderColor: drawdownColor,
-				backgroundColor: drawdownColor
+				borderColor: "#ff6384",
+				backgroundColor: "#ff6384a0",
+				fill: "origin"
 			}
 		];
 		return datasets;
@@ -465,7 +465,7 @@ export class WebUi {
 				if (raw.drawdownPercent != null) {
 					const percentage = 100.0 * raw.drawdownPercent;
 					const formatted = this.formatNumber(raw.y);
-					return `${context.dataset.label}: ${formatted} (${percentage.toFixed(2)}%)`;
+					return `${context.dataset.label}: ${formatted} (${percentage.toFixed(1)}%)`;
 				}
 				else {
 					const formatted = this.formatNumber(raw.y);

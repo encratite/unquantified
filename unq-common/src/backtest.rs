@@ -785,7 +785,7 @@ impl<'a> Backtest<'a> {
 
 	fn ruin_check(&mut self) -> Result<()> {
 		let last = self.equity_curve_daily.last()
-			.with_context(|| anyhow!("Unable to retrieve most recent equity curve value"))?;
+			.with_context(|| "Unable to retrieve most recent equity curve value")?;
 		if last.equity_curve.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
 			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
 			self.log_event(EventType::Ruin, message.to_string());
@@ -816,6 +816,24 @@ impl<'a> Backtest<'a> {
 		}
 		let standard_deviation = (delta_sum / ((n - 1) as f64)).sqrt();
 		Ok(standard_deviation)
+	}
+
+	fn mean_nan(samples: &Vec<f64>) -> f64 {
+		let mean = Self::mean(samples);
+		Self::error_to_nan(mean)
+	}
+
+	fn standard_deviation_nan(samples: &Vec<f64>, mean: f64) -> f64 {
+		let standard_deviation = Self::standard_deviation(samples, mean);
+		Self::error_to_nan(standard_deviation)
+	}
+
+	fn error_to_nan(result: Result<f64>) -> f64 {
+		if let Ok(value) = result {
+			value
+		} else {
+			f64::NAN
+		}
 	}
 
 	fn get_daily_returns(equity_curve_daily: &Vec<DailyStats>) -> Vec<f64> {
@@ -881,9 +899,9 @@ impl<'a> Backtest<'a> {
 
 	fn get_ratios(&self, max_drawdown: f64, equity_curve_daily: &Vec<DailyStats>) -> Result<(f64, f64, f64)> {
 		let daily_returns = Self::get_daily_returns(equity_curve_daily);
-		let mean_daily_returns = Self::mean(&daily_returns)?;
+		let mean_daily_returns = Self::mean_nan(&daily_returns);
+		let daily_standard_deviation = Self::standard_deviation_nan(&daily_returns, mean_daily_returns);
 		let mean_annual_returns = TRADING_DAYS_PER_YEAR * mean_daily_returns;
-		let daily_standard_deviation = Self::standard_deviation(&daily_returns, mean_daily_returns)?;
 		let standard_deviation_factor = TRADING_DAYS_PER_YEAR.sqrt();
 		let standard_deviation = standard_deviation_factor * daily_standard_deviation;
 		let risk_fre_rate = self.get_risk_free_rate()?;
@@ -894,8 +912,8 @@ impl<'a> Backtest<'a> {
 			.filter(|x| **x < 0.0)
 			.cloned()
 			.collect();
-		let mean_downside_daily_returns = Self::mean(&downside_daily_returns)?;
-		let daily_downside_standard_deviation = Self::standard_deviation(&downside_daily_returns, mean_downside_daily_returns)?;
+		let mean_downside_daily_returns = Self::mean_nan(&downside_daily_returns);
+		let daily_downside_standard_deviation = Self::standard_deviation_nan(&downside_daily_returns, mean_downside_daily_returns);
 		let downside_standard_deviation = standard_deviation_factor * daily_downside_standard_deviation;
 		let sortino_ratio = excess_returns / downside_standard_deviation;
 		let calmar_ratio = mean_annual_returns / max_drawdown.abs();
@@ -940,7 +958,7 @@ impl<'a> Backtest<'a> {
 		if self.configuration.enable_interest {
 			let date = self.now.date();
 			let annual_rate = (self.fed_funds_rate.get(&date)? / 100.0 - 0.005).max(0.0);
-			let daily_rate = annual_rate.powf(1.0 / TRADING_DAYS_PER_YEAR);
+			let daily_rate = (annual_rate + 1.0).powf(1.0 / TRADING_DAYS_PER_YEAR) - 1.0;
 			let Some((_, maximum_ratio)) = interpolation_table.last() else {
 				bail!("Empty interpolation table");
 			};

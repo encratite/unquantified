@@ -6,7 +6,7 @@ lazy_static! {
 	static ref GLOBEX_REGEX: Regex = Regex::new("^([A-Z0-9]{2,})([FGHJKMNQUVXZ])([0-9]{2})$").unwrap();
 }
 
-#[derive(Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, PartialOrd)]
 pub struct GlobexCode {
 	pub symbol: String,
 	pub month: String,
