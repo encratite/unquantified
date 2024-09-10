@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use configparser::ini::Ini;
 use unq_common::globex::GlobexCode;
 use crate::ini_file::get_ini_sections;
@@ -17,7 +17,7 @@ pub struct ContractFilter {
 }
 
 impl ContractFilter {
-	pub fn new(root: &String, ini: &Ini) -> Result<Option<ContractFilter>> {
+	pub fn new(root: &String, ini: &Ini) -> Result<ContractFilter> {
 		let get_filter = |key| -> Option<Vec<String>> {
 			ini.get(root, key)
 				.map(move |x|
@@ -38,34 +38,28 @@ impl ContractFilter {
 		let last_contract = ini.get(root, "last_contract");
 		let include_months = get_filter("include_months");
 		let exclude_months = get_filter("exclude_months");
-		let include_valid = include_months.is_some() != exclude_months.is_some();
-		let first_last_contract_valid = !last_contract.is_some() || first_contract.is_some();
-		if include_valid && first_last_contract_valid {
-			let mut filter = ContractFilter {
-				root: root.to_uppercase(),
-				legacy_cutoff,
-				first_contract,
-				last_contract,
-				include_months,
-				exclude_months,
-				active: true,
-				previous_symbol: None
-			};
-			filter.reset();
-			Ok(Some(filter))
-		} else {
-			Ok(None)
+		if (first_contract.is_some() || last_contract.is_some()) && include_months.is_none() && exclude_months.is_none() {
+			bail!("Invalid combination of filters for symbol \"{root}\"");
 		}
+		let mut filter = ContractFilter {
+			root: root.to_uppercase(),
+			legacy_cutoff,
+			first_contract,
+			last_contract,
+			include_months,
+			exclude_months,
+			active: true,
+			previous_symbol: None
+		};
+		filter.reset();
+		Ok(filter)
 	}
 
 	pub fn from_ini(ini: &Ini) -> Result<Vec<ContractFilter>> {
 		let config_map = get_ini_sections(ini)?;
 		let filters = config_map.keys()
 			.map(|symbol| ContractFilter::new(symbol, &ini))
-			.collect::<Result<Vec<Option<_>>>>()?
-			.into_iter()
-			.filter_map(|x| x)
-			.collect();
+			.collect::<Result<Vec<_>>>()?;
 		Ok(filters)
 	}
 
@@ -100,7 +94,7 @@ impl ContractFilter {
 			} else if let Some(exclude_months) = &self.exclude_months {
 				!exclude_months.contains(&globex_code.month)
 			} else {
-				false
+				true
 			}
 		} else {
 			true

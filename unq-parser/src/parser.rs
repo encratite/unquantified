@@ -173,7 +173,7 @@ impl CsvParser {
 			}
 		}
 		if ohlc_map.values().len() < 250 {
-			panic!("Missing data in {}", path.to_string());
+			bail!("Missing data in {}", path.to_string());
 		}
 		let mut records: Vec<RawOhlcRecord> = ohlc_map.into_values().collect();
 		records.sort_by(|a, b| {

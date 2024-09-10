@@ -256,6 +256,11 @@ export class WebUi {
 		return datasets;
 	}
 
+	getProfitPercentage(equityCurve, first) {
+		const percentage = equityCurve.accountValue / first.accountValue - 1.0;
+		return percentage;
+	}
+
 	getEquityCurveDaily(equityCurveDaily) {
 		const getData = drawdown => {
 			const data = equityCurveDaily.map(record => {
@@ -267,9 +272,10 @@ export class WebUi {
 				};
 				if (drawdown === true) {
 					output.y = equityCurve.drawdown;
-					output.drawdownPercent = equityCurve.drawdownPercent;
+					output.percentage = equityCurve.drawdownPercent;
 				} else {
 					output.y = equityCurve.accountValue;
+					output.percentage = this.getProfitPercentage(equityCurve, equityCurveDaily[0].equityCurve);
 				}
 				return output;
 			});
@@ -288,10 +294,11 @@ export class WebUi {
 				};
 				if (drawdown === true) {
 					output.y = record.drawdown;
-					output.drawdownPercent = record.drawdownPercent;
+					output.percentage = record.drawdownPercent;
 				}
 				else {
 					output.y = record.accountValue;
+					output.percentage = this.getProfitPercentage(record, equityCurveByTrade[0]);
 				}
 				return output;
 			});
@@ -462,8 +469,8 @@ export class WebUi {
 		} else if (lineMode === false) {
 			const labelCallback = context => {
 				const raw = context.raw;
-				if (raw.drawdownPercent != null) {
-					const percentage = 100.0 * raw.drawdownPercent;
+				if (raw.percentage != null) {
+					const percentage = 100.0 * raw.percentage;
 					const formatted = this.formatNumber(raw.y);
 					return `${context.dataset.label}: ${formatted} (${percentage.toFixed(1)}%)`;
 				}
