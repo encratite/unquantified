@@ -20,6 +20,12 @@ const ChartMode = {
 	EQUITY_CURVE: "equityCurve"
 };
 
+const DailyStatsMode = {
+	EQUITY_CURVE_DAILY: "equityCurveDaily",
+	EQUITY_CURVE_TRADES: "equityCurveTrades",
+	MARGIN: "margin"
+};
+
 export class WebUi {
 	constructor() {
 		this.content = null;
@@ -159,26 +165,33 @@ export class WebUi {
 			form.className = "equity-curve";
 			container.insertBefore(form, container.firstChild);
 			const chartContext = new ChartContext(context, button, data);
-			const onChangeDaily = () => this.updateEquityCurve(chartContext, true);
-			const onChangeTrades = () => this.updateEquityCurve(chartContext, false);
+			const onChangeDaily = () => this.updateDailyStats(chartContext, DailyStatsMode.EQUITY_CURVE_DAILY);
+			const onChangeTrades = () => this.updateDailyStats(chartContext, DailyStatsMode.EQUITY_CURVE_TRADES);
+			const onChangeMargin = () => this.updateDailyStats(chartContext, DailyStatsMode.MARGIN);
 			this.createRadioButton("Equity curve (daily)", form, true, onChangeDaily);
 			this.createRadioButton("Equity curve (trades)", form, false, onChangeTrades);
-			this.updateEquityCurve(chartContext, true);
+			this.createRadioButton("Margin", form, false, onChangeMargin);
+			this.updateDailyStats(chartContext, DailyStatsMode.EQUITY_CURVE_DAILY);
 		} else {
 			throw new Error("Unknown chart mode specified");
 		}
 		$(container).resizable();
 	}
 
-	updateEquityCurve(chartContext, daily) {
+	updateDailyStats(chartContext, mode) {
 		let datasets;
-		if (daily === true) {
+		if (mode === DailyStatsMode.EQUITY_CURVE_DAILY) {
 			datasets = this.getEquityCurveDaily(chartContext.data.equityCurveDaily);
-		} else {
+		} else if (mode === DailyStatsMode.EQUITY_CURVE_TRADES) {
 			datasets = this.getEquityCurveTrades(chartContext.data.equityCurveTrades);
+		} else if (mode === DailyStatsMode.MARGIN) {
+			datasets = this.getMarginDatasets(chartContext.data.equityCurveDaily);
+		} else {
+			throw new Error("Unknown mode in updateDailyStats");
 		}
 		const options = this.getBaseChartOptions();
-		this.setChartOptions(datasets, options, daily, false);
+		const timeSeries = mode !== DailyStatsMode.EQUITY_CURVE_TRADES;
+		this.setChartOptions(datasets, options, timeSeries, false);
 		chartContext.render(options);
 	}
 
@@ -325,6 +338,33 @@ export class WebUi {
 				borderColor: "#ff6384",
 				backgroundColor: "#ff6384a0",
 				fill: "origin"
+			}
+		];
+		return datasets;
+	}
+
+	getMarginDatasets(equityCurveDaily) {
+		const getData = overnight => equityCurveDaily.map(record => {
+			const dateTime = this.getTime(record.date);
+			const value = overnight ? record.overnightMargin : record.maintenanceMargin;
+			const percentage = value / record.equityCurve.accountValue;
+			return {
+				x: dateTime.valueOf(),
+				y: value,
+				time: dateTime,
+				percentage: percentage
+			};
+		});
+		let maintenanceMarginData = getData(false);
+		let overnightMarginData = getData(true);
+		const datasets = [
+			{
+				label: "Maintenance margin",
+				data: maintenanceMarginData
+			},
+			{
+				label: "Overnight margin",
+				data: overnightMarginData
 			}
 		];
 		return datasets;
