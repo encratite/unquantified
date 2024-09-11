@@ -163,6 +163,7 @@ pub struct BacktestResult {
 	equity_curve_daily: Vec<DailyStats>,
 	equity_curve_trades: Vec<EquityCurveData>,
 	fees: WebF64,
+	fees_percent: WebF64,
 	interest: WebF64,
 	profit: WebF64,
 	annual_average_profit: WebF64,
@@ -179,6 +180,7 @@ pub struct BacktestResult {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeResults {
 	trades: u32,
 	profit: WebF64,
@@ -294,11 +296,17 @@ impl<'a> Backtest<'a> {
 		let time_difference = self.to - self.from;
 		let years = (time_difference.num_days() as f64) / DAYS_PER_YEAR;
 		let annual_average_profit = profit / years;
-		let total_return = self.cash / self.configuration.starting_cash - 1.0;
+		let return_ratio = self.cash / self.configuration.starting_cash;
+		let total_return = return_ratio - 1.0;
 		let annual_average_return = total_return / years;
-		let compound_annual_growth_rate = total_return.powf(1.0 / years);
+		let compound_annual_growth_rate = return_ratio.powf(1.0 / years) - 1.0;
 		let equity_curve_daily = self.equity_curve_daily.clone();
 		let (sharpe_ratio, sortino_ratio, calmar_ratio) = self.get_ratios(self.max_drawdown, &equity_curve_daily)?;
+		let fees_percent = if profit >= 0.0 {
+			self.fees / profit
+		} else {
+			f64::NAN
+		};
 		let all_trades = self.get_trade_results(true, true)?;
 		let long_trades = self.get_trade_results(true, false)?;
 		let short_trades = self.get_trade_results(false, true)?;
@@ -309,6 +317,7 @@ impl<'a> Backtest<'a> {
 			equity_curve_daily,
 			equity_curve_trades: self.equity_curve_trades.clone(),
 			fees: WebF64::new(self.fees),
+			fees_percent: WebF64::new(fees_percent),
 			interest: WebF64::new(self.interest),
 			profit: WebF64::precise(profit),
 			annual_average_profit: WebF64::precise(annual_average_profit),
@@ -861,8 +870,8 @@ impl<'a> Backtest<'a> {
 		let source = self.profit_duration_stats
 			.iter()
 			.filter(|x|
-				(!long || x.side == PositionSide::Long) &&
-				(!short || x.side == PositionSide::Short)
+				(long && x.side == PositionSide::Long) ||
+				(short && x.side == PositionSide::Short)
 			);
 		let mut profits_only = 0.0;
 		let mut profits_count = 0u32;
@@ -884,7 +893,11 @@ impl<'a> Backtest<'a> {
 		let profit = profits_only + losses_only;
 		let profit_per_trade = profit / (trades as f64);
 		let win_rate = (profits_count as f64) / (trades as f64);
-		let profit_factor = (profits_only / losses_only).abs();
+		let profit_factor = if profits_count == 0 || losses_count == 0 {
+			f64::NAN
+		} else {
+			(profits_only / losses_only).abs()
+		};
 		let bars_in_trade = (bars_in_trade_sum as f64) / (trades as f64);
 		let results = TradeResults {
 			trades,

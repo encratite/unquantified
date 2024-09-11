@@ -6,7 +6,7 @@ body {
 .editor {
 	border: 1px solid #bbb;
 	margin-bottom: 1.8em;
-	max-width: 40em;
+	width: 45rem;
 
 	.read-only {
 		background-color: #f8f8f8;
@@ -123,5 +123,48 @@ body {
 
 	span {
 		margin-right: 0.5em;
+	}
+}
+
+.results {
+	width: 45rem;
+	margin-bottom: 1.5em;
+
+	table {
+		border-collapse: collapse;
+		flex: 1;
+	}
+
+	td {
+		border: 1px solid #bbb;
+		padding-left: 0.5em;
+		padding-right: 0.5em;
+		white-space: nowrap;
+		vertical-align: top;
+	}
+
+	td:nth-child(2) {
+		text-align: right;
+	}
+
+	.general {
+		display: flex;
+		align-items: flex-start;
+		gap: 1em;
+		margin-bottom: 1em;
+	}
+
+	.trades {
+		display: flex;
+		align-items: flex-start;
+		gap: 1em;
+
+		tr:first-child {
+			td {
+				text-align: center;
+				border: 0;
+				padding-bottom: 0.1em;
+			}
+		}
 	}
 }

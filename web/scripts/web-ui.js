@@ -26,6 +26,21 @@ const DailyStatsMode = {
 	MARGIN: "margin"
 };
 
+const NOT_AVAILABLE_SYMBOL = "-";
+
+function createElement(tag, container, properties) {
+	const element = document.createElement(tag);
+	if (container != null) {
+		container.appendChild(element);
+	}
+	if (properties != null) {
+		for (const name in properties) {
+			element[name] = properties[name];
+		}
+	}
+	return element;
+}
+
 export class WebUi {
 	constructor() {
 		this.content = null;
@@ -126,19 +141,78 @@ export class WebUi {
 		return dateTime.toFormat(formatString);
 	}
 
-	append(element) {
-		this.content.appendChild(element);
+	createBacktestTable(result) {
+		const container = createElement("div", this.content, {
+			className: "results"
+		});
+		const topContainer = createElement("div", container, {
+			className: "general"
+		});
+		const bottomContainer = createElement("div", container, {
+			className: "trades"
+		});
+		const createTable = (cells, container, title) => {
+			const table = createElement("table", container);
+			if (title != null) {
+				const row = createElement("tr", table);
+				createElement("td", row, {
+					textContent: title,
+					colSpan: 2
+				});
+			}
+			cells.forEach(cell => {
+				const description = cell[0];
+				const value = cell[1];
+				const row = createElement("tr", table);
+				createElement("td", row, {
+					textContent: description
+				});
+				createElement("td", row, {
+					textContent: value
+				});
+			});
+		};
+		const generalTableLeft = [
+			["Net profit", this.formatCurrency(result.profit)],
+			["Annual average profit", this.formatCurrency(result.annualAverageProfit)],
+			["Total return", this.formatPercentage(result.totalReturn)],
+			["Compound annual growth rate", this.formatPercentage(result.compoundAnnualGrowthRate)],
+			["Interest accumulated", this.formatCurrency(result.interest)],
+		];
+		const generalTableRight = [
+			["Sharpe ratio", this.formatNumber(result.sharpeRatio)],
+			["Sortino ratio", this.formatNumber(result.sortinoRatio)],
+			["Calmar ratio", this.formatNumber(result.calmarRatio)],
+			["Max drawdown", this.formatPercentage(result.maxDrawdown)],
+			["Fees per profit", this.formatPercentage(result.feesPercent)],
+		];
+		const createTradesTable = (title, tradeResults) => {
+			const zeroToNan = number => number != 0 ? number : null;
+			const cells = [
+				["Trades", this.formatInt(zeroToNan(tradeResults.trades))],
+				["Profit", this.formatCurrency(zeroToNan(tradeResults.profit))],
+				["Profit per trade", this.formatCurrency(tradeResults.profitPerTrade)],
+				["Win rate", this.formatPercentage(tradeResults.winRate, false)],
+				["Profit factor", this.formatNumber(tradeResults.profitFactor)],
+				["Bars in trade", this.formatNumber(tradeResults.barsInTrade, 1)]
+			];
+			createTable(cells, bottomContainer, title);
+		};
+		createTable(generalTableLeft, topContainer);
+		createTable(generalTableRight, topContainer);
+		createTradesTable("All trades", result.allTrades);
+		createTradesTable("Long trades only", result.longTrades);
+		createTradesTable("Short trades only", result.shortTrades);
 	}
 
 	createChart(data, mode) {
-		const container = document.createElement("div");
-		container.className = "plot";
-		const canvas = document.createElement("canvas");
-		container.appendChild(canvas);
-		const button = document.createElement("button");
-		button.textContent = "Reset zoom";
-		container.appendChild(button);
-		this.append(container);
+		const container = createElement("div", this.content, {
+			className: "plot"
+		});
+		const canvas = createElement("canvas", container);
+		const button = createElement("button", container, {
+			textContent: "Reset zoom"
+		});
 		const context = canvas.getContext("2d");
 		if (context === null) {
 			throw new Error("Failed to create 2D context");
@@ -161,8 +235,9 @@ export class WebUi {
 			this.setChartOptions(datasets, options, true, true);
 			initializeChart();
 		} else if (mode === ChartMode.EQUITY_CURVE) {
-			const form = document.createElement("form");
-			form.className = "equity-curve";
+			const form = createElement("form", null, {
+				className: "equity-curve"
+			});
 			container.insertBefore(form, container.firstChild);
 			const chartContext = new ChartContext(context, button, data);
 			const onChangeDaily = () => this.updateDailyStats(chartContext, DailyStatsMode.EQUITY_CURVE_DAILY);
@@ -170,7 +245,7 @@ export class WebUi {
 			const onChangeMargin = () => this.updateDailyStats(chartContext, DailyStatsMode.MARGIN);
 			this.createRadioButton("Equity curve (daily)", form, true, onChangeDaily);
 			this.createRadioButton("Equity curve (trades)", form, false, onChangeTrades);
-			this.createRadioButton("Margin", form, false, onChangeMargin);
+			this.createRadioButton("Margin used", form, false, onChangeMargin);
 			this.updateDailyStats(chartContext, DailyStatsMode.EQUITY_CURVE_DAILY);
 		} else {
 			throw new Error("Unknown chart mode specified");
@@ -196,17 +271,16 @@ export class WebUi {
 	}
 
 	createRadioButton(labelText, container, checked, onChange) {
-		const label = document.createElement("label");
-		container.appendChild(label);
-		const input = document.createElement("input");
-		input.type = "radio";
-		input.name = "mode";
-		input.checked = checked;
-		input.onchange = onChange;
-		label.appendChild(input);
-		const span = document.createElement("span");
-		span.textContent = labelText;
-		label.appendChild(span);
+		const label = createElement("label", container);
+		createElement("input", label, {
+			type: "radio",
+			name: "mode",
+			checked: checked,
+			onchange: onChange
+		});
+		createElement("span", label, {
+			textContent: labelText
+		});
 	}
 
 	getCandlestickDatasets(tickerMap) {
@@ -502,20 +576,22 @@ export class WebUi {
 			};
 			const labelCallback = context => {
 				const raw = context.raw;
+				// Should be using formatCurrency with a currency parameter here
 				const formatted = this.formatNumber(raw.c);
-				return `${context.dataset.label}: ${formatted} (${raw.y.toFixed(1)}%)`;
+				const percentage = this.formatPercentage(raw.y)
+				return `${context.dataset.label}: ${formatted} (${percentage})`;
 			};
 			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
 		} else if (lineMode === false) {
 			const labelCallback = context => {
 				const raw = context.raw;
 				if (raw.percentage != null) {
-					const percentage = 100.0 * raw.percentage;
-					const formatted = this.formatNumber(raw.y);
-					return `${context.dataset.label}: ${formatted} (${percentage.toFixed(1)}%)`;
+					const formatted = this.formatCurrency(raw.y, false);
+					const percentage = this.formatPercentage(raw.percentage);
+					return `${context.dataset.label}: ${formatted} (${percentage})`;
 				}
 				else {
-					const formatted = this.formatNumber(raw.y);
+					const formatted = this.formatCurrency(raw.y, false);
 					return `${context.dataset.label}: ${formatted}`;
 				}
 			};
@@ -524,20 +600,68 @@ export class WebUi {
 		this.setTitleCallback(datasets, options, timeSeries);
 	}
 
-	formatNumber(number) {
-		const formattedNumber = number.toLocaleString("en-US", {
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2
+	formatInt(number) {
+		if (number === null) {
+			return NOT_AVAILABLE_SYMBOL;
+		}
+		const formatted = number.toLocaleString("en-US");
+		return formatted;
+	}
+
+	formatNumber(number, digits) {
+		if (number === null) {
+			return NOT_AVAILABLE_SYMBOL;
+		}
+		digits = digits || 2;
+		const formatted = number.toLocaleString("en-US", {
+			minimumFractionDigits: digits,
+			maximumFractionDigits: digits
 		});
-		return formattedNumber;
+		return formatted;
+	}
+
+	formatPercentage(number, plusPrefix) {
+		if (number === null) {
+			return NOT_AVAILABLE_SYMBOL;
+		}
+		const percentage = 100.0 * number;
+		const digits = 1;
+		const formatted = percentage.toLocaleString("en-US", {
+			minimumFractionDigits: digits,
+			maximumFractionDigits: digits
+		});
+		if (number > 0 && plusPrefix === true) {
+			return `+${formatted}%`;
+		} else {
+			return `${formatted}%`;
+		}
+	};
+
+	formatCurrency(number, useParentheses) {
+		if (number === null) {
+			return NOT_AVAILABLE_SYMBOL;
+		}
+		if (useParentheses === undefined) {
+			useParentheses = true;
+		}
+		const formatted = this.formatNumber(Math.abs(number));
+		if (number >= 0) {
+			return `$${formatted}`;
+		} else {
+			if (useParentheses === true) {
+				return `($${formatted})`;
+			} else {
+				return `-$${formatted}`;
+			}
+		}
 	}
 
 	createEditor() {
-		const container = document.createElement("div");
-		container.className = "editor";
-		container.onkeydown = this.onEditorKeyDown.bind(this);
-		container.onkeyup = this.onEditorKeyUp.bind(this);
-		this.append(container);
+		const container = createElement("div", this.content, {
+			className: "editor",
+			onkeydown: this.onEditorKeyDown.bind(this),
+			onkeyup: this.onEditorKeyUp.bind(this)
+		});
 		const editor = ace.edit(container);
 		editor.setOptions({
 			fontSize: "0.9em",
@@ -655,13 +779,13 @@ export class WebUi {
 	}
 
 	renderCorrelationMatrix(correlation, separators) {
-		const container = document.createElement("div");
-		container.className = "correlation";
-		this.append(container);
-		const table = this.createElement("table", container);
-		const createRow = () => this.createElement("tr", table);
+		const container = createElement("div", this.content, {
+			className: "correlation"
+		});
+		const table = createElement("table", container);
+		const createRow = () => createElement("tr", table);
 		const createCell = (text, row) => {
-			const element = this.createElement("td", row);
+			const element = createElement("td", row);
 			if (text != null) {
 				element.textContent = text;
 			}
@@ -702,16 +826,8 @@ export class WebUi {
 		}
 		const from = this.getTime(correlation.from);
 		const to = this.getTime(correlation.to);
-		const fromToLabel = this.createElement("div", container);
+		const fromToLabel = createElement("div", container);
 		fromToLabel.textContent = `Showing data from ${this.getDateFormat(from, true)} to ${this.getDateFormat(to, true)}`;
-	}
-
-	createElement(tag, parent) {
-		const element = document.createElement(tag);
-		if (parent != null) {
-			parent.appendChild(element);
-		}
-		return element;
 	}
 
 	async plot(callArguments, isCandlestick) {
@@ -790,6 +906,7 @@ export class WebUi {
 			parameters.getJsonValue(),
 			timeFrame.getJsonValue(),
 		);
+		this.createBacktestTable(backtestResult);
 		this.createChart(backtestResult, ChartMode.EQUITY_CURVE);
 		console.log(backtestResult);
 	}
