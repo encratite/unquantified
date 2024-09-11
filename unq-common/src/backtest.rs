@@ -941,13 +941,13 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn get_risk_free_rate(&self) -> Result<f64> {
-		let tbills = self.asset_manager.get_time_series("TB3MS")?;
+		let t_bills = self.asset_manager.get_time_series("TB3MS")?;
 		let from = self.from.date();
 		let to = self.to.date();
 		let days = (to - from).num_days().max(1);
 		let mut sum = 0.0;
 		for day in from.iter_days().take(days as usize) {
-			let rate = tbills.get(&day)? / 100.0;
+			let rate = t_bills.get(&day)? / 100.0;
 			sum += rate;
 		}
 		let mean = sum / (days as f64);

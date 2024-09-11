@@ -13,6 +13,9 @@ import {
 } from "./engine.js";
 
 const LOCAL_STORAGE_KEY = "unquantified";
+const NOT_AVAILABLE_SYMBOL = "-";
+// At what point should the max drawdown be highlighted in red?
+const MAX_DRAWDOWN_WARNING = -0.2;
 
 const ChartMode = {
 	LINE: "line",
@@ -25,8 +28,6 @@ const DailyStatsMode = {
 	EQUITY_CURVE_TRADES: "equityCurveTrades",
 	MARGIN: "margin"
 };
-
-const NOT_AVAILABLE_SYMBOL = "-";
 
 function createElement(tag, container, properties) {
 	const element = document.createElement(tag);
@@ -167,9 +168,13 @@ export class WebUi {
 				createElement("td", row, {
 					textContent: description
 				});
-				createElement("td", row, {
-					textContent: value
-				});
+				const valueCell = createElement("td", row);
+				if (typeof value === "string") {
+					valueCell.textContent = value;
+				} else {
+					// For red spans indicating losses
+					valueCell.appendChild(value);
+				}
 			});
 		};
 		const generalTableLeft = [
@@ -179,20 +184,22 @@ export class WebUi {
 			["Compound annual growth rate", this.formatPercentage(result.compoundAnnualGrowthRate)],
 			["Interest accumulated", this.formatCurrency(result.interest)],
 		];
+		const ratioDigits = 2;
+		const maxDrawdownEnableColor = result.maxDrawdown < MAX_DRAWDOWN_WARNING;
+		const zeroToNull = number => number != 0 ? number : null;
 		const generalTableRight = [
-			["Sharpe ratio", this.formatNumber(result.sharpeRatio)],
-			["Sortino ratio", this.formatNumber(result.sortinoRatio)],
-			["Calmar ratio", this.formatNumber(result.calmarRatio)],
-			["Max drawdown", this.formatPercentage(result.maxDrawdown)],
-			["Fees per profit", this.formatPercentage(result.feesPercent)],
+			["Sharpe ratio", this.formatNumber(result.sharpeRatio, ratioDigits, true)],
+			["Sortino ratio", this.formatNumber(result.sortinoRatio, ratioDigits, true)],
+			["Calmar ratio", this.formatNumber(result.calmarRatio, ratioDigits, true)],
+			["Max drawdown", this.formatPercentage(zeroToNull(result.maxDrawdown), false, maxDrawdownEnableColor)],
+			["Fees per profit", this.formatPercentage(zeroToNull(result.feesPercent), false, false)],
 		];
 		const createTradesTable = (title, tradeResults) => {
-			const zeroToNan = number => number != 0 ? number : null;
 			const cells = [
-				["Trades", this.formatInt(zeroToNan(tradeResults.trades))],
-				["Profit", this.formatCurrency(zeroToNan(tradeResults.profit))],
+				["Trades", this.formatInt(zeroToNull(tradeResults.trades))],
+				["Profit", this.formatCurrency(zeroToNull(tradeResults.profit))],
 				["Profit per trade", this.formatCurrency(tradeResults.profitPerTrade)],
-				["Win rate", this.formatPercentage(tradeResults.winRate, false)],
+				["Win rate", this.formatPercentage(tradeResults.winRate, false, false)],
 				["Profit factor", this.formatNumber(tradeResults.profitFactor)],
 				["Bars in trade", this.formatNumber(tradeResults.barsInTrade, 1)]
 			];
@@ -578,7 +585,7 @@ export class WebUi {
 				const raw = context.raw;
 				// Should be using formatCurrency with a currency parameter here
 				const formatted = this.formatNumber(raw.c);
-				const percentage = this.formatPercentage(raw.y)
+				const percentage = this.formatPercentage(raw.y, false, false)
 				return `${context.dataset.label}: ${formatted} (${percentage})`;
 			};
 			innerOptions.plugins.tooltip.callbacks.label = labelCallback;
@@ -586,12 +593,12 @@ export class WebUi {
 			const labelCallback = context => {
 				const raw = context.raw;
 				if (raw.percentage != null) {
-					const formatted = this.formatCurrency(raw.y, false);
-					const percentage = this.formatPercentage(raw.percentage);
+					const formatted = this.formatCurrency(raw.y, false, false);
+					const percentage = this.formatPercentage(raw.percentage, false, false);
 					return `${context.dataset.label}: ${formatted} (${percentage})`;
 				}
 				else {
-					const formatted = this.formatCurrency(raw.y, false);
+					const formatted = this.formatCurrency(raw.y, false, false);
 					return `${context.dataset.label}: ${formatted}`;
 				}
 			};
@@ -608,19 +615,23 @@ export class WebUi {
 		return formatted;
 	}
 
-	formatNumber(number, digits) {
+	formatNumber(number, digits, enableColor) {
 		if (number === null) {
 			return NOT_AVAILABLE_SYMBOL;
 		}
 		digits = digits || 2;
-		const formatted = number.toLocaleString("en-US", {
+		const text = number.toLocaleString("en-US", {
 			minimumFractionDigits: digits,
 			maximumFractionDigits: digits
 		});
-		return formatted;
+		if (number < 0) {
+			return this.getNegativeSpan(text, enableColor);
+		} else {
+			return text;
+		}
 	}
 
-	formatPercentage(number, plusPrefix) {
+	formatPercentage(number, plusPrefix, enableColor) {
 		if (number === null) {
 			return NOT_AVAILABLE_SYMBOL;
 		}
@@ -633,11 +644,16 @@ export class WebUi {
 		if (number > 0 && plusPrefix === true) {
 			return `+${formatted}%`;
 		} else {
-			return `${formatted}%`;
+			const text = `${formatted}%`;
+			if (number < 0) {
+				return this.getNegativeSpan(text, enableColor);
+			} else {
+				return text;
+			}
 		}
 	};
 
-	formatCurrency(number, useParentheses) {
+	formatCurrency(number, useParentheses, enableColor) {
 		if (number === null) {
 			return NOT_AVAILABLE_SYMBOL;
 		}
@@ -648,11 +664,25 @@ export class WebUi {
 		if (number >= 0) {
 			return `$${formatted}`;
 		} else {
+			let text;
 			if (useParentheses === true) {
-				return `($${formatted})`;
+				text = `($${formatted})`;
 			} else {
-				return `-$${formatted}`;
+				text = `-$${formatted}`;
 			}
+			return this.getNegativeSpan(text, enableColor);
+		}
+	}
+
+	getNegativeSpan(text, enableColor) {
+		if (enableColor === undefined || enableColor === true) {
+			const span = createElement("span", null, {
+				className: "negative",
+				textContent: text
+			});
+			return span;
+		} else {
+			return text;
 		}
 	}
 
