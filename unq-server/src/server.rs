@@ -11,7 +11,7 @@ use tokio::task;
 use tokio::task::JoinError;
 use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
 use unq_common::manager::AssetManager;
-use unq_common::ohlc::{OhlcArchive, OhlcRecord, TimeFrame};
+use unq_common::ohlc::{OhlcArchive, OhlcMap, OhlcRecord, TimeFrame};
 use unq_common::strategy::{StrategyParameter, StrategyParameters};
 use unq_common::web::WebF64;
 use unq_strategy::get_strategy;
@@ -216,8 +216,8 @@ fn get_ohlc_records(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: u16, a
 	let chunk_size = (time_frame / archive.intraday_time_frame) as usize;
 	archive.intraday
 		.get_adjusted_fallback()
-		.iter()
-		.filter(|x| matches_from_to(from, to, x))
+		.range(from..to)
+		.map(|(_, record)| record)
 		.collect::<Vec<_>>()
 		.chunks(chunk_size)
 		.filter(|x| x.len() == chunk_size)
@@ -257,18 +257,11 @@ fn merge_ohlc_records(data: &[&OhlcRecord]) -> Result<OhlcRecordWeb> {
 	Ok(record)
 }
 
-fn matches_from_to(from: &NaiveDateTime, to: &NaiveDateTime, record: &OhlcRecord) -> bool {
-	record.time >= *from && record.time < *to
-}
-
-fn get_unprocessed_records<'a, T>(from: &NaiveDateTime, to: &NaiveDateTime, records: T) -> Vec<OhlcRecordWeb>
-where
-	T: IntoIterator<Item = &'a OhlcRecord>,
+fn get_unprocessed_records(from: &NaiveDateTime, to: &NaiveDateTime, source: &OhlcMap) -> Vec<OhlcRecordWeb>
 {
-	records
-		.into_iter()
-		.filter(|x| matches_from_to(from, to, x))
-		.map(|x| OhlcRecordWeb::new(&*x))
+	source
+		.range(from..to)
+		.map(|(_, record)| OhlcRecordWeb::new(record))
 		.collect()
 }
 

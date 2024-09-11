@@ -89,14 +89,17 @@ impl RelativeDateTime {
 
 fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &OhlcArchive) -> Result<NaiveDateTime> {
 	let data = archive.get_data(time_frame);
-	let mut time_values = data.get_adjusted_fallback()
-		.iter()
-		.map(|x| x.time);
-	let get_some_time = |time: Option<NaiveDateTime>| time.with_context(|| anyhow!("No records available"));
+	let get_some_time = |time: Option<NaiveDateTime>| time.with_context(|| "No records available");
 	if is_first {
-		get_some_time(time_values.next())
+		let first = data.unadjusted
+			.first_key_value()
+			.map(|(time, _)| time.clone());
+		get_some_time(first)
 	} else {
-		get_some_time(time_values.last())
+		let last = data.unadjusted
+			.last_key_value()
+			.map(|(time, _)| time.clone());
+		get_some_time(last)
 	}
 }
 

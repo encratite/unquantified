@@ -1,9 +1,10 @@
+use std::collections::btree_map::Values;
 use std::collections::HashMap;
 use chrono::NaiveDateTime;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
 use anyhow::{bail, Context, Result};
-use unq_common::ohlc::{OhlcArchive, OhlcRecord, OhlcVec};
+use unq_common::ohlc::{OhlcArchive, OhlcRecord};
 
 #[derive(Serialize)]
 pub struct CorrelationData {
@@ -63,18 +64,17 @@ fn get_common_time_range(request_from: NaiveDateTime, request_to: NaiveDateTime,
 	let mut from = request_from;
 	let mut to = request_to;
 	for archive in archives {
-			let get_time = |x: &OhlcRecord| Some(x.time);
-			let records = get_records(archive);
-			let first = records
-				.first()
-				.and_then(get_time);
-			let last = records
-				.last()
-				.and_then(get_time);
+			let adjusted = archive.daily.get_adjusted_fallback();
+			let first = adjusted
+				.first_key_value()
+				.map(|(time, _)| time);
+			let last = adjusted
+				.last_key_value()
+				.map(|(time, _)| time);
 			match (first, last) {
 				(Some(first_time), Some(last_time)) => {
-					from = from.max(first_time);
-					to = to.min(last_time);
+					from = from.max(*first_time);
+					to = to.min(*last_time);
 				}
 				_ => bail!("Missing records in archive")
 			}
@@ -133,6 +133,8 @@ fn get_delta_samples(from: &NaiveDateTime, to: &NaiveDateTime, archives: &Vec<&O
 	Ok(delta_samples)
 }
 
-fn get_records(archive: &OhlcArchive) -> &OhlcVec {
-	archive.daily.get_adjusted_fallback()
+fn get_records(archive: &OhlcArchive) -> Values<NaiveDateTime, OhlcRecord> {
+	archive.daily
+		.get_adjusted_fallback()
+		.values()
 }

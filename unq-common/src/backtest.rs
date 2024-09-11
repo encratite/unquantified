@@ -497,27 +497,26 @@ impl<'a> Backtest<'a> {
 			return None;
 		};
 		let data = archive.get_data(&self.time_frame);
-		let latest_record = if let Some(record) = data.time_map.get(&self.now) {
-			record
-		} else {
-			let adjusted = data.get_adjusted_fallback();
-			let Some(record) = adjusted
-				.iter()
-				.rev()
-				.filter(|x| x.time < self.now)
-				.next()
-			else {
-				return None
-			};
-			record
+		let latest_record_opt = data
+			.get_adjusted_fallback()
+			.range(..=self.now)
+			.next_back()
+			.map(|(_, record)| record);
+		let Some(latest_record) = latest_record_opt else {
+			return None
 		};
 		Some(latest_record.symbol.clone())
 	}
 
 	fn get_asset_margin(&self, asset: &Asset, archive: &OhlcArchive) -> Result<f64> {
-		let current_record = archive.daily.time_map.get(&self.now)
+		let current_record = archive.daily.unadjusted
+			.range(..=self.now)
+			.next_back()
+			.map(|(_, record)| record)
 			.with_context(|| anyhow!("Unable to find current record for symbol {} at {}", asset.symbol, self.now))?;
-		let last_record = archive.daily.unadjusted.last()
+		let last_record = archive.daily.unadjusted
+			.values()
+			.last()
 			.with_context(|| "Last record missing")?;
 		// Attempt to reconstruct historical maintenance margin using price ratio
 		let margin;
@@ -573,7 +572,8 @@ impl<'a> Backtest<'a> {
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
 		let get_record = |archive: &OhlcArchive| -> Result<OhlcRecord> {
 			let source = archive.get_data(&self.time_frame);
-			let record = source.time_map.get(&time)
+			let adjusted = source.get_adjusted_fallback();
+			let record = adjusted.get(&time)
 				.with_context(map_error)?
 				.clone();
 			Ok(record)
@@ -613,7 +613,7 @@ impl<'a> Backtest<'a> {
 		let time_reference = asset_manager.get_archive(&time_reference_symbol)?;
 		// Skip samples outside the configured time range
 		let source = time_reference.get_data(time_frame);
-		let time_keys: Box<dyn Iterator<Item = &NaiveDateTime>> = Box::new(source.time_map.keys());
+		let time_keys: Box<dyn Iterator<Item = &NaiveDateTime>> = Box::new(source.unadjusted.keys());
 		let time_keys_in_range = time_keys
 			.filter(|&&x|
 				x >= *from &&

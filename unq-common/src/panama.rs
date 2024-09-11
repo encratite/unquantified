@@ -1,8 +1,8 @@
-use std::{collections::{HashSet, VecDeque, BTreeMap, HashMap}, cmp::Ordering};
-use chrono::{NaiveDate, NaiveDateTime, Timelike};
+use std::{collections::{HashSet, BTreeMap, HashMap}, cmp::Ordering};
+use chrono::NaiveDateTime;
 use anyhow::{Result, anyhow, bail, Context};
 use crate::{globex::GlobexCode, RawOhlcArchive};
-use crate::ohlc::{OhlcContractMap, OhlcRecord, OhlcVec};
+use crate::ohlc::{OhlcContractMap, OhlcRecord, OhlcMap, OhlcVec};
 
 type BoundaryMap<'a> = BTreeMap<&'a String, (NaiveDateTime, NaiveDateTime)>;
 pub type OffsetMap = HashMap<String, f64>;
@@ -45,8 +45,8 @@ impl<'a> PanamaCanal<'a> {
 		Ok(Some(channel))
 	}
 
-	pub fn get_adjusted_data(&mut self) -> Result<(OhlcVec, OffsetMap)> {
-		let mut output = VecDeque::new();
+	pub fn get_adjusted_data(&mut self) -> Result<(OhlcMap, OffsetMap)> {
+		let mut output = OhlcMap::new();
 		let time_limit_opt = self.get_time_limit()?;
 		for (time, records) in self.map.iter().rev() {
 			if let Some(time_limit) = time_limit_opt {
@@ -56,77 +56,68 @@ impl<'a> PanamaCanal<'a> {
 			}
 			if let Some(next_record) = self.get_next_record(time, records)? {
 				let adjusted_record = next_record.apply_offset(self.offset);
-				output.push_front(adjusted_record);
+				output.insert(adjusted_record.time, adjusted_record);
 			}
 		}
-		let output_vec = Vec::from(output);
-		Ok((output_vec, self.offset_map.clone()))
+		Ok((output, self.offset_map.clone()))
 	}
 
 	// Generate a continuous contract with intraday data from the rollovers that had previously been calculated from daily data
-	pub fn from_offset_map(intraday: &OhlcContractMap, daily: &OhlcVec, offset_map: &OffsetMap) -> Result<OhlcVec> {
-		let mut output = OhlcVec::new();
-		let mut daily_map = BTreeMap::new();
-		for x in daily {
-			daily_map.insert(x.time.date(), &x.symbol);
-		}
-		let (mut current_contract, first_date) = Self::get_current_contract(intraday, daily, &daily_map)?;
-		let Some(mut offset) = Self::deref(offset_map.get(current_contract)) else {
+	pub fn from_offset_map(intraday: &OhlcContractMap, daily: &OhlcMap, offset_map: &OffsetMap) -> Result<OhlcMap> {
+		let mut output = OhlcMap::new();
+		let (mut current_contract, first_date) = Self::get_current_contract(intraday, daily)?;
+		let Some(mut offset) = offset_map.get(current_contract) else {
 			bail!("Unable to initialize Panama offset for contract {current_contract}");
 		};
 		let mut rollover_date = first_date;
-		for (time, records) in intraday.iter() {
-			let date = time.date();
-			if let Some(daily_contract) = Self::deref(daily_map.get(&date)) {
+		for (intraday_time, records) in intraday.iter() {
+			let daily_record_opt = daily
+				.range(..=intraday_time)
+				.next_back()
+				.map(|(_, record)| record);
+			if let Some(daily_record) = daily_record_opt {
+				let daily_contract = &daily_record.symbol;
 				if daily_contract != current_contract {
 					// Try to perform the rollover during the primary trading session and not at midnight
-					if time.hour() >= 12 || date > rollover_date {
-						let Some(new_offset) = Self::deref(offset_map.get(daily_contract)) else {
+					let delta = *intraday_time - *rollover_date;
+					if delta.num_hours() >= 36 {
+						let Some(new_offset) = offset_map.get(daily_contract) else {
 							bail!("Unable to determine offset for contract {daily_contract}");
 						};
 						offset = new_offset;
 						current_contract = daily_contract;
 					}
-					rollover_date = date;
+					rollover_date = &daily_record.time;
 				}
 			}
 			// Only generate an adjusted record in case of a matching contract for the current period in the intraday contract map
 			if let Some(contract_record) = records.iter().find(|x| x.symbol == *current_contract) {
-				let mut adjusted_record = contract_record.apply_offset(offset);
+				let mut adjusted_record = contract_record.apply_offset(*offset);
 				adjusted_record.symbol = current_contract.clone();
-				output.push(adjusted_record);
+				output.insert(adjusted_record.time, adjusted_record);
 			}
 		}
 		Ok(output)
 	}
 
-	fn get_current_contract<'b>(intraday: &OhlcContractMap, daily: &OhlcVec, daily_map: &BTreeMap<NaiveDate, &'b String>) -> Result<(&'b String, NaiveDate)> {
+	fn get_current_contract<'b>(intraday: &'b OhlcContractMap, daily: &'b OhlcMap) -> Result<(&'b String, &'b NaiveDateTime)> {
 		let first_intraday_date_opt = intraday
 			.keys()
-			.map(|x| x.date())
 			.next();
 		let Some(first_intraday_date) = first_intraday_date_opt else {
 			bail!("Unable to get first intraday date");
 		};
 		let first_daily_date_opt = daily
-			.iter()
-			.map(|x| x.time.date())
+			.keys()
 			.next();
 		let Some(first_daily_date) = first_daily_date_opt else {
 			bail!("Unable to get first daily date");
 		};
 		let first_date = first_intraday_date.max(first_daily_date);
-		let Some((_, current_contract)) = daily_map.range(..=first_daily_date).next_back() else {
+		let Some((_, record)) = daily.range(..=first_daily_date).next_back() else {
 			bail!("Unable to determine first contract");
 		};
-		Ok((current_contract, first_date))
-	}
-
-	fn deref<T>(opt: Option<&T>) -> Option<T>
-	where
-		T: Copy
-	{
-		opt.map(|x| *x)
+		Ok((&record.symbol, &first_date))
 	}
 
 	fn get_boundary_map(map: &'a OhlcContractMap) -> BoundaryMap<'a> {

@@ -6,7 +6,7 @@ use crate::globex::GlobexCode;
 use crate::panama::{OffsetMap, PanamaCanal};
 
 pub type OhlcVec = Vec<OhlcRecord>;
-pub type OhlcTimeMap = BTreeMap<NaiveDateTime, OhlcRecord>;
+pub type OhlcMap = BTreeMap<NaiveDateTime, OhlcRecord>;
 pub type OhlcContractMap = BTreeMap<NaiveDateTime, OhlcVec>;
 
 #[derive(Clone, PartialEq, Archive, Serialize, serde::Deserialize)]
@@ -43,27 +43,22 @@ pub struct OhlcArchive {
 }
 
 /*
-General container for the actual OHLC records, both as a map for time-based lookups and as a vector for efficiently selecting ranges.
-The post-processed records feature an additional index into the vector that can be used to accelerate lookups of all records between t_1 and t_2.
-The underlying OHLC type is boxed to reduce memory usage. The contents of vector and map depend on the type of asset:
+General container for the actual OHLC records. Contents depend on the asset type.
 
 Currency pair:
-- "unadjusted" contains the original records in ascending order
+- "unadjusted" contains the original records
 - "adjusted" is None
-- "time_map" maps timestamps to records
 - "contract_map" is None
 
 Futures:
-- Both "unadjusted"/"adjusted" contains a continuous contract with new records generated from multiple overlapping contracts
+- Both "unadjusted"/"adjusted" contain a continuous contract with new records generated from multiple overlapping contracts
 - In the case of "unadjusted" it is the original values with automatic roll-overs based on volume and open interest
 - "adjusted" features new records generated using the Panama Canal method for use with indicators, same roll-over criteria
-- "time_map" maps timestamps to adjusted continuous contract data
 - Each vector in "contract_map" contains the full set of active contracts for that particular point in time
  */
 pub struct OhlcData {
-	pub unadjusted: OhlcVec,
-	pub adjusted: Option<OhlcVec>,
-	pub time_map: OhlcTimeMap,
+	pub unadjusted: OhlcMap,
+	pub adjusted: Option<OhlcMap>,
 	pub contract_map: Option<OhlcContractMap>
 }
 
@@ -93,8 +88,7 @@ impl RawOhlcArchive {
 			let daily_offset_map = Some((daily_adjusted, &offset_map));
 			let (intraday, _) = Self::get_data(&self.intraday, daily_offset_map, skip_front_contract)?;
 			(daily, intraday)
-		}
-		else {
+		} else {
 			let (daily, _) = Self::get_data(&self.daily, None, skip_front_contract)?;
 			let (intraday, _) = Self::get_data(&self.intraday, None, skip_front_contract)?;
 			(daily, intraday)
@@ -153,7 +147,7 @@ impl RawOhlcArchive {
 		false
 	}
 
-	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcVec, &OffsetMap)>, skip_front_contract: bool) -> Result<(OhlcData, Option<OffsetMap>)> {
+	fn get_data(records: &Vec<RawOhlcRecord>, daily_offset_map: Option<(&OhlcMap, &OffsetMap)>, skip_front_contract: bool) -> Result<(OhlcData, Option<OffsetMap>)> {
 		let is_contract = Self::is_contract(records);
 		if is_contract {
 			// Futures contract
@@ -171,11 +165,9 @@ impl RawOhlcArchive {
 					None => (None, None)
 				};
 			}
-			let time_map = Self::get_time_map(&unadjusted, &adjusted);
 			let data = OhlcData {
 				unadjusted,
 				adjusted,
-				time_map,
 				contract_map: Some(contract_map)
 			};
 			Ok((data, output_offset_map))
@@ -184,11 +176,9 @@ impl RawOhlcArchive {
 			let contract_map = None;
 			let unadjusted = Self::get_unadjusted_data(records);
 			let adjusted = None;
-			let time_map = Self::get_time_map(&unadjusted, &adjusted);
 			let data = OhlcData {
 				unadjusted,
 				adjusted,
-				time_map,
 				contract_map
 			};
 			Ok((data, None))
@@ -219,26 +209,25 @@ impl RawOhlcArchive {
 		}
 	}
 
-	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>) -> OhlcVec {
-		records.iter().map(|x| {
-			x.to_archive()
-		}).collect()
+	fn get_unadjusted_data(records: &Vec<RawOhlcRecord>) -> OhlcMap {
+		let mut output = OhlcMap::new();
+		for x in records {
+			output.insert(x.time, x.to_archive());
+		}
+		output
 	}
 
-	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcVec> {
-		map.values()
-			.map(|records| {
-				Self::get_most_popular_record(records, skip_front_contract)
-			})
-			.filter_map(|result| match result {
-				Ok(Some(value)) => Some(Ok(value)),
-				Ok(None) => None,
-				Err(err) => Some(Err(err)),
-			})
-			.collect()
+	fn get_unadjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<OhlcMap> {
+		let mut output = OhlcMap::new();
+		for records in map.values() {
+			if let Some(record) = Self::get_most_popular_record(records, skip_front_contract)? {
+				output.insert(record.time, record);
+			}
+		}
+		Ok(output)
 	}
 
-	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<(OhlcVec, OffsetMap)>> {
+	fn get_adjusted_data_from_map(map: &OhlcContractMap, skip_front_contract: bool) -> Result<Option<(OhlcMap, OffsetMap)>> {
 		let Some(mut panama) = PanamaCanal::new(map, skip_front_contract)? else {
 			return Ok(None);
 		};
@@ -257,20 +246,6 @@ impl RawOhlcArchive {
 				map.insert(x.time, records);
 			}
 		});
-		map
-	}
-
-	fn get_time_map(unadjusted: &OhlcVec, adjusted: &Option<OhlcVec>) -> OhlcTimeMap {
-		let source = match adjusted {
-			Some(adjusted_vec) => adjusted_vec,
-			None => unadjusted
-		};
-		let mut map = OhlcTimeMap::new();
-		for record in source {
-			let key = record.time;
-			let value = record.clone();
-			map.insert(key, value);
-		}
 		map
 	}
 }
@@ -316,7 +291,7 @@ impl OhlcArchive {
 }
 
 impl OhlcData {
-	pub fn get_adjusted_fallback(&self) -> &OhlcVec {
+	pub fn get_adjusted_fallback(&self) -> &OhlcMap {
 		match &self.adjusted {
 			Some(ref x) => x,
 			None => &self.unadjusted
