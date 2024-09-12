@@ -1,3 +1,4 @@
+import chroma from "https://cdn.jsdelivr.net/npm/chroma-js@3.1.1/index.min.js";
 import { UnquantifiedMode } from "./highlight-rules.js";
 import {
 	ScriptingEngine,

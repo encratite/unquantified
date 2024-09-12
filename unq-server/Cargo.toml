@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "unq-server"
 
 [dependencies]
-unq-common = { version = "0.4.0", path = "../unq-common" }
+unq-common = { version = "0.5.0", path = "../unq-common" }
 unq-strategy = { version = "0.1.0", path = "../unq-strategy" }
 anyhow = "1.0.86"
 axum = { version = "0.7.5", features = ["macros"] }

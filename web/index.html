@@ -2,19 +2,19 @@
 <html>
 	<head>
 		<title>Unquantified</title>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.4.4/luxon.js" integrity="sha512-Y0hNpPUGIlAoQY6XHJFOCN3OfCPtNtUqiyfOOPbZ8kMrHfyFXv1v6Hn6rMA1G+KmMG/TSLeo0vuULkJZToFu0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-		<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.js" integrity="sha512-LUpacDQOhzI4MVomIbJOUbdKypLvklsznjLrjD9GwzynjSlF7qLy112SzTw+ZWJPxhBvNRLGGdW/7E1slOvsFA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/chroma-js@3.1.1/index.min.js" integrity="sha512-eH/FwNg09l/ky1yVbGSlNy00ZV5Z+rTVSJMH7bU7w5H3nPWFhJsGSX0EaO4o7psbn0tcRHQXgLVZEpsMjpFYyA==" crossorigin="anonymous" referrerpolicy="no-referrer">
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.5.0/luxon.min.js" integrity="sha512-SN7iwxiJt9nFKiLayg3NjLItXPwRfBr4SQSIugMeBFrD4lIFJe1Z/exkTZYAg3Ul+AfZEGws2PQ+xSoaWfxRQQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js" integrity="sha512-7O5t5j7BgmuJwql+4VwBZdMXKhtomkAlymA7wsR8D3VKT4Knxxf2SaJUuySIP34i4m4g7yMApDktTM8ffqq9cg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1" integrity="sha512-I8SeDoNxRKOuQMhqHmx95hydiG/LCY9SFCs3cqAf+f1kIZbAyXXIXIIwgx32ZIgZpOVrEOHSfyjeKxRNIuBvWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://www.chartjs.org/chartjs-chart-financial/chartjs-chart-financial.js" integrity="sha512-xYtFNm3nxyrvnZMg5nnzvhsLxhPueD/dTA+yNj8nZXYZX+nwTmanhJ4Tu/k921AWnoikj1AcrWpaUX/CACFpIQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.35.0/ace.js" integrity="sha512-VBSPPzA3vXv9TFRJtm9ZR4YAJM59ihY4K8+b4LtJenbKk7OfwbAR0v40IJICmfSA6t3caE49CYz9q7mkk/2YPg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.36.2/ace.js" integrity="sha512-yjhIcftV1KZyd3rLPujicRV6NpFEuCqQaOBBdrey6vFdU1zVkJYgJf9a+15YrOuzzSXYNV2GU4xdQ8Xy9Zj/fA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://code.jquery.com/jquery-3.7.1.js" integrity="sha512-+k1pnlgt4F1H8L7t3z95o3/KO+o78INEcXTbnoJQ/F2VqDVhWoaiVml/OEHv9HsVgxUaVW+IbiZPUJQfF/YxZw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-		<script src="https://code.jquery.com/ui/1.13.3/jquery-ui.js" integrity="sha512-EMXcXPVkXS7DOqaH3k0cQzRFb32nV9i7DAa2Pw1kKton6A/lczec7qSn/l7VIhjRInIAAKqdzzxPjk/p/SZuUA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script src="https://code.jquery.com/ui/1.14.0/jquery-ui.js" integrity="sha512-cxRn/7O+JWSqvBOGeODaC+v9wr7RFllEwd6SBAub5ZuBPEzBtYZXTx46KNnlzvEfG42CzbwfscbBYZYcgrXKNA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js" integrity="sha512-VEd+nq25CkR676O+pLBnDW09R7VQX9Mdiij052gVCp5yVH3jGtH70Ho/UUv4mJDsEdTvqRCFZg0NKGiojGnUCw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://unpkg.com/ohm-js@17.1.0/dist/ohm.min.js" integrity="sha512-JuSOMVhTIOEN/19IsolZJAVGAGsce4wYaKqzajbIwuMV3i5cI2dGJOkLoM/DdkQj+7uqVPPVlha+86sb6eDoyg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js" integrity="sha512-zInFF17qBFVvvvFpIfeBzo7Tj7+rQxLeTJDmbxjBz5/zIr89YVbTNelNhdTT+/DCrxoVzBeUPVFJsczKbB7sew==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="https://cdn.jsdelivr.net/npm/kvin@1.2.14/kvin.min.js"></script>
-		<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.3/themes/base/jquery-ui.css">
+		<link rel="stylesheet" href="https://code.jquery.com/ui/1.14.0/themes/base/jquery-ui.css">
 		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.css">
 		<link rel="stylesheet" href="./style.css">
 		<link rel="icon" type="image/x-icon" href="./favicon.ico">
