@@ -146,13 +146,16 @@ export class WebUi {
 		const container = createElement("div", this.content, {
 			className: "results"
 		});
-		const topContainer = createElement("div", container, {
+		const generalStatsContainer = createElement("div", container, {
 			className: "general"
 		});
-		const bottomContainer = createElement("div", container, {
+		const tradesContainer = createElement("div", container, {
 			className: "trades"
 		});
-		const createTable = (cells, container, title) => {
+		const eventsContainer = createElement("div", container, {
+			className: "events"
+		});
+		const createTable = (rows, container, title) => {
 			const table = createElement("table", container);
 			if (title != null) {
 				const row = createElement("tr", table);
@@ -161,20 +164,16 @@ export class WebUi {
 					colSpan: 2
 				});
 			}
-			cells.forEach(cell => {
-				const description = cell[0];
-				const value = cell[1];
+			rows.forEach(columns => {
 				const row = createElement("tr", table);
-				createElement("td", row, {
-					textContent: description
+				columns.forEach(column => {
+					const cell = createElement("td", row);
+					if (typeof column === "string") {
+						cell.textContent = column;
+					} else {
+						cell.appendChild(column);
+					}
 				});
-				const valueCell = createElement("td", row);
-				if (typeof value === "string") {
-					valueCell.textContent = value;
-				} else {
-					// For red spans indicating losses
-					valueCell.appendChild(value);
-				}
 			});
 		};
 		const generalTableLeft = [
@@ -195,7 +194,7 @@ export class WebUi {
 			["Fees per profit", this.formatPercentage(zeroToNull(result.feesPercent), false, false)],
 		];
 		const createTradesTable = (title, tradeResults) => {
-			const cells = [
+			const rows = [
 				["Trades", this.formatInt(zeroToNull(tradeResults.trades))],
 				["Profit", this.formatCurrency(zeroToNull(tradeResults.profit))],
 				["Profit per trade", this.formatCurrency(tradeResults.profitPerTrade)],
@@ -203,13 +202,40 @@ export class WebUi {
 				["Profit factor", this.formatNumber(tradeResults.profitFactor)],
 				["Bars in trade", this.formatNumber(tradeResults.barsInTrade, 1)]
 			];
-			createTable(cells, bottomContainer, title);
+			createTable(rows, tradesContainer, title);
 		};
-		createTable(generalTableLeft, topContainer);
-		createTable(generalTableRight, topContainer);
+		createTable(generalTableLeft, generalStatsContainer);
+		createTable(generalTableRight, generalStatsContainer);
 		createTradesTable("All trades", result.allTrades);
 		createTradesTable("Long trades only", result.longTrades);
 		createTradesTable("Short trades only", result.shortTrades);
+		let eventRows = result.events.map(event => {
+			const dateTime = luxon.DateTime.fromISO(event.time);
+			const short =
+				dateTime.hour === 0 &&
+				dateTime.minute === 0 &&
+				dateTime.second === 0;
+			const dateTimeString = this.getDateFormat(dateTime, short);
+			const eventTypeData = this.getEventTypeData(event.eventType);
+			const description = eventTypeData[0];
+			const className = eventTypeData[1];
+			const descriptionSpan = createElement("span", null, {
+				textContent: description
+			});
+			if (className != null) {
+				descriptionSpan.className = className;
+			}
+			return [
+				dateTimeString,
+				descriptionSpan,
+				event.message
+			];
+		});
+		eventRows.reverse();
+		eventRows = [
+			["Time", "Event", "Description"]
+		].concat(eventRows);
+		createTable(eventRows, eventsContainer);
 	}
 
 	createChart(data, mode) {
@@ -239,7 +265,7 @@ export class WebUi {
 			initializeChart();
 		} else if (mode === ChartMode.LINE) {
 			const datasets = this.getLineDatasets(data);
-			this.setChartOptions(datasets, options, true, true);
+			this.setChartOptions(datasets, options, true, true, false);
 			initializeChart();
 		} else if (mode === ChartMode.EQUITY_CURVE) {
 			const form = createElement("form", null, {
@@ -273,7 +299,7 @@ export class WebUi {
 		}
 		const options = this.getBaseChartOptions();
 		const timeSeries = mode !== DailyStatsMode.EQUITY_CURVE_TRADES;
-		this.setChartOptions(datasets, options, timeSeries, false);
+		this.setChartOptions(datasets, options, timeSeries, false, true);
 		chartContext.render(options);
 	}
 
@@ -528,7 +554,7 @@ export class WebUi {
 		return options;
 	}
 
-	setChartOptions(datasets, options, timeSeries, lineMode) {
+	setChartOptions(datasets, options, timeSeries, lineMode, currency) {
 		options.type = "line";
 		options.data = {
 			datasets: datasets
@@ -561,6 +587,13 @@ export class WebUi {
 					} else {
 						return "rgba(0, 0, 0, 0.1)";
 					}
+				}
+			};
+		}
+		if (currency === true) {
+			innerOptions.scales.y.ticks = {
+				callback: (value, _, __) => {
+					return this.formatCurrency(value, false, false);
 				}
 			};
 		}
@@ -1004,6 +1037,23 @@ export class WebUi {
 		} else {
 			throw new Error(invalidSymbol);
 		}
+	}
+
+	getEventTypeData(eventType) {
+		const definitions = {
+			openPosition: ["Opened position", null],
+			closePosition: ["Closed position", null],
+			rollover: ["Rollover", null],
+			marginCall: ["Margin call", "error"],
+			ruin: ["Out of funds", "error"],
+			warning: ["Warning", "warning"],
+			error: ["Error", "error"]
+		};
+		const output = definitions[eventType];
+		if (output == null) {
+			throw new Error("Unknown event type");
+		}
+		return output;
 	}
 }
 

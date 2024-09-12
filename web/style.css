@@ -1,3 +1,7 @@
+:root {
+	--base-width: 50rem;
+}
+
 body {
 	padding: 3em;
 	font-family: system-ui, -apple-system, blinkmacsystemfont, "Segoe UI", helvetica, arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
@@ -6,7 +10,7 @@ body {
 .editor {
 	border: 1px solid #bbb;
 	margin-bottom: 1.8em;
-	width: 45rem;
+	width: var(--base-width);
 
 	.read-only {
 		background-color: #f8f8f8;
@@ -15,9 +19,9 @@ body {
 
 .plot {
 	text-align: right;
-	width: 60em;
-	height: 35em;
-	margin-bottom: 2em;
+	width: var(--base-width);
+	height: 30rem;
+	margin-bottom: 1em;
 
 	canvas {
 		margin-bottom: 3em;
@@ -41,6 +45,12 @@ body {
 		-ms-user-select: none;
 		user-select: none;
 	}
+
+	form {
+		position: absolute;
+		right: 0;
+		top: -1.1rem;
+	}
 }
 
 .ace_command {
@@ -57,6 +67,10 @@ body {
 
 .ace_keyword {
 	color: black !important;
+}
+
+.ace_editor .ace_marker-layer .ace_bracket {
+	display: none
 }
 
 .correlation {
@@ -127,8 +141,8 @@ body {
 }
 
 .results {
-	width: 45rem;
-	margin-bottom: 1.5em;
+	width: var(--base-width);
+	margin-bottom: 2em;
 
 	table {
 		border-collapse: collapse;
@@ -143,7 +157,7 @@ body {
 		vertical-align: top;
 	}
 
-	td:nth-child(2) {
+	.general td:nth-child(2), .trades td:nth-child(2) {
 		text-align: right;
 	}
 
@@ -158,6 +172,7 @@ body {
 		display: flex;
 		align-items: flex-start;
 		gap: 1em;
+		margin-bottom: 1.5em;
 
 		tr:first-child {
 			td {
@@ -165,6 +180,42 @@ body {
 				border: 0;
 				padding-bottom: 0.1em;
 			}
+		}
+	}
+
+	.events {
+		width: calc(var(--base-width) - 2px);
+		height: 11.8rem;
+		overflow-y: scroll;
+		border: 1px solid #bbb;
+
+		table {
+			width: 100%;
+		}
+
+		td:first-child {
+			text-align: right;
+			border-left: 0;
+		}
+
+		td:last-child {
+			border-right: 0;
+		}
+
+		tr:first-child td {
+			border-top: 0;
+		}
+
+		tr:last-child td {
+			border-bottom: 0;
+		}
+
+		.warning {
+			color: #ffd000;
+		}
+
+		.error {
+			color: #d00;
 		}
 	}
 }

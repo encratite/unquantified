@@ -38,6 +38,7 @@ pub enum PositionSide {
 }
 
 #[derive(Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum EventType {
 	OpenPosition,
 	ClosePosition,
