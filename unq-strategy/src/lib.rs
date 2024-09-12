@@ -1,4 +1,5 @@
 mod buy_and_hold;
+mod technical;
 
 use std::sync::Mutex;
 use anyhow::{Result, bail};

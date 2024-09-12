@@ -147,7 +147,7 @@ impl CsvTimeSeries {
 	}
 
 	pub fn get(&self, date: &NaiveDate) -> Result<f64> {
-		let Some((_, value))  = self.time_series.range(..=date).next_back() else {
+		let Some((_, value)) = self.time_series.range(..=date).next_back() else {
 			bail!("Unable to find a matching value for date {}", date);
 		};
 		Ok(*value)

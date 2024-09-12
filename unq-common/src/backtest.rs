@@ -343,6 +343,23 @@ impl<'a> Backtest<'a> {
 			.with_context(|| anyhow!("Unable to find position with ID {id}"))
 	}
 
+	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<&OhlcRecord>> {
+		let root = match parse_globex_code(symbol) {
+			Some((root, _, _)) => root,
+			None => symbol.clone()
+		};
+		let (_, archive) = self.asset_manager.get_asset(&root)?;
+		let source = archive.get_data(&self.time_frame);
+		let records = source
+			.get_adjusted_fallback()
+			.range(..=self.now)
+			.rev()
+			.take(bars)
+			.map(|(_, record)| record)
+			.collect::<Vec<&OhlcRecord>>();
+		Ok(records)
+	}
+
 	fn next_internal(&mut self) -> Result<bool> {
 		if let Some(now) = self.time_sequence.pop_front() {
 			self.margin_call_check()?;
