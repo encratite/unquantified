@@ -1045,7 +1045,6 @@ export class WebUi {
 			closePosition: ["Closed position", null],
 			rollover: ["Rollover", null],
 			marginCall: ["Margin call", "error"],
-			ruin: ["Out of funds", "error"],
 			warning: ["Warning", "warning"],
 			error: ["Error", "error"]
 		};

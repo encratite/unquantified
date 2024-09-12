@@ -44,7 +44,6 @@ pub enum EventType {
 	ClosePosition,
 	Rollover,
 	MarginCall,
-	Ruin,
 	Warning,
 	Error
 }
@@ -345,24 +344,20 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn next_internal(&mut self) -> Result<bool> {
-		match self.time_sequence.pop_front() {
-			Some(now) => {
-				self.margin_call_check()?;
-				self.gain_interest()?;
-				self.now = now;
-				self.update_position_bars();
-				self.rollover_contracts()?;
-				self.update_daily_stats()?;
-				self.ruin_check()?;
-				Ok(false)
-			}
-			None => {
-				// Cash out
-				self.close_all_positions()?;
-				self.terminated = true;
-				Ok(true)
-			}
+		if let Some(now) = self.time_sequence.pop_front() {
+			self.margin_call_check()?;
+			self.gain_interest()?;
+			self.now = now;
+			self.update_position_bars();
+			self.rollover_contracts()?;
+			self.update_daily_stats()?;
+			self.ruin_check()?;
+		} else {
+			// Cash out
+			self.close_all_positions()?;
+			self.terminated = true;
 		}
+		Ok(self.terminated)
 	}
 
 	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
@@ -693,7 +688,7 @@ impl<'a> Backtest<'a> {
 			if overnight_margin > account_value {
 				// Keep on closing positions until there's enough collateral
 				if log_margin_call {
-					let message = format!("The overnight margin of ${overnight_margin} exceeds the account value of ${account_value}, closing positions");
+					let message = format!("The overnight margin of ${overnight_margin:.2} exceeds the account value of ${account_value:.2}, closing positions");
 					self.log_event(EventType::MarginCall, message);
 				}
 				let close_result = self.close_position(position_id, position_count);
@@ -797,9 +792,9 @@ impl<'a> Backtest<'a> {
 		let last = self.equity_curve_daily.last()
 			.with_context(|| "Unable to retrieve most recent equity curve value")?;
 		if last.equity_curve.account_value.get() < self.configuration.ruin_ratio * self.configuration.starting_cash {
-			let message = "Backtest has been terminated because the account value dropped below the ruin ratio";
-			self.log_event(EventType::Ruin, message.to_string());
-			bail!(message);
+			let message = "Account value too low, terminating backtest";
+			self.log_event(EventType::Error, message.to_string());
+			self.terminated = true;
 		}
 		Ok(())
 	}
