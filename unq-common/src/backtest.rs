@@ -434,13 +434,13 @@ impl<'a> Backtest<'a> {
 		let asset = &position.asset;
 		let bid;
 		if asset.asset_type == AssetType::Futures {
-			let (value, position_bid, fees) = self.get_position_value(&position, count, enable_fees)?;
+			let (value, profit, position_bid, fees) = self.get_position_value(&position, count, enable_fees)?;
 			bid = position_bid;
 			self.cash += value;
 			self.fees += fees;
 			let profit_duration_stats = ProfitDurationStats {
 				side: position.side.clone(),
-				profit: value,
+				profit,
 				bars_in_trade: position.bars_in_trade
 			};
 			self.profit_duration_stats.push(profit_duration_stats);
@@ -627,14 +627,14 @@ impl<'a> Backtest<'a> {
 		let position_value: f64 = self.positions
 			.iter()
 			.map(|position| self.get_position_value(position, position.count, enable_fees)
-				.map(|(value, _, _)| value)
+				.map(|(value, _, _, _)| value)
 				.unwrap_or(0.0))
 			.sum();
 		let account_value = self.cash + position_value;
 		account_value
 	}
 
-	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64, f64)> {
+	fn get_position_value(&self, position: &Position, count: u32, enable_fees: bool) -> Result<(f64, f64, f64, f64)> {
 		let asset = &position.asset;
 		/*
 		This is a questionable workaround for holidays on which lots of CME futures are not being traded,
@@ -645,18 +645,18 @@ impl<'a> Backtest<'a> {
 		let margin = (position.count as f64) * position.margin;
 		let bid = record.close;
 		let ticks = (count as f64) * (bid - position.price) / asset.tick_size;
-		let mut gain = ticks * asset.tick_value;
+		let mut profit = ticks * asset.tick_value;
 		if position.side == PositionSide::Short {
-			gain = - gain;
+			profit = -profit;
 		}
-		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), gain)?;
+		let (gain_usd, forex_fee) = self.convert_currency(&asset.currency, &FOREX_USD.to_string(), profit)?;
 		let fees = if enable_fees {
 			forex_fee + asset.broker_fee + asset.exchange_fee
 		} else {
 			0.0
 		};
 		let value = margin + gain_usd - fees;
-		Ok((value, bid, fees))
+		Ok((value, profit, bid, fees))
 	}
 
 	fn get_account_margin(&self, overnight: bool) -> f64 {
