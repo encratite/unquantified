@@ -10,6 +10,7 @@ use crate::globex::GlobexCode;
 use crate::manager::CsvTimeSeries;
 use crate::OhlcArchive;
 use crate::ohlc::{OhlcRecord, TimeFrame};
+use crate::stats::{mean, standard_deviation_mean};
 use crate::web::WebF64;
 
 const FOREX_USD: &str = "USD";
@@ -816,37 +817,13 @@ impl<'a> Backtest<'a> {
 		Ok(())
 	}
 
-	fn mean(samples: &Vec<f64>) -> Result<f64> {
-		let sum: f64 = samples.iter().sum();
-		let n = samples.len();
-		if n < 1 {
-			bail!("Not enough samples to calculate mean");
-		}
-		let mean = sum / (n as f64);
-		Ok(mean)
-	}
-
-	fn standard_deviation(samples: &Vec<f64>, mean: f64) -> Result<f64> {
-		let mut delta_sum = 0.0;
-		for x in samples {
-			let delta = x - mean;
-			delta_sum += delta * delta;
-		}
-		let n = samples.len();
-		if n < 2 {
-			bail!("Not enough samples to calculate standard deviation");
-		}
-		let standard_deviation = (delta_sum / ((n - 1) as f64)).sqrt();
-		Ok(standard_deviation)
-	}
-
 	fn mean_nan(samples: &Vec<f64>) -> f64 {
-		let mean = Self::mean(samples);
+		let mean = mean(samples);
 		Self::error_to_nan(mean)
 	}
 
 	fn standard_deviation_nan(samples: &Vec<f64>, mean: f64) -> f64 {
-		let standard_deviation = Self::standard_deviation(samples, mean);
+		let standard_deviation = standard_deviation_mean(samples, mean);
 		Self::error_to_nan(standard_deviation)
 	}
 

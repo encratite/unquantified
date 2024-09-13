@@ -4,6 +4,7 @@ pub mod ohlc;
 pub mod globex;
 pub mod strategy;
 pub mod web;
+pub mod stats;
 mod panama;
 
 use std::{fs, fs::File, path::PathBuf};
