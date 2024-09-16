@@ -1,6 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::iter;
-use std::sync::Mutex;
 use anyhow::{Result, bail};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
@@ -8,7 +8,7 @@ use unq_common::strategy::{Strategy, StrategyParameters};
 pub struct BuyAndHoldStrategy<'a> {
 	remaining_symbols: HashMap<String, u32>,
 	side: PositionSide,
-	backtest: &'a Mutex<Backtest<'a>>
+	backtest: &'a RefCell<Backtest<'a>>
 }
 
 /*
@@ -23,7 +23,7 @@ By default, all positions are long and one contract of each asset is held, but t
 This would change the number of contracts for NG and CL to 2 each.
 */
 impl<'a> BuyAndHoldStrategy<'a> {
-	fn new(symbols: Vec<String>, contracts: Vec<u32>, side: PositionSide, backtest: &'a Mutex<Backtest<'a>>) -> Result<BuyAndHoldStrategy<'a>> {
+	fn new(symbols: Vec<String>, contracts: Vec<u32>, side: PositionSide, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		if symbols.is_empty() {
 			bail!("Need at least one symbol");
 		}
@@ -38,7 +38,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 			};
 			remaining_symbols.insert(symbol.clone(), *count);
 		}
-		let strategy = BuyAndHoldStrategy {
+		let strategy = Self {
 			remaining_symbols,
 			side,
 			backtest
@@ -46,7 +46,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a Mutex<Backtest<'a>>) -> Result<BuyAndHoldStrategy<'a>> {
+	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let contracts: Vec<u32> = match parameters.get_values("contracts")? {
 			Some(count) => count
 				.iter()
@@ -72,7 +72,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 
 impl<'a> Strategy for BuyAndHoldStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
-		let mut backtest = self.backtest.lock().unwrap();
+		let mut backtest = self.backtest.borrow_mut();
 		// Try to create all positions in each iteration, just in case we're dealing with illiquid assets and intraday data
 		for (symbol, contract_count) in self.remaining_symbols.clone() {
 			let result = backtest.open_position(&symbol, contract_count, self.side.clone());

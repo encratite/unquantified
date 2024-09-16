@@ -818,12 +818,12 @@ impl<'a> Backtest<'a> {
 	}
 
 	fn mean_nan(samples: &Vec<f64>) -> f64 {
-		let mean = mean(samples);
+		let mean = mean(samples.iter());
 		Self::error_to_nan(mean)
 	}
 
 	fn standard_deviation_nan(samples: &Vec<f64>, mean: f64) -> f64 {
-		let standard_deviation = standard_deviation_mean(samples, mean);
+		let standard_deviation = standard_deviation_mean(samples.iter(), mean);
 		Self::error_to_nan(standard_deviation)
 	}
 

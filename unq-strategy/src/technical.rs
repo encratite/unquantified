@@ -1,164 +1,514 @@
+use std::collections::VecDeque;
 use anyhow::{bail, Result};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::{mean, standard_deviation_mean_biased};
 
-const MACD_SIGNAL_PERIOD: usize = 9;
-const MACD_FAST_PERIOD: usize = 12;
-const MACD_SLOW_PERIOD: usize = 26;
-
-pub fn momentum(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	if period > records.len() {
-		bail!("Not enough samples to calculate MOM({period})");
-	}
-	let momentum = records[0].close / records[period - 1].close - 1.0;
-	Ok(momentum)
+pub enum TradeSignal {
+	Long,
+	Hold,
+	Short
 }
 
-pub fn simple_moving_average(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	if period > records.len() {
-		bail!("Not enough samples to calculate SMA({period})");
-	}
-	let sum: f64 = records
-		.iter()
-		.take(period)
-		.map(|x| x.close)
-		.sum();
-	let average = sum / (period as f64);
-	Ok(average)
+pub trait Indicator {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal>;
 }
 
-pub fn weighted_moving_average(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	if period > records.len() {
-		bail!("Not enough samples to calculate LMA({period})");
-	}
-	let mut average = 0.0;
-	let mut i = 0;
-	for x in records.iter().take(period) {
-		average += ((period - i) as f64) * x.close;
-		i += 1;
-	}
-	average /= ((period * (period + 1)) as f64) / 2.0;
-	Ok(average)
+pub trait MovingAverageCalculation {
+	fn calculate(&self, period: usize) -> f64;
 }
 
-pub fn exponential_moving_average(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	let closes = get_closes(records);
-	let ema = exponential_internal(closes, period);
-	Ok(ema)
+struct IndicatorBuffer {
+	buffer: VecDeque<f64>,
+	size: usize
 }
 
-pub fn average_true_range(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	if period + 1 > records.len() {
-		bail!("Not enough samples to calculate ATR({period})");
-	}
-	let mut sum = 0.0;
-	for window in records.windows(2).take(period) {
-		let [x, x_previous] = window else {
-			bail!("Invalid window shape");
-		};
-		let part1 = x.high - x.low;
-		let part2 = (x.high - x_previous.close).abs();
-		let part3 = (x.low - x_previous.close).abs();
-		let true_range = part1.max(part2).max(part3);
-		sum += true_range;
-	}
-	let average = sum / (period as f64);
-	Ok(average)
-}
-
-pub fn normalized_true_range(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	let average = average_true_range(records, period)?;
-	let normalized = average / records[0].close;
-	Ok(normalized)
-}
-
-pub fn relative_strength_index(records: &Vec<&OhlcRecord>, period: usize) -> Result<f64> {
-	if period + 1 > records.len() {
-		bail!("Not enough samples to calculate RSI({period})");
-	}
-	let mut up = Vec::new();
-	let mut down = Vec::new();
-	for window in records.windows(2).take(period) {
-		let [x, x_previous] = window else {
-			bail!("Invalid window shape");
-		};
-		let difference = x.close - x_previous.close;
-		if difference >= 0.0 {
-			up.push(difference)
-		} else {
-			down.push(difference)
+impl IndicatorBuffer {
+	pub fn new(size: usize) -> Self {
+		Self {
+			buffer: VecDeque::new(),
+			size
 		}
 	}
-	let up_ema = exponential_internal(up, period);
-	let down_ema = exponential_internal(down, period);
-	let rsi = 100.0 * up_ema / (up_ema + down_ema);
-	Ok(rsi)
-}
 
-pub fn moving_average_convergence(records: &Vec<&OhlcRecord>) -> Result<(f64, f64)> {
-	if records.len() < MACD_SLOW_PERIOD {
-		bail!("Not enough samples to calculate MACD");
+	pub fn with_slow(fast_size: usize, slow_size: Option<usize>) -> Self {
+		let max_size = if let Some(slow) = slow_size {
+			fast_size.max(slow)
+		} else {
+			fast_size
+		};
+		Self {
+			buffer: VecDeque::new(),
+			size: max_size
+		}
 	}
-	let signal = exponential_moving_average(records, MACD_SIGNAL_PERIOD)?;
-	let fast_ema = exponential_moving_average(records, MACD_FAST_PERIOD)?;
-	let slow_ema = exponential_moving_average(records, MACD_SLOW_PERIOD)?;
-	let macd = fast_ema - slow_ema;
-	Ok((signal, macd))
-}
 
-pub fn percentage_price_oscillator(records: &Vec<&OhlcRecord>) -> Result<(f64, f64)> {
-	if records.len() < MACD_SIGNAL_PERIOD + MACD_SLOW_PERIOD {
-		bail!("Not enough samples to calculate PPO");
+	pub fn add(&mut self, sample: f64) -> bool {
+		self.buffer.push_back(sample);
+		if self.buffer.len() > self.size {
+			self.buffer.pop_front();
+			true
+		} else {
+			false
+		}
 	}
-	let windows = records
-		.windows(MACD_SLOW_PERIOD)
-		.take(MACD_SIGNAL_PERIOD);
-	let ppo_samples = windows
-		.map(|window| {
-			let ppo_records = window.iter().cloned().collect();
-			percentage_price_internal(&ppo_records)
-		})
-		.collect::<Result<Vec<f64>>>()?;
-	let ppo = ppo_samples[0];
-	let signal = exponential_internal(ppo_samples, MACD_SIGNAL_PERIOD);
-	Ok((signal, ppo))
+
+	pub fn average(&self) -> f64 {
+		let sum: f64 = self.buffer.iter().sum();
+		let average = sum / (self.buffer.len() as f64);
+		average
+	}
+
+	pub fn filled(&self) -> bool {
+		self.buffer.len() >= self.size
+	}
 }
 
-pub fn bollinger_bands(records: &Vec<&OhlcRecord>, period: usize, multiplier: f64) -> Result<(f64, f64, f64)> {
-	let signal = exponential_moving_average(records, period)?;
-	let closes = get_closes(records);
-	let mean = mean(&closes)?;
-	let standard_deviation = standard_deviation_mean_biased(&closes, mean)?;
-	let upper = mean + multiplier * standard_deviation;
-	let lower = mean - multiplier * standard_deviation;
-	Ok((signal, upper, lower))
+pub struct MomentumIndicator {
+	period: usize,
+	long_threshold: f64,
+	short_threshold: f64,
+	buffer: IndicatorBuffer
 }
 
-fn get_closes(records: &Vec<&OhlcRecord>) -> Vec<f64> {
-	let closes = records
-		.iter()
-		.map(|x| x.close)
-		.collect::<Vec<f64>>();
-	closes
+impl MomentumIndicator {
+	pub fn new(period: usize, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+		validate_parameters(period, long_threshold, short_threshold)?;
+		let output = Self {
+			period,
+			long_threshold,
+			short_threshold,
+			buffer: IndicatorBuffer::new(period)
+		};
+		Ok(output)
+	}
 }
 
-fn exponential_internal(records: Vec<f64>, period: usize) -> f64 {
+impl Indicator for MomentumIndicator {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let filled = self.buffer.add(record.close);
+		if !filled {
+			return None;
+		}
+		let buffer = &self.buffer.buffer;
+		let first = buffer.front().unwrap();
+		let last = buffer.iter().last().unwrap();
+		let momentum = first / last - 1.0;
+		translate_signal(momentum, self.long_threshold, - self.long_threshold)
+	}
+}
+
+struct MovingAverage {
+	fast_period: usize,
+	slow_period: Option<usize>,
+	long_threshold: f64,
+	short_threshold: f64,
+	buffer: IndicatorBuffer
+}
+
+impl MovingAverage {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+		validate_parameters(fast_period, long_threshold, short_threshold)?;
+		let output = Self {
+			fast_period,
+			slow_period,
+			long_threshold,
+			short_threshold,
+			buffer: IndicatorBuffer::with_slow(fast_period, slow_period)
+		};
+		Ok(output)
+	}
+
+	fn calculate_next(&mut self, record: &OhlcRecord, calculate: &dyn Fn(usize, &VecDeque<f64>) -> f64) -> Option<TradeSignal> {
+		let filled = self.buffer.add(record.close);
+		if !filled {
+			return None;
+		}
+		let buffer = &self.buffer.buffer;
+		let fast_average = calculate(self.fast_period, buffer);
+		if let Some(slow_period) = self.slow_period {
+			let slow_average = calculate(slow_period, buffer);
+			let difference = fast_average - slow_average;
+			translate_signal(difference, self.long_threshold, self.short_threshold)
+		} else {
+			let price = *buffer.front().unwrap();
+			translate_signal(price, fast_average + self.long_threshold, fast_average - self.short_threshold)
+		}
+	}
+}
+
+pub struct SimpleMovingAverage(MovingAverage);
+
+impl SimpleMovingAverage {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		let output = SimpleMovingAverage(moving_average);
+		Ok(output)
+	}
+}
+
+impl Indicator for SimpleMovingAverage {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
+			let sum: f64 = buffer.iter().take(period).sum();
+			let average = sum / (period as f64);
+			average
+		};
+		self.0.calculate_next(record, &calculate)
+	}
+}
+
+pub struct WeightedMovingAverage(MovingAverage);
+
+impl WeightedMovingAverage {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		let output = WeightedMovingAverage(moving_average);
+		Ok(output)
+	}
+}
+
+impl Indicator for WeightedMovingAverage {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
+			let mut average = 0.0;
+			let mut i = 0;
+			for x in buffer.iter().take(period) {
+				average += ((period - i) as f64) * x;
+				i += 1;
+			}
+			average /= ((period * (period + 1)) as f64) / 2.0;
+			average
+		};
+		self.0.calculate_next(record, &calculate)
+	}
+}
+
+pub struct ExponentialMovingAverage(MovingAverage);
+
+impl ExponentialMovingAverage {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		let output = ExponentialMovingAverage(moving_average);
+		Ok(output)
+	}
+
+	pub fn calculate(period: usize, buffer: &VecDeque<f64>) -> f64 {
+		let mut average = 0.0;
+		let mut i = 0;
+		let lambda = 2.0 / ((period + 1) as f64);
+		for x in buffer.iter().take(period) {
+			average += lambda * (1.0 - lambda).powi(i) * x;
+			i += 1;
+		}
+		average
+	}
+}
+
+impl Indicator for ExponentialMovingAverage {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let calculate = ExponentialMovingAverage::calculate;
+		self.0.calculate_next(record, &calculate)
+	}
+}
+
+pub struct AverageTrueRange {
+	period: usize,
+	multiplier: f64,
+	close_buffer: IndicatorBuffer,
+	true_range_buffer: IndicatorBuffer,
+}
+
+impl AverageTrueRange {
+	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
+		validate_period(period)?;
+		validate_multiplier(multiplier)?;
+		let output = Self {
+			period,
+			multiplier,
+			close_buffer: IndicatorBuffer::new(period),
+			true_range_buffer: IndicatorBuffer::new(period)
+		};
+		Ok(output)
+	}
+}
+
+impl Indicator for AverageTrueRange {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		if let Some(previous_close) = self.close_buffer.buffer.front() {
+			let part1 = record.high - record.low;
+			let part2 = (record.high - previous_close).abs();
+			let part3 = (record.low - previous_close).abs();
+			let true_range = part1.max(part2).max(part3);
+			self.true_range_buffer.add(true_range);
+		}
+		let close = record.close;
+		let close_filled = self.close_buffer.add(close);
+		let true_range_filled = self.true_range_buffer.filled();
+		if close_filled && true_range_filled {
+			let simple_moving_average = self.close_buffer.average();
+			let average_true_range = self.true_range_buffer.average();
+			let multiplier_range = self.multiplier * average_true_range;
+			let upper_band = simple_moving_average + multiplier_range;
+			let lower_band = simple_moving_average - multiplier_range;
+			translate_signal(close, upper_band, lower_band)
+		} else {
+			None
+		}
+	}
+}
+
+pub struct RelativeStrengthIndicator {
+	period: usize,
+	upper_band: f64,
+	lower_band: f64,
+	buffer: IndicatorBuffer,
+}
+
+impl RelativeStrengthIndicator {
+	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
+		validate_parameters(period, high_threshold, low_threshold)?;
+		let output = Self {
+			period,
+			upper_band: high_threshold,
+			lower_band: low_threshold,
+			buffer: IndicatorBuffer::new(period + 1)
+		};
+		Ok(output)
+	}
+
+	fn calculate(&self) -> f64 {
+		let mut up = Vec::new();
+		let mut down = Vec::new();
+		let buffer = &self.buffer.buffer;
+		let mut previous_close = buffer.iter().last().unwrap();
+		for close in buffer.iter().rev() {
+			let difference = close - previous_close;
+			if difference >= 0.0 {
+				up.push(difference)
+			} else {
+				down.push(difference)
+			}
+			previous_close = close;
+		}
+		let up_ema = exponential_moving_average(up.iter(), self.period);
+		let down_ema = exponential_moving_average(down.iter(), self.period);
+		let rsi = 100.0 * up_ema / (up_ema + down_ema);
+		rsi
+	}
+}
+
+impl Indicator for RelativeStrengthIndicator {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let filled = self.buffer.add(record.close);
+		if filled {
+			let rsi = self.calculate();
+			translate_signal(rsi, self.upper_band, self.lower_band)
+		} else {
+			None
+		}
+	}
+}
+
+pub struct MovingAverageConvergence {
+	signal_period: usize,
+	fast_period: usize,
+	slow_period: usize,
+	buffer: IndicatorBuffer
+}
+
+impl MovingAverageConvergence {
+	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
+		validate_signal_parameters(signal_period, fast_period, slow_period)?;
+		let max_period = signal_period.max(fast_period).max(slow_period);
+		let output = Self {
+			signal_period,
+			fast_period,
+			slow_period,
+			buffer: IndicatorBuffer::new(max_period)
+		};
+		Ok(output)
+	}
+
+	fn calculate(&self) -> (f64, f64) {
+		let buffer = &self.buffer.buffer;
+		let signal = exponential_moving_average(buffer.iter(), self.signal_period);
+		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
+		let slow_ema = exponential_moving_average(buffer.iter(), self.slow_period);
+		let macd = fast_ema - slow_ema;
+		(signal, macd)
+	}
+}
+
+impl Indicator for MovingAverageConvergence {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let filled = self.buffer.add(record.close);
+		if filled {
+			let (signal, macd) = self.calculate();
+			translate_signal(signal, macd, macd)
+		} else {
+			None
+		}
+	}
+}
+
+pub struct PercentagePriceOscillator {
+	signal_period: usize,
+	fast_period: usize,
+	slow_period: usize,
+	close_buffer: IndicatorBuffer,
+	ppo_buffer: IndicatorBuffer
+}
+
+impl PercentagePriceOscillator {
+	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
+		validate_signal_parameters(signal_period, fast_period, slow_period)?;
+		let close_buffer_size = fast_period.max(slow_period);
+		let output = Self {
+			signal_period,
+			fast_period,
+			slow_period,
+			close_buffer: IndicatorBuffer::new(close_buffer_size),
+			ppo_buffer: IndicatorBuffer::new(signal_period)
+		};
+		Ok(output)
+	}
+
+	fn calculate(&self) -> f64 {
+		let buffer = &self.close_buffer.buffer;
+		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
+		let slow_ema = exponential_moving_average(buffer.iter(), self.slow_period);
+		let ppo = 100.0 * (fast_ema - slow_ema) / slow_ema;
+		ppo
+	}
+}
+
+impl Indicator for PercentagePriceOscillator {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let close_filled = self.close_buffer.add(record.close);
+		if !close_filled {
+			return None;
+		}
+		let ppo = self.calculate();
+		let ppo_filled = self.ppo_buffer.add(ppo);
+		if !ppo_filled {
+			return None;
+		}
+		let signal = exponential_moving_average(self.ppo_buffer.buffer.iter(), self.signal_period);
+		translate_signal(signal, ppo, ppo)
+	}
+}
+
+pub struct BollingerBands {
+	period: usize,
+	multiplier: f64,
+	buffer: IndicatorBuffer
+}
+
+impl BollingerBands {
+	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
+		validate_period(period)?;
+		validate_multiplier(multiplier)?;
+		let output = Self {
+			period,
+			multiplier,
+			buffer: IndicatorBuffer::new(period)
+		};
+		Ok(output)
+	}
+
+	fn calculate(&self) -> (f64, f64, f64) {
+		let buffer = &self.buffer.buffer;
+		let signal = exponential_moving_average(buffer.iter(), self.period);
+		let mean = mean(buffer.iter()).unwrap();
+		let standard_deviation = standard_deviation_mean_biased(buffer.iter(), mean).unwrap();
+		let upper = mean + self.multiplier * standard_deviation;
+		let lower = mean - self.multiplier * standard_deviation;
+		(signal, upper, lower)
+	}
+}
+
+impl Indicator for BollingerBands {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let filled = self.buffer.add(record.close);
+		if filled {
+			let (signal, upper, lower) = self.calculate();
+			translate_signal(signal, upper, lower)
+		} else {
+			None
+		}
+	}
+}
+
+fn exponential_moving_average<'a, I>(records: I, period: usize) -> f64
+where
+	I: Iterator<Item = &'a f64>
+{
 	let mut average = 0.0;
 	let mut i = 0;
 	let lambda = 2.0 / ((period + 1) as f64);
-	for x in records {
+	for x in records.take(period) {
 		average += lambda * (1.0 - lambda).powi(i) * x;
 		i += 1;
 	}
 	average
 }
 
-fn percentage_price_internal(records: &Vec<&OhlcRecord>) -> Result<f64> {
-	if records.len() < MACD_SLOW_PERIOD {
-		bail!("Not enough samples to calculate PPO");
+fn validate_thresholds(long_threshold: f64, short_threshold: f64) -> Result<()> {
+	if long_threshold < 0.0 {
+		bail!("Invalid long threshold ({long_threshold}) for indicator, must be >= 0");
 	}
-	let fast_ema = exponential_moving_average(records, MACD_FAST_PERIOD)?;
-	let slow_ema = exponential_moving_average(records, MACD_SLOW_PERIOD)?;
-	let ppo = 100.0 * (fast_ema - slow_ema) / slow_ema;
-	Ok(ppo)
+	if short_threshold < 0.0 {
+		bail!("Invalid short threshold ({short_threshold}) for indicator, must >= 0");
+	}
+	Ok(())
+}
+
+fn validate_period(period: usize) -> Result<()> {
+	if period < 2 {
+		bail!("Invalid period for indicator");
+	}
+	Ok(())
+}
+
+fn validate_parameters(period: usize, long_threshold: f64, short_threshold: f64) -> Result<()> {
+	validate_period(period)?;
+	validate_thresholds(long_threshold, short_threshold)
+}
+
+fn validate_fast_slow_parameters(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<()> {
+	if let Some(slow) = slow_period {
+		validate_period(fast_period)?;
+		validate_period(slow)?;
+		if slow >= fast_period {
+			bail!("Invalid combination of fast period ({fast_period}) and slow period ({slow}) for indicator");
+		}
+		validate_thresholds(long_threshold, short_threshold)?;
+	} else {
+		validate_parameters(fast_period, long_threshold, short_threshold)?;
+	}
+	Ok(())
+}
+
+fn validate_signal_parameters(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<()> {
+	if signal_period >= fast_period || fast_period >= slow_period {
+		bail!("Invalid combination of signal periods ({signal_period}, {fast_period}, {slow_period})");
+	}
+	Ok(())
+}
+
+fn validate_multiplier(multiplier: f64) -> Result<()> {
+	if multiplier < 0.1 {
+		bail!("Multiplier ({multiplier}) is too low");
+	}
+	Ok(())
+}
+
+fn translate_signal(signal: f64, long_threshold: f64, short_threshold: f64) -> Option<TradeSignal> {
+	if signal > long_threshold {
+		Some(TradeSignal::Long)
+	} else if signal < short_threshold {
+		Some(TradeSignal::Short)
+	} else {
+		Some(TradeSignal::Hold)
+	}
 }

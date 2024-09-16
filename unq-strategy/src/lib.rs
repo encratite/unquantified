@@ -1,13 +1,16 @@
-mod buy_and_hold;
 mod technical;
+mod strategy {
+	pub mod buy_and_hold;
+	pub mod indicator;
+}
 
-use std::sync::Mutex;
+use std::cell::RefCell;
 use anyhow::{Result, bail};
 use unq_common::backtest::Backtest;
 use unq_common::strategy::{Strategy, StrategyParameters};
-use crate::buy_and_hold::BuyAndHoldStrategy;
+use crate::strategy::buy_and_hold::BuyAndHoldStrategy;
 
-pub fn get_strategy<'a>(name: &String, symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a Mutex<Backtest<'a>>) -> Result<Box<dyn Strategy + 'a>> {
+pub fn get_strategy<'a>(name: &String, symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Box<dyn Strategy + 'a>> {
 	match name.as_str() {
 		"buy and hold" => {
 			let strategy = BuyAndHoldStrategy::from_parameters(symbols, parameters, backtest)?;

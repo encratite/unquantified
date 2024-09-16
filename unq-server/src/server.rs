@@ -1,5 +1,5 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use std::sync::Mutex;
+use std::cell::RefCell;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -270,17 +270,17 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
 	let backtest = Backtest::new(from, to, request.time_frame, backtest_configuration.clone(), asset_manager)?;
-	let backtest_mutex = Mutex::new(backtest);
+	let backtest_refcell = RefCell::new(backtest);
 	let parameters = StrategyParameters(request.parameters);
-	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_mutex)?;
+	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_refcell)?;
 	let mut done = false;
 	while !done {
 		strategy.next()?;
-		let mut backtest_mut = backtest_mutex.lock().unwrap();
+		let mut backtest_mut = backtest_refcell.borrow_mut();
 		done = backtest_mut.next()?;
 	}
 	let result;
-	let backtest = backtest_mutex.lock().unwrap();
+	let backtest = backtest_refcell.borrow_mut();
 	result = backtest.get_result()?;
 	Ok(result)
 }
