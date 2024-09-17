@@ -13,10 +13,6 @@ pub trait Indicator {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal>;
 }
 
-pub trait MovingAverageCalculation {
-	fn calculate(&self, period: usize) -> f64;
-}
-
 struct IndicatorBuffer {
 	buffer: VecDeque<f64>,
 	size: usize
