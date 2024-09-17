@@ -1,6 +1,17 @@
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
+#[derive(PartialEq, Debug)]
+pub enum StrategyParameterType {
+	NumericSingle,
+	NumericMulti,
+	NumericRange,
+	Bool,
+	String
+}
+
+type StrategyParameterSelect<'a, T> = &'a dyn Fn(&StrategyParameter) -> Option<T>;
+
 pub trait Strategy {
 	fn next(&mut self) -> Result<()>;
 }
@@ -37,35 +48,31 @@ pub struct StrategyParameter {
 	pub limit: Option<f64>,
 	pub increment: Option<f64>,
 	pub values: Option<Vec<f64>>,
-	pub bool_value: Option<bool>
+	pub bool_value: Option<bool>,
+	pub string_value: Option<String>
 }
 
 pub struct StrategyParameters(pub Vec<StrategyParameter>);
 
 impl StrategyParameter {
-	pub fn sanity_check(&self) -> Result<()> {
+	pub fn get_type(&self) -> Result<StrategyParameterType> {
 		let tuple = (
 			self.value.is_some(),
 			self.limit.is_some(),
 			self.increment.is_some(),
 			self.values.is_some(),
-			self.bool_value.is_some()
+			self.bool_value.is_some(),
+			self.string_value.is_some()
 		);
 		match tuple {
-			(true, false, false, false, false) |
-			(true, true, false, false, false) |
-			(true, true, true, false, false) |
-			(false, false, false, true, false) |
-			(false, false, false, false, true) => Ok(()),
+			(true, false, false, false, false, false) => Ok(StrategyParameterType::NumericSingle),
+			(true, true, false, false, false, false) => Ok(StrategyParameterType::NumericRange),
+			(true, true, true, false, false, false) => Ok(StrategyParameterType::NumericRange),
+			(false, false, false, true, false, false) => Ok(StrategyParameterType::NumericMulti),
+			(false, false, false, false, true, false) => Ok(StrategyParameterType::Bool),
+			(false, false, false, false, false, true) => Ok(StrategyParameterType::String),
 			_ => bail!("Invalid combination of values in strategy parameter")
 		}
-	}
-
-	pub fn not_bool_check(&self) -> Result<()> {
-		if self.bool_value.is_some() {
-			bail!("Parameter \"{}\" cannot take a boolean value", self.name);
-		}
-		Ok(())
 	}
 }
 
@@ -75,46 +82,46 @@ impl StrategyParameters {
 	}
 
 	pub fn get_value(&self, name: &str) -> Result<Option<f64>> {
-		match self.get_parameter(name) {
-			Some(parameter) => {
-				if parameter.values.is_some() {
-					bail!("Cannot specify multiple values for parameter \"{name}\"");
-				}
-				parameter.not_bool_check()?;
-				Ok(parameter.value)
-			}
-			None => Ok(None)
-		}
+		let select: StrategyParameterSelect<f64> = &|parameter| parameter.value;
+		self.get_typed_parameter(name, StrategyParameterType::NumericSingle, select)
 	}
 
 	pub fn get_values(&self, name: &str) -> Result<Option<Vec<f64>>> {
-		match self.get_parameter(name) {
-			Some(parameter) => {
-				parameter.not_bool_check()?;
-				match parameter.value {
-					Some(value) => Ok(Some(vec![value])),
-					None => Ok(parameter.values.clone())
-				}
+		if let Some(parameter) = self.get_parameter(name) {
+			match parameter.get_type()? {
+				StrategyParameterType::NumericSingle => Ok(Some(vec![parameter.value.unwrap()])),
+				StrategyParameterType::NumericMulti => Ok(parameter.values.clone()),
+				other => bail!("Found parameter type \"{other:?}\", expected a numeric type")
 			}
-			None => Ok(None)
+		} else {
+			Ok(None)
 		}
 	}
 
 	pub fn get_bool(&self, name: &str) -> Result<Option<bool>> {
-		match self.get_parameter(name) {
-			Some(parameter) => {
-				if parameter.value.is_some() || parameter.values.is_some() {
-					bail!("Invalid value specified for boolean parameter \"{name}\"");
-				}
-				Ok(parameter.bool_value)
-			}
-			None => Ok(None)
-		}
+		let select: StrategyParameterSelect<bool> = &|parameter| parameter.bool_value;
+		self.get_typed_parameter(name, StrategyParameterType::Bool, select)
+	}
+
+	pub fn get_string(&self, name: &str) -> Result<Option<String>> {
+		let select: StrategyParameterSelect<String> = &|parameter| parameter.string_value.clone();
+		self.get_typed_parameter(name, StrategyParameterType::String, select)
 	}
 
 	fn get_parameter(&self, name: &str) -> Option<&StrategyParameter> {
 		self.0
 			.iter()
 			.find(|x| x.name.as_str() == name)
+	}
+
+	fn get_typed_parameter<T>(&self, name: &str, expected_type: StrategyParameterType, select: StrategyParameterSelect<T>) -> Result<Option<T>> {
+		if let Some(parameter) = self.get_parameter(name) {
+			match parameter.get_type()? {
+				StrategyParameterType::String => Ok(select(parameter)),
+				other => bail!("Found parameter type \"{other:?}\", expected \"{expected_type:?}\"")
+			}
+		} else {
+			Ok(None)
+		}
 	}
 }
