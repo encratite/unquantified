@@ -3,6 +3,7 @@ use anyhow::{bail, Result};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::{mean, standard_deviation_mean_biased};
 
+#[derive(PartialEq)]
 pub enum TradeSignal {
 	Long,
 	Hold,
@@ -11,8 +12,10 @@ pub enum TradeSignal {
 
 pub trait Indicator {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal>;
+	fn clone_box(&self) -> Box<dyn Indicator>;
 }
 
+#[derive(Clone)]
 struct IndicatorBuffer {
 	buffer: VecDeque<f64>,
 	size: usize
@@ -59,8 +62,8 @@ impl IndicatorBuffer {
 	}
 }
 
+#[derive(Clone)]
 pub struct MomentumIndicator {
-	period: usize,
 	long_threshold: f64,
 	short_threshold: f64,
 	buffer: IndicatorBuffer
@@ -70,7 +73,6 @@ impl MomentumIndicator {
 	pub fn new(period: usize, long_threshold: f64, short_threshold: f64) -> Result<Self> {
 		validate_parameters(period, long_threshold, short_threshold)?;
 		let output = Self {
-			period,
 			long_threshold,
 			short_threshold,
 			buffer: IndicatorBuffer::new(period)
@@ -89,10 +91,15 @@ impl Indicator for MomentumIndicator {
 		let first = buffer.front().unwrap();
 		let last = buffer.iter().last().unwrap();
 		let momentum = first / last - 1.0;
-		translate_signal(momentum, self.long_threshold, - self.long_threshold)
+		translate_signal(momentum, self.long_threshold, - self.short_threshold)
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
 	}
 }
 
+#[derive(Clone)]
 struct MovingAverage {
 	fast_period: usize,
 	slow_period: Option<usize>,
@@ -103,7 +110,7 @@ struct MovingAverage {
 
 impl MovingAverage {
 	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		validate_parameters(fast_period, long_threshold, short_threshold)?;
+		validate_fast_slow_parameters(fast_period, slow_period, long_threshold, short_threshold)?;
 		let output = Self {
 			fast_period,
 			slow_period,
@@ -132,6 +139,7 @@ impl MovingAverage {
 	}
 }
 
+#[derive(Clone)]
 pub struct SimpleMovingAverage(MovingAverage);
 
 impl SimpleMovingAverage {
@@ -151,8 +159,13 @@ impl Indicator for SimpleMovingAverage {
 		};
 		self.0.calculate_next(record, &calculate)
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct WeightedMovingAverage(MovingAverage);
 
 impl WeightedMovingAverage {
@@ -177,8 +190,13 @@ impl Indicator for WeightedMovingAverage {
 		};
 		self.0.calculate_next(record, &calculate)
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct ExponentialMovingAverage(MovingAverage);
 
 impl ExponentialMovingAverage {
@@ -205,10 +223,14 @@ impl Indicator for ExponentialMovingAverage {
 		let calculate = ExponentialMovingAverage::calculate;
 		self.0.calculate_next(record, &calculate)
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct AverageTrueRange {
-	period: usize,
 	multiplier: f64,
 	close_buffer: IndicatorBuffer,
 	true_range_buffer: IndicatorBuffer,
@@ -219,7 +241,6 @@ impl AverageTrueRange {
 		validate_period(period)?;
 		validate_multiplier(multiplier)?;
 		let output = Self {
-			period,
 			multiplier,
 			close_buffer: IndicatorBuffer::new(period),
 			true_range_buffer: IndicatorBuffer::new(period)
@@ -251,8 +272,13 @@ impl Indicator for AverageTrueRange {
 			None
 		}
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct RelativeStrengthIndicator {
 	period: usize,
 	upper_band: f64,
@@ -303,8 +329,13 @@ impl Indicator for RelativeStrengthIndicator {
 			None
 		}
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct MovingAverageConvergence {
 	signal_period: usize,
 	fast_period: usize,
@@ -345,8 +376,13 @@ impl Indicator for MovingAverageConvergence {
 			None
 		}
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct PercentagePriceOscillator {
 	signal_period: usize,
 	fast_period: usize,
@@ -392,8 +428,13 @@ impl Indicator for PercentagePriceOscillator {
 		let signal = exponential_moving_average(self.ppo_buffer.buffer.iter(), self.signal_period);
 		translate_signal(signal, ppo, ppo)
 	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
 }
 
+#[derive(Clone)]
 pub struct BollingerBands {
 	period: usize,
 	multiplier: f64,
@@ -432,6 +473,10 @@ impl Indicator for BollingerBands {
 		} else {
 			None
 		}
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
 	}
 }
 

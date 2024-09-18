@@ -344,6 +344,20 @@ impl<'a> Backtest<'a> {
 			.with_context(|| anyhow!("Unable to find position with ID {id}"))
 	}
 
+	pub fn get_position_by_root(&self, symbol: &String) -> Option<Position> {
+		self.positions
+			.iter()
+			.find(|x| {
+				if let Some(globex_code) = GlobexCode::new(&x.symbol) {
+					if globex_code.symbol == *symbol {
+						return true;
+					}
+				}
+				false
+			})
+			.cloned()
+	}
+
 	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<&OhlcRecord>> {
 		let root = match parse_globex_code(symbol) {
 			Some((root, _, _)) => root,
@@ -359,6 +373,10 @@ impl<'a> Backtest<'a> {
 			.map(|(_, record)| record)
 			.collect::<Vec<&OhlcRecord>>();
 		Ok(records)
+	}
+
+	pub fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
+		self.get_record(symbol, self.now, true)
 	}
 
 	fn next_internal(&mut self) -> Result<bool> {
@@ -575,10 +593,6 @@ impl<'a> Backtest<'a> {
 
 	fn current_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now, false)
-	}
-
-	fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
-		self.get_record(symbol, self.now, true)
 	}
 
 	fn get_record(&self, symbol: &String, time: NaiveDateTime, most_recent: bool) -> Result<OhlcRecord> {

@@ -1,20 +1,24 @@
 use std::cell::RefCell;
 use anyhow::{bail, Result};
-use unq_common::backtest::Backtest;
+use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
-use crate::technical::{AverageTrueRange, BollingerBands, ExponentialMovingAverage, Indicator, MomentumIndicator, MovingAverageConvergence, PercentagePriceOscillator, RelativeStrengthIndicator, SimpleMovingAverage, WeightedMovingAverage};
+use crate::technical::*;
+
+pub struct SymbolIndicator {
+	symbol: String,
+	contracts: u32,
+	indicator: Box<dyn Indicator>
+}
 
 pub struct IndicatorStrategy<'a> {
-	symbols: Vec<String>,
-	indicator: Box<dyn Indicator>,
+	indicators: Vec<SymbolIndicator>,
 	backtest: &'a RefCell<Backtest<'a>>
 }
 
 impl<'a> IndicatorStrategy<'a> {
-	pub fn new(symbols: Vec<String>, indicator: Box<dyn Indicator>, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(indicators: Vec<SymbolIndicator>, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let strategy = Self {
-			symbols,
-			indicator,
+			indicators,
 			backtest
 		};
 		Ok(strategy)
@@ -108,11 +112,17 @@ impl<'a> IndicatorStrategy<'a> {
 			},
 			other => bail!("Unknown indicator type \"{other}\"")
 		};
-		let strategy = Self {
-			symbols,
-			indicator,
-			backtest
-		};
+		let indicators: Vec<SymbolIndicator> = symbols
+			.iter()
+			.map(|symbol| {
+				SymbolIndicator {
+					symbol: symbol.clone(),
+					contracts: 1,
+					indicator: indicator.clone_box()
+				}
+			})
+			.collect();
+		let strategy = Self::new(indicators, backtest)?;
 		Ok(strategy)
 	}
 
@@ -128,11 +138,54 @@ impl<'a> IndicatorStrategy<'a> {
 		let output = value.map(|x| x as usize);
 		Ok(output)
 	}
+
+	fn trade(&mut self, indicator_index: usize) -> Result<()> {
+		let indicator_data = &mut self.indicators[indicator_index];
+		let mut backtest = self.backtest.borrow_mut();
+		let record = backtest.most_recent_record(&indicator_data.symbol)?;
+		let Some(signal) = indicator_data.indicator.next(&record) else {
+			return Ok(());
+		};
+		if signal == TradeSignal::Hold {
+			return Ok(());
+		}
+		// Hack to make the borrow checker happy
+		let position_data = match backtest.get_position_by_root(&indicator_data.symbol) {
+			Some(position) => Some((position.id, position.count, position.side)),
+			None => None
+		};
+		let target_side = match signal {
+			TradeSignal::Long => PositionSide::Long,
+			TradeSignal::Short => PositionSide::Short,
+			_ => bail!("Unknown trade signal")
+		};
+		if let Some((position_id, position_count, position_side)) = position_data {
+			// We already created a position for this symbol, ensure that the side matches
+			if position_side != target_side {
+				/*
+				Two possibilities:
+				1. We have a long position and the signal is short
+				2. We have a short position and the signal is long
+				Close the position and create a new one, suppressing errors.
+				*/
+				let _ = backtest.close_position(position_id, position_count);
+				let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side.clone());
+			}
+		} else {
+			// Create a new position for the symbol based on the signal
+			// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
+			let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
+		}
+		Ok(())
+	}
 }
 
 impl<'a> Strategy for IndicatorStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
-		let backtest = self.backtest.borrow_mut();
-		todo!()
+		// Hack to make the borrow checker happy
+		for indicator_index in 0..self.indicators.len() {
+			self.trade(indicator_index)?;
+		}
+		Ok(())
 	}
 }
