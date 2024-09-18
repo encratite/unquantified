@@ -116,9 +116,11 @@ impl StrategyParameters {
 
 	fn get_typed_parameter<T>(&self, name: &str, expected_type: StrategyParameterType, select: StrategyParameterSelect<T>) -> Result<Option<T>> {
 		if let Some(parameter) = self.get_parameter(name) {
-			match parameter.get_type()? {
-				StrategyParameterType::String => Ok(select(parameter)),
-				other => bail!("Found parameter type \"{other:?}\", expected \"{expected_type:?}\"")
+			let parameter_type = parameter.get_type()?;
+			if parameter_type == expected_type {
+				 Ok(select(parameter))
+			} else {
+				bail!("Found parameter type \"{parameter_type:?}\", expected \"{expected_type:?}\"")
 			}
 		} else {
 			Ok(None)

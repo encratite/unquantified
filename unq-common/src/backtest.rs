@@ -349,7 +349,7 @@ impl<'a> Backtest<'a> {
 			.iter()
 			.find(|x| {
 				if let Some(globex_code) = GlobexCode::new(&x.symbol) {
-					if globex_code.symbol == *symbol {
+					if globex_code.root == *symbol {
 						return true;
 					}
 				}
@@ -377,6 +377,15 @@ impl<'a> Backtest<'a> {
 
 	pub fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now, true)
+	}
+
+	pub fn log_event(&mut self, event_type: EventType, message: String) {
+		let event = BacktestEvent {
+			time: self.now,
+			event_type,
+			message
+		};
+		self.events.push(event);
 	}
 
 	fn next_internal(&mut self) -> Result<bool> {
@@ -424,7 +433,7 @@ impl<'a> Backtest<'a> {
 				0.0
 			};
 			if initial_margin + fees >= self.cash {
-				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin}");
+				bail!("Not enough cash to open a position with {count} contract(s) of {symbol} with an initial margin requirement of ${initial_margin:.2}");
 			}
 			let cost = (count as f64) * maintenance_margin_usd + fees;
 			self.cash -= cost;
@@ -601,9 +610,16 @@ impl<'a> Backtest<'a> {
 		let get_record = |archive: &OhlcArchive| -> Result<OhlcRecord> {
 			let source = archive.get_data(&self.time_frame);
 			let adjusted = source.get_adjusted_fallback();
-			let record = adjusted.get(&time)
-				.with_context(map_error)?
-				.clone();
+			let record = if most_recent {
+				adjusted.range(..=time)
+					.next_back()
+					.map(|(_, value)| value.clone())
+					.with_context(map_error)?
+			} else {
+				adjusted.get(&time)
+					.with_context(map_error)?
+					.clone()
+			};
 			Ok(record)
 		};
 		if let Some((root, _, _)) = parse_globex_code(&symbol) {
@@ -743,15 +759,6 @@ impl<'a> Backtest<'a> {
 			Some(first_position) => Some((first_position.id, first_position.count)),
 			None => None
 		}
-	}
-
-	fn log_event(&mut self, event_type: EventType, message: String) {
-		let event = BacktestEvent {
-			time: self.now,
-			event_type,
-			message
-		};
-		self.events.push(event);
 	}
 
 	fn close_all_positions(&mut self) -> Result<()> {

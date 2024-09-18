@@ -9,6 +9,7 @@ lazy_static! {
 #[derive(Clone, Eq, PartialEq, PartialOrd)]
 pub struct GlobexCode {
 	pub symbol: String,
+	pub root: String,
 	pub month: String,
 	pub year: u16
 }
@@ -28,7 +29,7 @@ pub fn parse_globex_code(symbol: &String) -> Option<(String, String, String)> {
 
 impl GlobexCode {
 	pub fn new(symbol: &String) -> Option<GlobexCode> {
-		let Some((_, month, year_string)) = parse_globex_code(symbol) else {
+		let Some((root, month, year_string)) = parse_globex_code(symbol) else {
 			return None;
 		};
 		let Ok(year) = str::parse::<u16>(year_string.as_str()) else {
@@ -40,6 +41,7 @@ impl GlobexCode {
 			year + 1900
 		};
 		let globex_code = GlobexCode {
+			root,
 			symbol: symbol.clone(),
 			month,
 			year: adjusted_year
