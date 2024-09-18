@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::iter;
 use anyhow::{Result, bail};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
+use crate::{get_symbol_contracts, SymbolContracts};
 
 pub struct BuyAndHoldStrategy<'a> {
 	remaining_symbols: HashMap<String, u32>,
@@ -23,20 +23,13 @@ By default, all positions are long and one contract of each asset is held, but t
 This would change the number of contracts for NG and CL to 2 each.
 */
 impl<'a> BuyAndHoldStrategy<'a> {
-	fn new(symbols: Vec<String>, contracts: Vec<u32>, side: PositionSide, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
-		if symbols.is_empty() {
+	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+		if symbol_contracts.is_empty() {
 			bail!("Need at least one symbol");
 		}
 		let mut remaining_symbols: HashMap<String, u32> = HashMap::new();
-		let n = symbols.len();
-		for i in 0..n {
-			let Some(symbol) = symbols.get(i) else {
-				bail!("Unable to retrieve symbol");
-			};
-			let Some(count) = contracts.get(i) else {
-				bail!("Missing contract count for symbol");
-			};
-			remaining_symbols.insert(symbol.clone(), *count);
+		for (symbol, contracts) in symbol_contracts {
+			remaining_symbols.insert(symbol.clone(), contracts);
 		}
 		let strategy = Self {
 			remaining_symbols,
@@ -47,15 +40,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 	}
 
 	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
-		let contracts: Vec<u32> = match parameters.get_values("contracts")? {
-			Some(count) => count
-				.iter()
-				.map(|x| *x as u32)
-				.collect(),
-			None => iter::repeat(1)
-				.take(symbols.len())
-				.collect()
-		};
+		let symbol_contracts = get_symbol_contracts(&symbols, parameters)?;
 		let side = match parameters.get_bool("short")? {
 			Some(value) => {
 				if value {
@@ -66,7 +51,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 			},
 			None => PositionSide::Long
 		};
-		Self::new(symbols, contracts, side, backtest)
+		Self::new(symbol_contracts, side, backtest)
 	}
 }
 

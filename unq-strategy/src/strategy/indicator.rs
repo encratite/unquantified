@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use anyhow::{bail, Result};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
+use crate::get_symbol_contracts;
 use crate::technical::*;
 
 pub struct SymbolIndicator {
@@ -118,12 +119,13 @@ impl<'a> IndicatorStrategy<'a> {
 			},
 			other => bail!("Unknown indicator type \"{other}\"")
 		};
-		let indicators: Vec<SymbolIndicator> = symbols
-			.iter()
-			.map(|symbol| {
+		let symbol_contracts = get_symbol_contracts(&symbols, parameters)?;
+		let indicators: Vec<SymbolIndicator> = symbol_contracts
+			.into_iter()
+			.map(|(symbol, contracts)| {
 				SymbolIndicator {
-					symbol: symbol.clone(),
-					contracts: 1,
+					symbol,
+					contracts,
 					indicator: indicator.clone_box()
 				}
 			})
