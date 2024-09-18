@@ -145,36 +145,25 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(output)
 	}
 
-	fn trade(&mut self, indicator_index: usize) -> Result<()> {
-		let indicator_data = &mut self.indicators[indicator_index];
-		let mut backtest = self.backtest.borrow_mut();
-		let record = backtest.most_recent_record(&indicator_data.symbol)?;
-		let Some(signal) = indicator_data.indicator.next(&record) else {
-			return Ok(());
-		};
+	fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &mut Backtest<'a>) -> Result<()> {
 		if signal == TradeSignal::Hold {
 			return Ok(());
 		}
-		// Hack to make the borrow checker happy
-		let position_data = match backtest.get_position_by_root(&indicator_data.symbol) {
-			Some(position) => Some((position.id, position.count, position.side)),
-			None => None
-		};
 		let target_side = match signal {
 			TradeSignal::Long => PositionSide::Long,
 			TradeSignal::Short => PositionSide::Short,
 			_ => bail!("Unknown trade signal")
 		};
-		let open_position = if let Some((position_id, position_count, position_side)) = position_data {
+		let open_position = if let Some(position) = backtest.get_position_by_root(&indicator_data.symbol) {
 			// We already created a position for this symbol, ensure that the side matches
-			if position_side != target_side {
+			if position.side != target_side {
 				/*
 				Two possibilities:
 				1. We have a long position and the signal is short
 				2. We have a short position and the signal is long
 				Close the position and create a new one, suppressing errors.
 				*/
-				let _ = backtest.close_position(position_id, position_count);
+				let _ = backtest.close_position(position.id, position.count);
 				true
 			} else {
 				false
@@ -184,8 +173,8 @@ impl<'a> IndicatorStrategy<'a> {
 			true
 		};
 		if open_position {
-			let long_valid = self.enable_long && target_side == PositionSide::Long;
-			let short_valid = self.enable_short && target_side == PositionSide::Short;
+			let long_valid = enable_long && target_side == PositionSide::Long;
+			let short_valid = enable_short && target_side == PositionSide::Short;
 			if long_valid || short_valid {
 				// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
 				let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
@@ -197,9 +186,13 @@ impl<'a> IndicatorStrategy<'a> {
 
 impl<'a> Strategy for IndicatorStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
-		// Hack to make the borrow checker happy
-		for indicator_index in 0..self.indicators.len() {
-			self.trade(indicator_index)?;
+		for indicator_data in self.indicators.iter_mut() {
+			let mut backtest = self.backtest.borrow_mut();
+			let record = backtest.most_recent_record(&indicator_data.symbol)?;
+			let Some(signal) = indicator_data.indicator.next(&record) else {
+				return Ok(());
+			};
+			Self::trade(signal, self.enable_long, self.enable_short, indicator_data, &mut backtest)?;
 		}
 		Ok(())
 	}
