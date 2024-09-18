@@ -12,13 +12,17 @@ pub struct SymbolIndicator {
 
 pub struct IndicatorStrategy<'a> {
 	indicators: Vec<SymbolIndicator>,
+	enable_long: bool,
+	enable_short: bool,
 	backtest: &'a RefCell<Backtest<'a>>
 }
 
 impl<'a> IndicatorStrategy<'a> {
-	pub fn new(indicators: Vec<SymbolIndicator>, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let strategy = Self {
 			indicators,
+			enable_long,
+			enable_short,
 			backtest
 		};
 		Ok(strategy)
@@ -28,6 +32,8 @@ impl<'a> IndicatorStrategy<'a> {
 		let Some(indicator_string) = parameters.get_string("indicator")? else {
 			bail!("Missing required parameter \"indicator\"");
 		};
+		let enable_long = parameters.get_bool("long")?.unwrap_or(true);
+		let enable_short = parameters.get_bool("short")?.unwrap_or(true);
 		let get_period = |period_opt: Option<usize>| -> Result<usize> {
 			if let Some(period) = period_opt {
 				Ok(period)
@@ -122,7 +128,7 @@ impl<'a> IndicatorStrategy<'a> {
 				}
 			})
 			.collect();
-		let strategy = Self::new(indicators, backtest)?;
+		let strategy = Self::new(indicators, enable_long, enable_short, backtest)?;
 		Ok(strategy)
 	}
 
@@ -159,7 +165,7 @@ impl<'a> IndicatorStrategy<'a> {
 			TradeSignal::Short => PositionSide::Short,
 			_ => bail!("Unknown trade signal")
 		};
-		if let Some((position_id, position_count, position_side)) = position_data {
+		let open_position = if let Some((position_id, position_count, position_side)) = position_data {
 			// We already created a position for this symbol, ensure that the side matches
 			if position_side != target_side {
 				/*
@@ -169,12 +175,21 @@ impl<'a> IndicatorStrategy<'a> {
 				Close the position and create a new one, suppressing errors.
 				*/
 				let _ = backtest.close_position(position_id, position_count);
-				let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side.clone());
+				true
+			} else {
+				false
 			}
 		} else {
 			// Create a new position for the symbol based on the signal
-			// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
-			let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
+			true
+		};
+		if open_position {
+			let long_valid = self.enable_long && target_side == PositionSide::Long;
+			let short_valid = self.enable_short && target_side == PositionSide::Short;
+			if long_valid || short_valid {
+				// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
+				let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
+			}
 		}
 		Ok(())
 	}

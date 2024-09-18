@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::{mean, standard_deviation_mean_biased};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum TradeSignal {
 	Long,
 	Hold,
@@ -29,7 +29,7 @@ impl IndicatorBuffer {
 		}
 	}
 
-	pub fn with_slow(fast_size: usize, slow_size: Option<usize>) -> Self {
+	pub fn with_slow(fast_size: usize, slow_size: Option<usize>, multiplier: usize) -> Self {
 		let max_size = if let Some(slow) = slow_size {
 			fast_size.max(slow)
 		} else {
@@ -37,7 +37,7 @@ impl IndicatorBuffer {
 		};
 		Self {
 			buffer: VecDeque::new(),
-			size: max_size
+			size: multiplier * max_size
 		}
 	}
 
@@ -109,14 +109,17 @@ struct MovingAverage {
 }
 
 impl MovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64, buffer_size_multiplier: usize) -> Result<Self> {
+		if buffer_size_multiplier < 1 || buffer_size_multiplier > 5 {
+			bail!("Invalid buffer size multiplier specified ({buffer_size_multiplier}");
+		}
 		validate_fast_slow_parameters(fast_period, slow_period, long_threshold, short_threshold)?;
 		let output = Self {
 			fast_period,
 			slow_period,
 			long_threshold,
 			short_threshold,
-			buffer: IndicatorBuffer::with_slow(fast_period, slow_period)
+			buffer: IndicatorBuffer::with_slow(fast_period, slow_period, buffer_size_multiplier)
 		};
 		Ok(output)
 	}
@@ -128,14 +131,14 @@ impl MovingAverage {
 		}
 		let buffer = &self.buffer.buffer;
 		let fast_average = calculate(self.fast_period, buffer);
-		if let Some(slow_period) = self.slow_period {
+		let difference = if let Some(slow_period) = self.slow_period {
 			let slow_average = calculate(slow_period, buffer);
-			let difference = fast_average - slow_average;
-			translate_signal(difference, self.long_threshold, self.short_threshold)
+			fast_average - slow_average
 		} else {
 			let price = *buffer.front().unwrap();
-			translate_signal(price, fast_average + self.long_threshold, fast_average - self.short_threshold)
-		}
+			price - fast_average
+		};
+		translate_signal(difference, self.long_threshold, - self.short_threshold)
 	}
 }
 
@@ -144,7 +147,7 @@ pub struct SimpleMovingAverage(MovingAverage);
 
 impl SimpleMovingAverage {
 	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 1)?;
 		let output = SimpleMovingAverage(moving_average);
 		Ok(output)
 	}
@@ -170,7 +173,7 @@ pub struct WeightedMovingAverage(MovingAverage);
 
 impl WeightedMovingAverage {
 	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 1)?;
 		let output = WeightedMovingAverage(moving_average);
 		Ok(output)
 	}
@@ -201,19 +204,25 @@ pub struct ExponentialMovingAverage(MovingAverage);
 
 impl ExponentialMovingAverage {
 	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold)?;
+		// Increase the buffer size to twice the normal size for moving averages
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 2)?;
 		let output = ExponentialMovingAverage(moving_average);
 		Ok(output)
 	}
 
 	pub fn calculate(period: usize, buffer: &VecDeque<f64>) -> f64 {
-		let mut average = 0.0;
+		let mut sum = 0.0;
+		let mut coefficient_sum = 0.0;
 		let mut i = 0;
 		let lambda = 2.0 / ((period + 1) as f64);
 		for x in buffer.iter().take(period) {
-			average += lambda * (1.0 - lambda).powi(i) * x;
+			let coefficient = lambda * (1.0 - lambda).powi(i);
+			sum += coefficient * x;
+			coefficient_sum += coefficient;
 			i += 1;
 		}
+		// Normalize the weights to 1.0 to avoid P-EMA distortion with limited buffer size
+		let average = sum / coefficient_sum;
 		average
 	}
 }
@@ -520,7 +529,7 @@ fn validate_fast_slow_parameters(fast_period: usize, slow_period: Option<usize>,
 	if let Some(slow) = slow_period {
 		validate_period(fast_period)?;
 		validate_period(slow)?;
-		if slow >= fast_period {
+		if slow <= fast_period {
 			bail!("Invalid combination of fast period ({fast_period}) and slow period ({slow}) for indicator");
 		}
 		validate_thresholds(long_threshold, short_threshold)?;

@@ -180,6 +180,7 @@ export class WebUi {
 		const generalTableLeft = [
 			["Net profit", this.formatCurrency(result.profit)],
 			["Annual average profit", this.formatCurrency(result.annualAverageProfit)],
+			["Starting capital", this.formatCurrency(result.startingCash)],
 			["Total return", this.formatPercentage(result.totalReturn)],
 			["Compound annual growth rate", this.formatPercentage(result.compoundAnnualGrowthRate)],
 			["Interest accumulated", this.formatCurrency(result.interest)],
@@ -192,6 +193,7 @@ export class WebUi {
 			["Sortino ratio", this.formatNumber(result.sortinoRatio, ratioDigits, true)],
 			["Calmar ratio", this.formatNumber(result.calmarRatio, ratioDigits, true)],
 			["Max drawdown", this.formatPercentage(zeroToNull(result.maxDrawdown), false, maxDrawdownEnableColor)],
+			["Fees paid", this.formatCurrency(result.fees)],
 			["Fees per profit", this.formatPercentage(zeroToNull(result.feesPercent), false, false)],
 		];
 		const createTradesTable = (title, tradeResults) => {
