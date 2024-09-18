@@ -149,7 +149,7 @@ export class Parameters extends BasicValue {
 }
 
 export class Parameter extends Value {
-	constructor(name, value, limit, increment, values, boolValue) {
+	constructor(name, value, limit, increment, values, boolValue, stringValue) {
 		super();
 		this.name = name;
 		this.value = value;
@@ -157,6 +157,7 @@ export class Parameter extends Value {
 		this.increment = increment;
 		this.values = values;
 		this.boolValue = boolValue;
+		this.stringValue = stringValue;
 	}
 }
 
@@ -201,12 +202,12 @@ export class ScriptingEngine {
 			},
 			ValueRangeParameter: (value, __, limit, ___, increment) => {
 				const getValue = x => x.sourceString !== "" ? x.eval() : null;
-				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null, null);
+				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null, null, null);
 				return parameter;
 			},
 			MultiValueParameter: (_, first, __, others, ___) => {
 				const values = [first.eval()].concat(others.eval());
-				const parameter = new Parameter(null, null, null, null, values, null);
+				const parameter = new Parameter(null, null, null, null, values, null, null);
 				return parameter;
 			},
 			SymbolArray: (_, first, others, __) => {
@@ -283,8 +284,17 @@ export class ScriptingEngine {
 				return new Symbol(symbol);
 			},
 			string: (_, content, __) => {
-				const fileName = new String(content.sourceString);
+				return content.sourceString;
+			},
+			stringValue: content => {
+				const stringValue = content.eval();
+				const fileName = new String(stringValue);
 				return fileName;
+			},
+			stringParameter: content => {
+				const stringValue = content.eval();
+				const parameter = new Parameter(null, null, null, null, null, null, stringValue);
+				return parameter;
 			},
 			keyword: keyword => {
 				const string = keyword.sourceString;
@@ -306,7 +316,7 @@ export class ScriptingEngine {
 			},
 			bool: value => {
 				const boolValue = value.sourceString === "true";
-				const parameter = new Parameter(null, null, null, null, null, boolValue);
+				const parameter = new Parameter(null, null, null, null, null, boolValue, null);
 				return parameter;
 			},
 			whitespace: _ => {

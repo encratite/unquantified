@@ -2,9 +2,9 @@ Unquantified {
 	Program = Statement*
 	Statement = (Assignment | Call) (eol | end)
 	Assignment = variable "=" (Value | Parameters)
-	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | string | SymbolArray | Parameters
+	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | stringValue | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
-	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter | bool)
+	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter | stringParameter | bool)
 	ValueRangeParameter = numeric ("to" numeric ("step" numeric)?)?
 	MultiValueParameter = "[" numeric ("," numeric)* "]"
 	Call = identifier Value ("," Value)*
@@ -21,6 +21,8 @@ Unquantified {
 	symbol = (upper | nonZeroDigit) (upper | nonZeroDigit)+
 	stringDelimiter = "\""
 	string = stringDelimiter (~stringDelimiter any)* stringDelimiter
+	stringValue = string
+	stringParameter = string
 	keyword = "true" | "false" | "first" | "last" | "now" | "daily" | "all"
 	bool = "true" | "false"
 	space := " " | "\t"
