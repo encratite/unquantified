@@ -633,17 +633,25 @@ impl<'a> Backtest<'a> {
 			let contract_map = source.contract_map
 				.as_ref()
 				.with_context(|| anyhow!("Archive for {symbol} lacks a contract map"))?;
-			let contracts_opt = if most_recent {
-				contract_map.range(..=time)
-					.next_back()
-					.map(|(_, value)| value)
+			if most_recent {
+				for (_, contract_records) in contract_map.range(..=time).rev() {
+					let record_opt = contract_records
+						.iter()
+						.find(|x| x.symbol == *symbol);
+					if let Some(record) = record_opt {
+						return Ok(record.clone());
+					}
+				}
+				bail!("Failed to find a recent matching contract set for {symbol} at {}", self.now);
 			} else {
-				contract_map.get(&time)
-			};
-			let contracts = contracts_opt.with_context(map_error)?;
-			record = contracts.iter().find(|&x| x.symbol == *symbol)
-				.with_context(|| anyhow!("Unable to find a record for contract {symbol}"))?
-				.clone();
+				let contract_records = contract_map.get(&time)
+					.with_context(|| anyhow!("Failed to find a contract set for {symbol} at {}", self.now))?;
+				record = contract_records
+					.iter()
+					.find(|x| x.symbol == *symbol)
+					.with_context(map_error)?
+					.clone();
+			}
 		} else if FOREX_MAP.values().any(|x| x == symbol) {
 			// Bypass asset manager for currencies
 			let archive = self.asset_manager.get_archive(symbol)?;
