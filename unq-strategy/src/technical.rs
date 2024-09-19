@@ -12,7 +12,14 @@ pub enum TradeSignal {
 
 pub trait Indicator {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal>;
+	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
+
+	fn initialize(&mut self, records: &Vec<&OhlcRecord>) {
+		for record in records {
+			let _ = self.next(record);
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -60,6 +67,14 @@ impl IndicatorBuffer {
 	pub fn filled(&self) -> bool {
 		self.buffer.len() >= self.size
 	}
+
+	pub fn needs_initialization(&self) -> Option<usize> {
+		if self.buffer.len() < self.size {
+			Some(self.size)
+		} else {
+			None
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -92,6 +107,10 @@ impl Indicator for MomentumIndicator {
 		let last = buffer.iter().last().unwrap();
 		let momentum = first / last - 1.0;
 		translate_signal(momentum, self.long_threshold, - self.short_threshold)
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -163,6 +182,10 @@ impl Indicator for SimpleMovingAverage {
 		self.0.calculate_next(record, &calculate)
 	}
 
+	fn needs_initialization(&self) -> Option<usize> {
+		self.0.buffer.needs_initialization()
+	}
+
 	fn clone_box(&self) -> Box<dyn Indicator> {
 		Box::new(self.clone())
 	}
@@ -192,6 +215,10 @@ impl Indicator for WeightedMovingAverage {
 			average
 		};
 		self.0.calculate_next(record, &calculate)
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.0.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -231,6 +258,10 @@ impl Indicator for ExponentialMovingAverage {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
 		let calculate = ExponentialMovingAverage::calculate;
 		self.0.calculate_next(record, &calculate)
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.0.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -280,6 +311,10 @@ impl Indicator for AverageTrueRange {
 		} else {
 			None
 		}
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.close_buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -339,6 +374,10 @@ impl Indicator for RelativeStrengthIndicator {
 		}
 	}
 
+	fn needs_initialization(&self) -> Option<usize> {
+		self.buffer.needs_initialization()
+	}
+
 	fn clone_box(&self) -> Box<dyn Indicator> {
 		Box::new(self.clone())
 	}
@@ -384,6 +423,10 @@ impl Indicator for MovingAverageConvergence {
 		} else {
 			None
 		}
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -438,6 +481,10 @@ impl Indicator for PercentagePriceOscillator {
 		translate_signal(signal, ppo, ppo)
 	}
 
+	fn needs_initialization(&self) -> Option<usize> {
+		self.close_buffer.needs_initialization()
+	}
+
 	fn clone_box(&self) -> Box<dyn Indicator> {
 		Box::new(self.clone())
 	}
@@ -482,6 +529,10 @@ impl Indicator for BollingerBands {
 		} else {
 			None
 		}
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {

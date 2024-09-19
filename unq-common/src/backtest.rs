@@ -365,9 +365,14 @@ impl<'a> Backtest<'a> {
 		};
 		let (_, archive) = self.asset_manager.get_asset(&root)?;
 		let source = archive.get_data(&self.time_frame);
+		/*
+		Use .. instead of ..= because the primary use case of this function is filling up buffers with data
+		from outside the backtest from/to configuration, when the "next" function of a strategy is executed
+		for the first time. The "get_record" function uses ..= instead.
+		*/
 		let records = source
 			.get_adjusted_fallback()
-			.range(..=self.now)
+			.range(..self.now)
 			.rev()
 			.take(bars)
 			.map(|(_, record)| record)
