@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use anyhow::{bail, Result};
-use unq_common::backtest::{Backtest, PositionSide};
+use unq_common::backtest::{Backtest, PositionSide, SimplePosition};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::get_symbol_contracts;
 use crate::technical::*;
@@ -147,64 +147,88 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(output)
 	}
 
-	fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &mut Backtest<'a>) -> Result<()> {
-		if signal == TradeSignal::Hold {
+	fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) -> Result<()> {
+		let position_opt = backtest
+			.borrow()
+			.get_position_by_root(&indicator_data.symbol)
+			.map(|x| x.simple());
+		if signal == TradeSignal::Close {
+			// Close the existing position and do not create a new one
+			Self::close_position(&position_opt, backtest);
 			return Ok(());
 		}
-		let target_side = match signal {
-			TradeSignal::Long => PositionSide::Long,
-			TradeSignal::Short => PositionSide::Short,
-			_ => bail!("Unknown trade signal")
-		};
-		let open_position = if let Some(position) = backtest.get_position_by_root(&indicator_data.symbol) {
+		let target_side = Self::get_target_side(signal)?;
+		if let Some(position) = &position_opt {
 			// We already created a position for this symbol, ensure that the side matches
 			if position.side != target_side {
 				/*
 				Two possibilities:
 				1. We have a long position and the signal is short
 				2. We have a short position and the signal is long
-				Close the position and create a new one, suppressing errors.
+				Close the current position and create a new one with the correct side.
 				*/
-				let _ = backtest.close_position(position.id, position.count);
-				true
-			} else {
-				false
+				Self::close_position(&position_opt, backtest);
+				Self::open_position(enable_long, enable_short, target_side, indicator_data, backtest);
 			}
 		} else {
 			// Create a new position for the symbol based on the signal
-			true
+			Self::open_position(enable_long, enable_short, target_side, indicator_data, backtest);
 		};
-		if open_position {
-			let long_valid = enable_long && target_side == PositionSide::Long;
-			let short_valid = enable_short && target_side == PositionSide::Short;
-			if long_valid || short_valid {
-				// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
-				let _ = backtest.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
-			}
-		}
 		Ok(())
+	}
+
+	fn get_target_side(signal: TradeSignal) -> Result<PositionSide> {
+		let target_side = match signal {
+			TradeSignal::Long => PositionSide::Long,
+			TradeSignal::Short => PositionSide::Short,
+			_ => bail!("Unknown trade signal")
+		};
+		Ok(target_side)
+	}
+
+	fn open_position(enable_long: bool, enable_short: bool, target_side: PositionSide, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) {
+		let long_valid = enable_long && target_side == PositionSide::Long;
+		let short_valid = enable_short && target_side == PositionSide::Short;
+		if long_valid || short_valid {
+			// Suppress errors due to margin requirements or lack of liquidity, it will keep on trying anyway
+			let _ = backtest
+				.borrow_mut()
+				.open_position(&indicator_data.symbol, indicator_data.contracts, target_side);
+		}
+	}
+
+	fn close_position(position_opt: &Option<SimplePosition>, backtest: &'a RefCell<Backtest<'a>>) {
+		if let Some(position) = position_opt {
+			let _ = backtest
+				.borrow_mut()
+				.close_position(position.id, position.count);
+		}
 	}
 }
 
 impl<'a> Strategy for IndicatorStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
 		for indicator_data in self.indicators.iter_mut() {
-			let mut backtest = self.backtest.borrow_mut();
-			if !backtest.is_available(&indicator_data.symbol)? {
-				continue;
-			}
-			if let Some(initialization_bars) = indicator_data.indicator.needs_initialization() {
-				// It's the first time the indicator is being invoked
-				// Try to fill up its buffer with OHLC data from outside the from/to range to speed up signal generation
-				// This can actually make a big difference with big buffers (e.g. EMA)
-				let initialization_records = backtest.get_records(&indicator_data.symbol, initialization_bars)?;
-				indicator_data.indicator.initialize(&initialization_records);
-			}
-			let record = backtest.most_recent_record(&indicator_data.symbol)?;
-			let Some(signal) = indicator_data.indicator.next(&record) else {
-				return Ok(());
+			let signal = {
+				let backtest = self.backtest.borrow();
+				if !backtest.is_available(&indicator_data.symbol)? {
+					// This symbol isn't available on the exchange yet, skip it
+					continue;
+				}
+				if let Some(initialization_bars) = indicator_data.indicator.needs_initialization() {
+					// It's the first time the indicator is being invoked
+					// Try to fill up its buffer with OHLC data from outside the from/to range to speed up signal generation
+					// This can actually make a big difference with big buffers (e.g. EMA)
+					let initialization_records = backtest.get_records(&indicator_data.symbol, initialization_bars)?;
+					indicator_data.indicator.initialize(&initialization_records);
+				}
+				let record = backtest.most_recent_record(&indicator_data.symbol)?;
+				let Some(signal) = indicator_data.indicator.next(&record) else {
+					return Ok(());
+				};
+				signal
 			};
-			Self::trade(signal, self.enable_long, self.enable_short, indicator_data, &mut backtest)?;
+			Self::trade(signal, self.enable_long, self.enable_short, indicator_data, &self.backtest)?;
 		}
 		Ok(())
 	}

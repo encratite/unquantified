@@ -61,6 +61,7 @@ impl<'a> Strategy for BuyAndHoldStrategy<'a> {
 		// Try to create all positions in each iteration, just in case we're dealing with illiquid assets and intraday data
 		for (symbol, contract_count) in self.remaining_symbols.clone() {
 			if !backtest.is_available(&symbol)? {
+				// This symbol isn't available on the exchange yet, skip it
 				continue;
 			}
 			let result = backtest.open_position(&symbol, contract_count, self.side.clone());

@@ -3,10 +3,12 @@ use anyhow::{bail, Result};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::{mean, standard_deviation_mean_biased};
 
+const EMA_BUFFER_SIZE_MULTIPLIER: usize = 2;
+
 #[derive(PartialEq, Debug)]
 pub enum TradeSignal {
 	Long,
-	Hold,
+	Close,
 	Short
 }
 
@@ -232,7 +234,7 @@ pub struct ExponentialMovingAverage(MovingAverage);
 impl ExponentialMovingAverage {
 	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
 		// Increase the buffer size to twice the normal size for moving averages
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 2)?;
+		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, EMA_BUFFER_SIZE_MULTIPLIER)?;
 		let output = ExponentialMovingAverage(moving_average);
 		Ok(output)
 	}
@@ -324,7 +326,6 @@ impl Indicator for AverageTrueRange {
 
 #[derive(Clone)]
 pub struct RelativeStrengthIndicator {
-	period: usize,
 	upper_band: f64,
 	lower_band: f64,
 	buffer: IndicatorBuffer,
@@ -334,7 +335,6 @@ impl RelativeStrengthIndicator {
 	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
 		validate_parameters(period, high_threshold, low_threshold)?;
 		let output = Self {
-			period,
 			upper_band: high_threshold,
 			lower_band: low_threshold,
 			buffer: IndicatorBuffer::new(period + 1)
@@ -352,13 +352,13 @@ impl RelativeStrengthIndicator {
 			if difference >= 0.0 {
 				up.push(difference)
 			} else {
-				down.push(difference)
+				down.push(- difference)
 			}
 			previous_close = close;
 		}
-		let up_ema = exponential_moving_average(up.iter(), self.period);
-		let down_ema = exponential_moving_average(down.iter(), self.period);
-		let rsi = 100.0 * up_ema / (up_ema + down_ema);
+		let up_mean = mean(up.iter()).unwrap();
+		let down_mean = mean(down.iter()).unwrap();
+		let rsi = 100.0 * up_mean / (up_mean + down_mean);
 		rsi
 	}
 }
@@ -388,27 +388,31 @@ pub struct MovingAverageConvergence {
 	signal_period: usize,
 	fast_period: usize,
 	slow_period: usize,
-	buffer: IndicatorBuffer
+	close_buffer: IndicatorBuffer,
+	signal_buffer: IndicatorBuffer,
 }
 
 impl MovingAverageConvergence {
 	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
 		validate_signal_parameters(signal_period, fast_period, slow_period)?;
-		let max_period = signal_period.max(fast_period).max(slow_period);
+		let close_buffer_size = EMA_BUFFER_SIZE_MULTIPLIER * fast_period.max(slow_period);
+		let signal_buffer_size = EMA_BUFFER_SIZE_MULTIPLIER * signal_period;
 		let output = Self {
 			signal_period,
 			fast_period,
 			slow_period,
-			buffer: IndicatorBuffer::new(max_period)
+			close_buffer: IndicatorBuffer::new(close_buffer_size),
+			signal_buffer: IndicatorBuffer::new(signal_buffer_size)
 		};
 		Ok(output)
 	}
 
 	fn calculate(&self) -> (f64, f64) {
-		let buffer = &self.buffer.buffer;
-		let signal = exponential_moving_average(buffer.iter(), self.signal_period);
-		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
-		let slow_ema = exponential_moving_average(buffer.iter(), self.slow_period);
+		let signal_iter = self.signal_buffer.buffer.iter();
+		let signal = exponential_moving_average(signal_iter, self.signal_period);
+		let close_buffer = &self.close_buffer.buffer;
+		let fast_ema = exponential_moving_average(close_buffer.iter(), self.fast_period);
+		let slow_ema = exponential_moving_average(close_buffer.iter(), self.slow_period);
 		let macd = fast_ema - slow_ema;
 		(signal, macd)
 	}
@@ -416,17 +420,27 @@ impl MovingAverageConvergence {
 
 impl Indicator for MovingAverageConvergence {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
-		let filled = self.buffer.add(record.close);
-		if filled {
-			let (signal, macd) = self.calculate();
-			translate_signal(signal, macd, macd)
-		} else {
-			None
+		let close_filled = self.close_buffer.add(record.close);
+		if !close_filled {
+			return None;
 		}
+		let (signal, macd) = self.calculate();
+		let signal_filled = self.signal_buffer.add(macd);
+		if !signal_filled {
+			return None;
+		}
+		translate_signal(signal, macd, macd)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		self.buffer.needs_initialization()
+		let close = self.close_buffer.needs_initialization();
+		let signal = self.signal_buffer.needs_initialization();
+		match (close, signal) {
+			(Some(x), Some(y)) => Some(x.max(y)),
+			(Some(x), None) => Some(x),
+			(None, Some(y)) => Some(y),
+			(None, None) => None,
+		}
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -610,6 +624,6 @@ fn translate_signal(signal: f64, long_threshold: f64, short_threshold: f64) -> O
 	} else if signal < short_threshold {
 		Some(TradeSignal::Short)
 	} else {
-		Some(TradeSignal::Hold)
+		Some(TradeSignal::Close)
 	}
 }

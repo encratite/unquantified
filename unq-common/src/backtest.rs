@@ -147,6 +147,13 @@ pub struct Position<'a> {
 	pub automatic_rollover: Option<bool>
 }
 
+#[derive(Clone)]
+pub struct SimplePosition {
+	pub id: u32,
+	pub count: u32,
+	pub side: PositionSide
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestEvent {
@@ -212,6 +219,16 @@ struct ProfitDurationStats {
 	side: PositionSide,
 	profit: f64,
 	bars_in_trade: u32
+}
+
+impl<'a> Position<'a> {
+	pub fn simple(&self) -> SimplePosition {
+		SimplePosition {
+			id: self.id,
+			count: self.count,
+			side: self.side.clone()
+		}
+	}
 }
 
 impl<'a> Backtest<'a> {
