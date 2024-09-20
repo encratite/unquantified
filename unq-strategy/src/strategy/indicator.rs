@@ -97,12 +97,6 @@ impl<'a> IndicatorStrategy<'a> {
 				let indicator = ExponentialMovingAverage::new(fast_period, slow_period_opt)?;
 				Box::new(indicator)
 			},
-			"atr" => {
-				let period = get_period(period_opt)?;
-				let multiplier = get_multiplier()?;
-				let indicator = AverageTrueRange::new(period, multiplier)?;
-				Box::new(indicator)
-			},
 			"rsi" => {
 				let period = get_period(period_opt)?;
 				let high_threshold = get_high_low("highThreshold")?;

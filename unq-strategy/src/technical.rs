@@ -67,16 +67,6 @@ impl IndicatorBuffer {
 		}
 	}
 
-	pub fn average(&self) -> f64 {
-		let sum: f64 = self.buffer.iter().sum();
-		let average = sum / (self.buffer.len() as f64);
-		average
-	}
-
-	pub fn filled(&self) -> bool {
-		self.buffer.len() >= self.size
-	}
-
 	pub fn needs_initialization(&self) -> Option<usize> {
 		if self.buffer.len() < self.size {
 			Some(self.size)
@@ -259,59 +249,6 @@ impl Indicator for ExponentialMovingAverage {
 
 	fn needs_initialization(&self) -> Option<usize> {
 		self.0.buffer.needs_initialization()
-	}
-
-	fn clone_box(&self) -> Box<dyn Indicator> {
-		Box::new(self.clone())
-	}
-}
-
-#[derive(Clone)]
-pub struct AverageTrueRange {
-	multiplier: f64,
-	close_buffer: IndicatorBuffer,
-	true_range_buffer: IndicatorBuffer,
-}
-
-impl AverageTrueRange {
-	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
-		validate_period(period)?;
-		validate_multiplier(multiplier)?;
-		let output = Self {
-			multiplier,
-			close_buffer: IndicatorBuffer::new(period),
-			true_range_buffer: IndicatorBuffer::new(period)
-		};
-		Ok(output)
-	}
-}
-
-impl Indicator for AverageTrueRange {
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
-		if let Some(previous_close) = self.close_buffer.buffer.front() {
-			let part1 = record.high - record.low;
-			let part2 = (record.high - previous_close).abs();
-			let part3 = (record.low - previous_close).abs();
-			let true_range = part1.max(part2).max(part3);
-			self.true_range_buffer.add(true_range);
-		}
-		let close = record.close;
-		let close_filled = self.close_buffer.add(close);
-		let true_range_filled = self.true_range_buffer.filled();
-		if close_filled && true_range_filled {
-			let simple_moving_average = self.close_buffer.average();
-			let average_true_range = self.true_range_buffer.average();
-			let multiplier_range = self.multiplier * average_true_range;
-			let upper_band = simple_moving_average + multiplier_range;
-			let lower_band = simple_moving_average - multiplier_range;
-			translate_band_signal(close, upper_band, lower_band)
-		} else {
-			None
-		}
-	}
-
-	fn needs_initialization(&self) -> Option<usize> {
-		self.close_buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
