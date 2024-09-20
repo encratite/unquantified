@@ -30,7 +30,7 @@ lazy_static! {
 	};
 }
 
-#[derive(Clone, PartialEq, Display)]
+#[derive(Clone, PartialEq, Display, Debug)]
 pub enum PositionSide {
 	#[strum(serialize = "long")]
 	Long,

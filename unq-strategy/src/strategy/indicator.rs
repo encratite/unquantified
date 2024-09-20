@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use anyhow::{bail, Result};
 use unq_common::backtest::{Backtest, PositionSide, SimplePosition};
 use unq_common::strategy::{Strategy, StrategyParameters};
@@ -61,27 +61,40 @@ impl<'a> IndicatorStrategy<'a> {
 		let signal_period_opt = Self::get_period("signalPeriod", parameters)?;
 		let fast_period_opt = Self::get_period("fastPeriod", parameters)?;
 		let slow_period_opt = Self::get_period("slowPeriod", parameters)?;
-		let long_threshold = Self::get_threshold("longThreshold", parameters)?;
-		let short_threshold = Self::get_threshold("shortThreshold", parameters)?;
 		let indicator: Box<dyn Indicator> = match indicator_string.as_str() {
 			"momentum" => {
 				let period = get_period(period_opt)?;
-				let indicator = MomentumIndicator::new(period, long_threshold, short_threshold)?;
+				let indicator = MomentumIndicator::new(period)?;
 				Box::new(indicator)
 			},
-			"sma" => {
-				let fast_period = get_period(fast_period_opt)?;
-				let indicator = SimpleMovingAverage::new(fast_period, slow_period_opt, long_threshold, short_threshold)?;
+			"p-sma" => {
+				let period = get_period(period_opt)?;
+				let indicator = SimpleMovingAverage::new(period, None)?;
 				Box::new(indicator)
 			},
-			"wma" => {
-				let fast_period = get_period(fast_period_opt)?;
-				let indicator = WeightedMovingAverage::new(fast_period, slow_period_opt, long_threshold, short_threshold)?;
+			"p-lma" => {
+				let period = get_period(period_opt)?;
+				let indicator = LinearMovingAverage::new(period, None)?;
 				Box::new(indicator)
 			},
-			"ema" => {
+			"p-ema" => {
+				let period = get_period(period_opt)?;
+				let indicator = ExponentialMovingAverage::new(period, None)?;
+				Box::new(indicator)
+			},
+			"smac" => {
 				let fast_period = get_period(fast_period_opt)?;
-				let indicator = ExponentialMovingAverage::new(fast_period, slow_period_opt, long_threshold, short_threshold)?;
+				let indicator = SimpleMovingAverage::new(fast_period, slow_period_opt)?;
+				Box::new(indicator)
+			},
+			"lmac" => {
+				let fast_period = get_period(fast_period_opt)?;
+				let indicator = LinearMovingAverage::new(fast_period, slow_period_opt)?;
+				Box::new(indicator)
+			},
+			"emac" => {
+				let fast_period = get_period(fast_period_opt)?;
+				let indicator = ExponentialMovingAverage::new(fast_period, slow_period_opt)?;
 				Box::new(indicator)
 			},
 			"atr" => {
@@ -134,13 +147,6 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	fn get_threshold(name: &str, parameters: &StrategyParameters) -> Result<f64> {
-		match parameters.get_value(name)? {
-			Some(threshold) => Ok(threshold),
-			None => Ok(0.0)
-		}
-	}
-
 	fn get_period(name: &str, parameters: &StrategyParameters) -> Result<Option<usize>> {
 		let value = parameters.get_value(name)?;
 		let output = value.map(|x| x as usize);
@@ -157,7 +163,7 @@ impl<'a> IndicatorStrategy<'a> {
 			Self::close_position(&position_opt, backtest);
 			return Ok(());
 		}
-		let target_side = Self::get_target_side(signal)?;
+		let target_side = Self::get_target_side(&signal)?;
 		if let Some(position) = &position_opt {
 			// We already created a position for this symbol, ensure that the side matches
 			if position.side != target_side {
@@ -177,7 +183,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(())
 	}
 
-	fn get_target_side(signal: TradeSignal) -> Result<PositionSide> {
+	fn get_target_side(signal: &TradeSignal) -> Result<PositionSide> {
 		let target_side = match signal {
 			TradeSignal::Long => PositionSide::Long,
 			TradeSignal::Short => PositionSide::Short,
@@ -204,26 +210,43 @@ impl<'a> IndicatorStrategy<'a> {
 				.close_position(position.id, position.count);
 		}
 	}
+
+	fn get_position_state(symbol: &String, backtest: &Ref<Backtest>) -> PositionState {
+		let position_opt = backtest.get_position_by_root(symbol);
+		let state = if let Some(position) = position_opt {
+			if position.side == PositionSide::Long {
+				PositionState::Long
+			} else {
+				PositionState::Short
+			}
+		} else {
+			PositionState::None
+		};
+		state
+	}
 }
 
 impl<'a> Strategy for IndicatorStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
 		for indicator_data in self.indicators.iter_mut() {
 			let signal = {
+				let symbol = &indicator_data.symbol;
+				let indicator = &mut indicator_data.indicator;
 				let backtest = self.backtest.borrow();
-				if !backtest.is_available(&indicator_data.symbol)? {
+				if !backtest.is_available(symbol)? {
 					// This symbol isn't available on the exchange yet, skip it
 					continue;
 				}
-				if let Some(initialization_bars) = indicator_data.indicator.needs_initialization() {
+				if let Some(initialization_bars) = indicator.needs_initialization() {
 					// It's the first time the indicator is being invoked
 					// Try to fill up its buffer with OHLC data from outside the from/to range to speed up signal generation
 					// This can actually make a big difference with big buffers (e.g. EMA)
-					let initialization_records = backtest.get_records(&indicator_data.symbol, initialization_bars)?;
-					indicator_data.indicator.initialize(&initialization_records);
+					let initialization_records = backtest.get_records(symbol, initialization_bars)?;
+					indicator.initialize(&initialization_records);
 				}
-				let record = backtest.most_recent_record(&indicator_data.symbol)?;
-				let Some(signal) = indicator_data.indicator.next(&record) else {
+				let record = backtest.most_recent_record(symbol)?;
+				let state = Self::get_position_state(symbol, &backtest);
+				let Some(signal) = indicator.next(&record, state) else {
 					return Ok(());
 				};
 				signal

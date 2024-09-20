@@ -12,14 +12,21 @@ pub enum TradeSignal {
 	Short
 }
 
+#[derive(PartialEq, Debug)]
+pub enum PositionState {
+	Long,
+	None,
+	Short
+}
+
 pub trait Indicator {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal>;
+	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal>;
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
 
 	fn initialize(&mut self, records: &Vec<&OhlcRecord>) {
 		for record in records {
-			let _ = self.next(record);
+			let _ = self.next(record, PositionState::None);
 		}
 	}
 }
@@ -80,39 +87,31 @@ impl IndicatorBuffer {
 }
 
 #[derive(Clone)]
-pub struct MomentumIndicator {
-	long_threshold: f64,
-	short_threshold: f64,
-	buffer: IndicatorBuffer
-}
+pub struct MomentumIndicator(IndicatorBuffer);
 
 impl MomentumIndicator {
-	pub fn new(period: usize, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		validate_parameters(period, long_threshold, short_threshold)?;
-		let output = Self {
-			long_threshold,
-			short_threshold,
-			buffer: IndicatorBuffer::new(period)
-		};
+	pub fn new(period: usize) -> Result<Self> {
+		validate_period(period)?;
+		let output = Self(IndicatorBuffer::new(period));
 		Ok(output)
 	}
 }
 
 impl Indicator for MomentumIndicator {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
-		let filled = self.buffer.add(record.close);
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+		let filled = self.0.add(record.close);
 		if !filled {
 			return None;
 		}
-		let buffer = &self.buffer.buffer;
+		let buffer = &self.0.buffer;
 		let first = buffer.front().unwrap();
 		let last = buffer.iter().last().unwrap();
-		let momentum = first / last - 1.0;
-		translate_signal(momentum, self.long_threshold, - self.short_threshold)
+		let momentum = first - last;
+		translate_signal(momentum)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		self.buffer.needs_initialization()
+		self.0.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -124,22 +123,18 @@ impl Indicator for MomentumIndicator {
 struct MovingAverage {
 	fast_period: usize,
 	slow_period: Option<usize>,
-	long_threshold: f64,
-	short_threshold: f64,
 	buffer: IndicatorBuffer
 }
 
 impl MovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64, buffer_size_multiplier: usize) -> Result<Self> {
+	pub fn new(fast_period: usize, slow_period: Option<usize>, buffer_size_multiplier: usize) -> Result<Self> {
 		if buffer_size_multiplier < 1 || buffer_size_multiplier > 5 {
 			bail!("Invalid buffer size multiplier specified ({buffer_size_multiplier}");
 		}
-		validate_fast_slow_parameters(fast_period, slow_period, long_threshold, short_threshold)?;
+		validate_fast_slow_parameters(fast_period, slow_period)?;
 		let output = Self {
 			fast_period,
 			slow_period,
-			long_threshold,
-			short_threshold,
 			buffer: IndicatorBuffer::with_slow(fast_period, slow_period, buffer_size_multiplier)
 		};
 		Ok(output)
@@ -159,7 +154,7 @@ impl MovingAverage {
 			let price = *buffer.front().unwrap();
 			price - fast_average
 		};
-		translate_signal(difference, self.long_threshold, - self.short_threshold)
+		translate_signal(difference)
 	}
 }
 
@@ -167,15 +162,15 @@ impl MovingAverage {
 pub struct SimpleMovingAverage(MovingAverage);
 
 impl SimpleMovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 1)?;
+	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
+		let moving_average = MovingAverage::new(fast_period, slow_period, 1)?;
 		let output = SimpleMovingAverage(moving_average);
 		Ok(output)
 	}
 }
 
 impl Indicator for SimpleMovingAverage {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let sum: f64 = buffer.iter().take(period).sum();
 			let average = sum / (period as f64);
@@ -194,18 +189,18 @@ impl Indicator for SimpleMovingAverage {
 }
 
 #[derive(Clone)]
-pub struct WeightedMovingAverage(MovingAverage);
+pub struct LinearMovingAverage(MovingAverage);
 
-impl WeightedMovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, 1)?;
-		let output = WeightedMovingAverage(moving_average);
+impl LinearMovingAverage {
+	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
+		let moving_average = MovingAverage::new(fast_period, slow_period, 1)?;
+		let output = LinearMovingAverage(moving_average);
 		Ok(output)
 	}
 }
 
-impl Indicator for WeightedMovingAverage {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+impl Indicator for LinearMovingAverage {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let mut average = 0.0;
 			let mut i = 0;
@@ -232,9 +227,9 @@ impl Indicator for WeightedMovingAverage {
 pub struct ExponentialMovingAverage(MovingAverage);
 
 impl ExponentialMovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<Self> {
+	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
 		// Increase the buffer size to twice the normal size for moving averages
-		let moving_average = MovingAverage::new(fast_period, slow_period, long_threshold, short_threshold, EMA_BUFFER_SIZE_MULTIPLIER)?;
+		let moving_average = MovingAverage::new(fast_period, slow_period, EMA_BUFFER_SIZE_MULTIPLIER)?;
 		let output = ExponentialMovingAverage(moving_average);
 		Ok(output)
 	}
@@ -257,7 +252,7 @@ impl ExponentialMovingAverage {
 }
 
 impl Indicator for ExponentialMovingAverage {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = ExponentialMovingAverage::calculate;
 		self.0.calculate_next(record, &calculate)
 	}
@@ -292,7 +287,7 @@ impl AverageTrueRange {
 }
 
 impl Indicator for AverageTrueRange {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		if let Some(previous_close) = self.close_buffer.buffer.front() {
 			let part1 = record.high - record.low;
 			let part2 = (record.high - previous_close).abs();
@@ -309,7 +304,7 @@ impl Indicator for AverageTrueRange {
 			let multiplier_range = self.multiplier * average_true_range;
 			let upper_band = simple_moving_average + multiplier_range;
 			let lower_band = simple_moving_average - multiplier_range;
-			translate_signal(close, upper_band, lower_band)
+			translate_band_signal(close, upper_band, lower_band)
 		} else {
 			None
 		}
@@ -333,7 +328,7 @@ pub struct RelativeStrengthIndicator {
 
 impl RelativeStrengthIndicator {
 	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
-		validate_parameters(period, high_threshold, low_threshold)?;
+		validate_period(period)?;
 		let output = Self {
 			upper_band: high_threshold,
 			lower_band: low_threshold,
@@ -364,11 +359,11 @@ impl RelativeStrengthIndicator {
 }
 
 impl Indicator for RelativeStrengthIndicator {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let filled = self.buffer.add(record.close);
 		if filled {
 			let rsi = self.calculate();
-			translate_signal(rsi, self.upper_band, self.lower_band)
+			translate_band_signal(rsi, self.upper_band, self.lower_band)
 		} else {
 			None
 		}
@@ -419,7 +414,7 @@ impl MovingAverageConvergence {
 }
 
 impl Indicator for MovingAverageConvergence {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let close_filled = self.close_buffer.add(record.close);
 		if !close_filled {
 			return None;
@@ -429,7 +424,7 @@ impl Indicator for MovingAverageConvergence {
 		if !signal_filled {
 			return None;
 		}
-		translate_signal(signal, macd, macd)
+		translate_signal(signal - macd)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -474,7 +469,7 @@ impl PercentagePriceOscillator {
 }
 
 impl Indicator for PercentagePriceOscillator {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let close_filled = self.close_buffer.add(record.close);
 		if !close_filled {
 			return None;
@@ -485,7 +480,7 @@ impl Indicator for PercentagePriceOscillator {
 			return None;
 		}
 		let signal = exponential_moving_average(self.signal_buffer.buffer.iter(), self.signal_period);
-		translate_signal(signal, ppo, ppo)
+		translate_signal(signal - ppo)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -525,14 +520,39 @@ impl BollingerBands {
 }
 
 impl Indicator for BollingerBands {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
-		let filled = self.buffer.add(record.close);
-		if filled {
-			let (_, upper, lower) = self.calculate();
-			translate_signal(record.close, upper, lower)
-		} else {
-			None
+	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
+		let close = record.close;
+		let filled = self.buffer.add(close);
+		if !filled {
+			return None;
 		}
+		let (center, upper, lower) = self.calculate();
+		let signal = match state {
+			PositionState::None => {
+				if close > upper {
+					TradeSignal::Long
+				} else if close < lower {
+					TradeSignal::Short
+				} else {
+					TradeSignal::Close
+				}
+			},
+			PositionState::Long => {
+				if close > center {
+					TradeSignal::Long
+				} else {
+					TradeSignal::Close
+				}
+			},
+			PositionState::Short => {
+				if close < center {
+					TradeSignal::Short
+				} else {
+					TradeSignal::Close
+				}
+			}
+		};
+		Some(signal)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -558,16 +578,6 @@ where
 	average
 }
 
-fn validate_thresholds(long_threshold: f64, short_threshold: f64) -> Result<()> {
-	if long_threshold < 0.0 {
-		bail!("Invalid long threshold ({long_threshold}) for indicator, must be >= 0");
-	}
-	if short_threshold < 0.0 {
-		bail!("Invalid short threshold ({short_threshold}) for indicator, must >= 0");
-	}
-	Ok(())
-}
-
 fn validate_period(period: usize) -> Result<()> {
 	if period < 2 {
 		bail!("Invalid period for indicator");
@@ -575,21 +585,13 @@ fn validate_period(period: usize) -> Result<()> {
 	Ok(())
 }
 
-fn validate_parameters(period: usize, long_threshold: f64, short_threshold: f64) -> Result<()> {
-	validate_period(period)?;
-	validate_thresholds(long_threshold, short_threshold)
-}
-
-fn validate_fast_slow_parameters(fast_period: usize, slow_period: Option<usize>, long_threshold: f64, short_threshold: f64) -> Result<()> {
+fn validate_fast_slow_parameters(fast_period: usize, slow_period: Option<usize>) -> Result<()> {
+	validate_period(fast_period)?;
 	if let Some(slow) = slow_period {
-		validate_period(fast_period)?;
 		validate_period(slow)?;
 		if slow <= fast_period {
 			bail!("Invalid combination of fast period ({fast_period}) and slow period ({slow}) for indicator");
 		}
-		validate_thresholds(long_threshold, short_threshold)?;
-	} else {
-		validate_parameters(fast_period, long_threshold, short_threshold)?;
 	}
 	Ok(())
 }
@@ -608,10 +610,20 @@ fn validate_multiplier(multiplier: f64) -> Result<()> {
 	Ok(())
 }
 
-fn translate_signal(signal: f64, long_threshold: f64, short_threshold: f64) -> Option<TradeSignal> {
-	if signal > long_threshold {
+fn translate_signal(signal: f64) -> Option<TradeSignal> {
+	if signal > 0.0 {
 		Some(TradeSignal::Long)
-	} else if signal < short_threshold {
+	} else if signal < 0.0 {
+		Some(TradeSignal::Short)
+	} else {
+		Some(TradeSignal::Close)
+	}
+}
+
+fn translate_band_signal(signal: f64, upper: f64, lower: f64) -> Option<TradeSignal> {
+	if signal > upper {
+		Some(TradeSignal::Long)
+	} else if signal < lower {
 		Some(TradeSignal::Short)
 	} else {
 		Some(TradeSignal::Close)
