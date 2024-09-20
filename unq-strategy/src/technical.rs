@@ -449,64 +449,7 @@ impl Indicator for MovingAverageConvergence {
 }
 
 #[derive(Clone)]
-pub struct PercentagePriceOscillator {
-	signal_period: usize,
-	fast_period: usize,
-	slow_period: usize,
-	close_buffer: IndicatorBuffer,
-	ppo_buffer: IndicatorBuffer
-}
-
-impl PercentagePriceOscillator {
-	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
-		validate_signal_parameters(signal_period, fast_period, slow_period)?;
-		let close_buffer_size = fast_period.max(slow_period);
-		let output = Self {
-			signal_period,
-			fast_period,
-			slow_period,
-			close_buffer: IndicatorBuffer::new(close_buffer_size),
-			ppo_buffer: IndicatorBuffer::new(signal_period)
-		};
-		Ok(output)
-	}
-
-	fn calculate(&self) -> f64 {
-		let buffer = &self.close_buffer.buffer;
-		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
-		let slow_ema = exponential_moving_average(buffer.iter(), self.slow_period);
-		let ppo = 100.0 * (fast_ema - slow_ema) / slow_ema;
-		ppo
-	}
-}
-
-impl Indicator for PercentagePriceOscillator {
-	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
-		let close_filled = self.close_buffer.add(record.close);
-		if !close_filled {
-			return None;
-		}
-		let ppo = self.calculate();
-		let ppo_filled = self.ppo_buffer.add(ppo);
-		if !ppo_filled {
-			return None;
-		}
-		let signal = exponential_moving_average(self.ppo_buffer.buffer.iter(), self.signal_period);
-		translate_signal(signal, ppo, ppo)
-	}
-
-	fn needs_initialization(&self) -> Option<usize> {
-		self.close_buffer.needs_initialization()
-	}
-
-	fn clone_box(&self) -> Box<dyn Indicator> {
-		Box::new(self.clone())
-	}
-}
-
-#[derive(Clone)]
 pub struct BollingerBands {
-	period: usize,
 	multiplier: f64,
 	buffer: IndicatorBuffer
 }
@@ -516,7 +459,6 @@ impl BollingerBands {
 		validate_period(period)?;
 		validate_multiplier(multiplier)?;
 		let output = Self {
-			period,
 			multiplier,
 			buffer: IndicatorBuffer::new(period)
 		};
@@ -525,12 +467,11 @@ impl BollingerBands {
 
 	fn calculate(&self) -> (f64, f64, f64) {
 		let buffer = &self.buffer.buffer;
-		let signal = exponential_moving_average(buffer.iter(), self.period);
-		let mean = mean(buffer.iter()).unwrap();
-		let standard_deviation = standard_deviation_mean_biased(buffer.iter(), mean).unwrap();
-		let upper = mean + self.multiplier * standard_deviation;
-		let lower = mean - self.multiplier * standard_deviation;
-		(signal, upper, lower)
+		let center = mean(buffer.iter()).unwrap();
+		let standard_deviation = standard_deviation_mean_biased(buffer.iter(), center).unwrap();
+		let upper = center + self.multiplier * standard_deviation;
+		let lower = center - self.multiplier * standard_deviation;
+		(center, upper, lower)
 	}
 }
 
@@ -538,8 +479,8 @@ impl Indicator for BollingerBands {
 	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
 		let filled = self.buffer.add(record.close);
 		if filled {
-			let (signal, upper, lower) = self.calculate();
-			translate_signal(signal, upper, lower)
+			let (_, upper, lower) = self.calculate();
+			translate_signal(record.close, upper, lower)
 		} else {
 			None
 		}
