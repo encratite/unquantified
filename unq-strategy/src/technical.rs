@@ -598,7 +598,7 @@ fn validate_signal_parameters(signal_period: usize, fast_period: usize, slow_per
 }
 
 fn validate_multiplier(multiplier: f64) -> Result<()> {
-	if multiplier < 0.1 {
+	if multiplier <= 0.0 {
 		bail!("Multiplier ({multiplier}) is too low");
 	}
 	Ok(())

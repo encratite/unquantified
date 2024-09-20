@@ -190,6 +190,9 @@ impl<'a> Strategy for IndicatorStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
 		for indicator_data in self.indicators.iter_mut() {
 			let mut backtest = self.backtest.borrow_mut();
+			if !backtest.is_available(&indicator_data.symbol)? {
+				continue;
+			}
 			if let Some(initialization_bars) = indicator_data.indicator.needs_initialization() {
 				// It's the first time the indicator is being invoked
 				// Try to fill up its buffer with OHLC data from outside the from/to range to speed up signal generation

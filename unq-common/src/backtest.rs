@@ -9,7 +9,7 @@ use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}
 use crate::globex::GlobexCode;
 use crate::manager::CsvTimeSeries;
 use crate::OhlcArchive;
-use crate::ohlc::{OhlcRecord, TimeFrame};
+use crate::ohlc::{OhlcData, OhlcRecord, TimeFrame};
 use crate::stats::{mean, standard_deviation_mean};
 use crate::web::WebF64;
 
@@ -359,12 +359,7 @@ impl<'a> Backtest<'a> {
 	}
 
 	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<&OhlcRecord>> {
-		let root = match parse_globex_code(symbol) {
-			Some((root, _, _)) => root,
-			None => symbol.clone()
-		};
-		let (_, archive) = self.asset_manager.get_asset(&root)?;
-		let source = archive.get_data(&self.time_frame);
+		let source = self.get_symbol_source(symbol)?;
 		/*
 		Use .. instead of ..= because the primary use case of this function is filling up buffers with data
 		from outside the backtest from/to configuration, when the "next" function of a strategy is executed
@@ -382,6 +377,16 @@ impl<'a> Backtest<'a> {
 
 	pub fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now, true)
+	}
+
+	pub fn is_available(&self, symbol: &String) -> Result<bool> {
+		let source = self.get_symbol_source(symbol)?;
+		let Some((first_timestamp, _)) = source.get_adjusted_fallback().first_key_value() else {
+			bail!("Unable to find any records for symbol {symbol}");
+		};
+		let ordering = self.now.cmp(first_timestamp);
+		let is_available = ordering == Ordering::Equal || ordering == Ordering::Greater;
+		Ok(is_available)
 	}
 
 	pub fn log_event(&mut self, event_type: EventType, message: String) {
@@ -1016,5 +1021,15 @@ impl<'a> Backtest<'a> {
 			self.interest += interest;
 		}
 		Ok(())
+	}
+
+	fn get_symbol_source(&self, symbol: &String) -> Result<&OhlcData> {
+		let root = match parse_globex_code(symbol) {
+			Some((root, _, _)) => root,
+			None => symbol.clone()
+		};
+		let (_, archive) = self.asset_manager.get_asset(&root)?;
+		let source = archive.get_data(&self.time_frame);
+		Ok(source)
 	}
 }

@@ -13,7 +13,8 @@ Unquantified {
 	identifier = lower (alnum | "_") *
 	variable = "$" identifier
 	nonZeroDigit = "1".."9"
-	numeric = "-"? nonZeroDigit digit* ("." digit+)?
+	numeric = (numericPrefix | "0") ("." digit+)?
+	numericPrefix = "-"? nonZeroDigit digit*
 	date = nonZeroDigit digit digit digit "-" digit digit "-" digit digit
 	dateTime = date space+ digit digit ":" digit digit (":" digit digit)?
 	offset = ("+" | "-") nonZeroDigit digit* ("mo" | "m" | "h" | "d" | "w" | "y")

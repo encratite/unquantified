@@ -230,12 +230,13 @@ export class ScriptingEngine {
 				const variable = new Variable(name);
 				return variable;
 			},
-			numeric: (negative, first, others, _, fractional) => {
-				let numericString = (negative ? negative.sourceString : "") + first.sourceString + (others ? others.sourceString : "");
-				if (fractional) {
-					numericString = `${numericString}.${fractional.sourceString}`;
-				}
+			numeric: (first, _, fractional) => {
+				let numericString = first.sourceString + fractional.sourceString;
 				return parseFloat(numericString);
+			},
+			numericPrefix: (negative, first, others) => {
+				const numericString = negative + first + others;
+				return numericString;
 			},
 			date: (year1, year2, year3, year4, _, month1, month2, __, day1, day2) => {
 				const yearString = year1.sourceString + year2.sourceString + year3.sourceString + year4.sourceString;

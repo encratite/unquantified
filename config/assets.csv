@@ -45,5 +45,6 @@ ZT,2-Year T-Note,Futures,USD,0.00390625,7.8125,1172.43,false,0.85,0.67,false
 ZQ,30-Day Fed Funds Rate,Futures,USD,0.0025,10.4175,409.356,false,0.85,0.98,false
 MBT,Micro Bitcoin,Futures,USD,5,0.5,2773.81,false,2.25,2.52,false
 MET,Micro Ether,Futures,USD,0.5,0.05,189.508,false,0.20,0.22,false
+VX,S&P 500 VIX,Futures,USD,0.05,50.00,8572.20,false,0.85,1.51,false
 VXM,Mini S&P 500 VIX,Futures,USD,0.05,50.00,857.22,false,0.25,0.22,false
 V2TX,VSTOXX,Futures,EUR,0.05,5.0,825,false,0.85,0.22,false
