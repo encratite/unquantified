@@ -433,14 +433,63 @@ impl Indicator for MovingAverageConvergence {
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		let close = self.close_buffer.needs_initialization();
-		let signal = self.signal_buffer.needs_initialization();
-		match (close, signal) {
-			(Some(x), Some(y)) => Some(x.max(y)),
-			(Some(x), None) => Some(x),
-			(None, Some(y)) => Some(y),
-			(None, None) => None,
+		needs_initialization(&self.close_buffer, &self.signal_buffer)
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
+}
+
+#[derive(Clone)]
+pub struct PercentagePriceOscillator {
+	signal_period: usize,
+	fast_period: usize,
+	slow_period: usize,
+	close_buffer: IndicatorBuffer,
+	signal_buffer: IndicatorBuffer
+}
+
+impl PercentagePriceOscillator {
+	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
+		validate_signal_parameters(signal_period, fast_period, slow_period)?;
+		let close_buffer_size = fast_period.max(slow_period);
+		let output = Self {
+			signal_period,
+			fast_period,
+			slow_period,
+			close_buffer: IndicatorBuffer::new(close_buffer_size),
+			signal_buffer: IndicatorBuffer::new(signal_period)
+		};
+		Ok(output)
+	}
+
+	fn calculate(&self) -> f64 {
+		let buffer = &self.close_buffer.buffer;
+		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
+		let slow_ema = exponential_moving_average(buffer.iter(), self.slow_period);
+		let ppo = 100.0 * (fast_ema - slow_ema) / slow_ema;
+		ppo
+	}
+}
+
+impl Indicator for PercentagePriceOscillator {
+	fn next(&mut self, record: &OhlcRecord) -> Option<TradeSignal> {
+		let close_filled = self.close_buffer.add(record.close);
+		if !close_filled {
+			return None;
 		}
+		let ppo = self.calculate();
+		let ppo_filled = self.signal_buffer.add(ppo);
+		if !ppo_filled {
+			return None;
+		}
+		let signal = exponential_moving_average(self.signal_buffer.buffer.iter(), self.signal_period);
+		translate_signal(signal, ppo, ppo)
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		needs_initialization(&self.close_buffer, &self.signal_buffer)
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -566,5 +615,16 @@ fn translate_signal(signal: f64, long_threshold: f64, short_threshold: f64) -> O
 		Some(TradeSignal::Short)
 	} else {
 		Some(TradeSignal::Close)
+	}
+}
+
+fn needs_initialization(close_buffer: &IndicatorBuffer, signal_buffer: &IndicatorBuffer) -> Option<usize> {
+	let close = close_buffer.needs_initialization();
+	let signal = signal_buffer.needs_initialization();
+	match (close, signal) {
+		(Some(x), Some(y)) => Some(x.max(y)),
+		(Some(x), None) => Some(x),
+		(None, Some(y)) => Some(y),
+		(None, None) => None,
 	}
 }

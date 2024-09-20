@@ -104,6 +104,13 @@ impl<'a> IndicatorStrategy<'a> {
 				let indicator = MovingAverageConvergence::new(signal_period, fast_period, slow_period)?;
 				Box::new(indicator)
 			},
+			"ppo" => {
+				let signal_period = get_period(signal_period_opt)?;
+				let fast_period = get_period(fast_period_opt)?;
+				let slow_period = get_period(slow_period_opt)?;
+				let indicator = PercentagePriceOscillator::new(signal_period, fast_period, slow_period)?;
+				Box::new(indicator)
+			},
 			"bollinger" => {
 				let period = get_period(period_opt)?;
 				let multiplier = get_multiplier()?;
