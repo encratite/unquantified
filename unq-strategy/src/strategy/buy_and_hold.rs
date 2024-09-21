@@ -39,7 +39,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let symbol_contracts = get_symbol_contracts(&symbols, parameters)?;
 		let side = match parameters.get_bool("short")? {
 			Some(value) => {

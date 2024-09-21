@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
@@ -40,7 +41,7 @@ Strategy parameters specified in the "backtest" command.
 - increment: None
 - values: Some({1.2, 3.4, 4.5})
 */
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyParameter {
 	pub name: String,
@@ -52,9 +53,22 @@ pub struct StrategyParameter {
 	pub string_value: Option<String>
 }
 
-pub struct StrategyParameters(pub Vec<StrategyParameter>);
+#[derive(Clone, Debug)]
+pub struct StrategyParameters(VecDeque<StrategyParameter>);
 
 impl StrategyParameter {
+	pub fn single(name: String, value: f64) -> Self {
+		Self {
+			name,
+			value: Some(value),
+			limit: None,
+			increment: None,
+			values: None,
+			bool_value: None,
+			string_value: None
+		}
+	}
+
 	pub fn get_type(&self) -> Result<StrategyParameterType> {
 		let tuple = (
 			self.value.is_some(),
@@ -77,8 +91,12 @@ impl StrategyParameter {
 }
 
 impl StrategyParameters {
-	pub fn new(params: Vec<StrategyParameter>) -> Self {
-		StrategyParameters(params)
+	pub fn new() -> Self {
+		StrategyParameters(VecDeque::new())
+	}
+
+	pub fn from_vec(parameters: Vec<StrategyParameter>) -> Self {
+		StrategyParameters(VecDeque::from(parameters))
 	}
 
 	pub fn get_value(&self, name: &str) -> Result<Option<f64>> {
@@ -106,6 +124,14 @@ impl StrategyParameters {
 	pub fn get_string(&self, name: &str) -> Result<Option<String>> {
 		let select: StrategyParameterSelect<String> = &|parameter| parameter.string_value.clone();
 		self.get_typed_parameter(name, StrategyParameterType::String, select)
+	}
+
+	pub fn push_back(&mut self, parameter: StrategyParameter) {
+		self.0.push_back(parameter);
+	}
+
+	pub fn pop_front(&mut self) -> Option<StrategyParameter> {
+		self.0.pop_front()
 	}
 
 	fn get_parameter(&self, name: &str) -> Option<&StrategyParameter> {

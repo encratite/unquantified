@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use anyhow::{Result, anyhow, Error, Context, bail};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use stopwatch::Stopwatch;
 use tokio::task;
 use tokio::task::JoinError;
@@ -14,7 +15,7 @@ use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArchive, OhlcMap, OhlcRecord, TimeFrame};
 use unq_common::strategy::{StrategyParameter, StrategyParameters};
 use unq_common::web::WebF64;
-use unq_strategy::get_strategy;
+use unq_strategy::{expand_parameters, get_strategy};
 use crate::correlation::{get_correlation_matrix, CorrelationData};
 use crate::datetime::RelativeDateTime;
 
@@ -269,18 +270,27 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
-	let backtest = Backtest::new(from, to, request.time_frame, backtest_configuration.clone(), asset_manager)?;
-	let backtest_refcell = RefCell::new(backtest);
-	let parameters = StrategyParameters(request.parameters);
-	let mut strategy = get_strategy(&request.strategy, request.symbols, &parameters, &backtest_refcell)?;
-	let mut done = false;
-	while !done {
-		strategy.next()?;
-		let mut backtest_mut = backtest_refcell.borrow_mut();
-		done = backtest_mut.next()?;
-	}
-	let result;
-	let backtest = backtest_refcell.borrow_mut();
-	result = backtest.get_result()?;
+	let parameters = StrategyParameters::from_vec(request.parameters);
+	// Expand range parameters/multi-value parameters and execute backtests in parallel
+	// This isn't very memory-efficient but might be faster than using a mutex for now
+	let expanded_parameters = expand_parameters(&parameters)?;
+	let results = expanded_parameters.par_iter().map(|parameters| -> Result<BacktestResult> {
+		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager)?;
+		let backtest_refcell = RefCell::new(backtest);
+		let mut strategy = get_strategy(&request.strategy, &request.symbols, parameters, &backtest_refcell)?;
+		let mut done = false;
+		while !done {
+			strategy.next()?;
+			let mut backtest_mut = backtest_refcell.borrow_mut();
+			done = backtest_mut.next()?;
+		}
+		let result;
+		let backtest = backtest_refcell.borrow_mut();
+		result = backtest.get_result()?;
+		Ok(result)
+	}).collect::<Result<Vec<BacktestResult>>>()?;
+	// Select best result by Sortino ratio and discard the others
+	let result = results.into_iter().max_by_key(|x| x.get_key())
+		.with_context(|| "Failed to expand strategy parameters")?;
 	Ok(result)
 }

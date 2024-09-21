@@ -29,7 +29,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let Some(indicator_string) = parameters.get_string("indicator")? else {
 			bail!("Missing required parameter \"indicator\"");
 		};

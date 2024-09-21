@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
+use ordered_float::OrderedFloat;
 use serde::Serialize;
 use strum_macros::Display;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
@@ -49,6 +50,7 @@ pub enum EventType {
 	Error
 }
 
+#[derive(Clone)]
 pub struct Backtest<'a> {
 	// Point in time when the backtest starts (from <= t < to)
 	from: NaiveDateTime,
@@ -162,7 +164,7 @@ pub struct BacktestEvent {
 	message: String
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestResult {
 	starting_cash: WebF64,
@@ -187,7 +189,7 @@ pub struct BacktestResult {
 	short_trades: TradeResults
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeResults {
 	trades: u32,
@@ -215,6 +217,7 @@ pub struct DailyStats {
 	overnight_margin: WebF64
 }
 
+#[derive(Clone)]
 struct ProfitDurationStats {
 	side: PositionSide,
 	profit: f64,
@@ -1048,5 +1051,12 @@ impl<'a> Backtest<'a> {
 		let (_, archive) = self.asset_manager.get_asset(&root)?;
 		let source = archive.get_data(&self.time_frame);
 		Ok(source)
+	}
+}
+
+impl BacktestResult {
+	pub fn get_key(&self) -> OrderedFloat<f64> {
+		let ratio = self.sortino_ratio.get();
+		OrderedFloat(ratio)
 	}
 }

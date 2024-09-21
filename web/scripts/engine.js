@@ -201,7 +201,17 @@ export class ScriptingEngine {
 				return parameter;
 			},
 			ValueRangeParameter: (value, __, limit, ___, increment) => {
-				const getValue = x => x.sourceString !== "" ? x.eval() : null;
+				const getValue = x => {
+					let value = x.sourceString !== "" ? x.eval() : null;
+					while (value instanceof Array) {
+						if (value.length > 0) {
+							value = value[0];
+						} else {
+							value = null;
+						}
+					}
+					return value;
+				};
 				const parameter = new Parameter(null, value.eval(), getValue(limit), getValue(increment), null, null, null);
 				return parameter;
 			},
