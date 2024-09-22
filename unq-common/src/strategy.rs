@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
 use serde::Deserialize;
 
@@ -15,6 +16,25 @@ type StrategyParameterSelect<'a, T> = &'a dyn Fn(&StrategyParameter) -> Option<T
 
 pub trait Strategy {
 	fn next(&mut self) -> Result<()>;
+}
+
+#[derive(Debug)]
+pub struct StrategyParameterError {
+	message: String
+}
+
+impl StrategyParameterError {
+	pub fn new(message: String) -> Self {
+		Self {
+			message
+		}
+	}
+}
+
+impl Display for StrategyParameterError {
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+		formatter.write_str(self.message.as_str())
+	}
 }
 
 /*
