@@ -17,6 +17,7 @@ const LOCAL_STORAGE_KEY = "unquantified";
 const NOT_AVAILABLE_SYMBOL = "-";
 // At what point should the max drawdown be highlighted in red?
 const MAX_DRAWDOWN_WARNING = -0.2;
+const RATIO_DIGITS = 2;
 
 const ChartMode = {
 	LINE: "line",
@@ -41,6 +42,44 @@ function createElement(tag, container, properties) {
 		}
 	}
 	return element;
+}
+
+function zeroToNull(number) {
+	return number != 0 ? number : null;
+}
+
+function numericSpan(content) {
+	if (content instanceof Node) {
+		content.classList.add("numeric");
+		return content;
+	} else {
+		return createElement("span", null, {
+			className: "numeric",
+			textContent: content
+		});
+	}
+}
+
+function createTable(rows, container, title) {
+	const table = createElement("table", container);
+	if (title != null) {
+		const row = createElement("tr", table);
+		createElement("td", row, {
+			textContent: title,
+			colSpan: 2
+		});
+	}
+	rows.forEach(columns => {
+		const row = createElement("tr", table);
+		columns.forEach(column => {
+			const cell = createElement("td", row);
+			if (typeof column === "string") {
+				cell.textContent = column;
+			} else {
+				cell.appendChild(column);
+			}
+		});
+	});
 }
 
 export class WebUi {
@@ -143,7 +182,7 @@ export class WebUi {
 		return dateTime.toFormat(formatString);
 	}
 
-	createBacktestTable(result) {
+	createBacktestTables(result) {
 		const container = createElement("div", this.content, {
 			className: "results"
 		});
@@ -156,45 +195,23 @@ export class WebUi {
 		const eventsContainer = createElement("div", container, {
 			className: "events"
 		});
-		const createTable = (rows, container, title) => {
-			const table = createElement("table", container);
-			if (title != null) {
-				const row = createElement("tr", table);
-				createElement("td", row, {
-					textContent: title,
-					colSpan: 2
-				});
-			}
-			rows.forEach(columns => {
-				const row = createElement("tr", table);
-				columns.forEach(column => {
-					const cell = createElement("td", row);
-					if (typeof column === "string") {
-						cell.textContent = column;
-					} else {
-						cell.appendChild(column);
-					}
-				});
-			});
-		};
+		const bestResult = result.bestResult;
 		const generalTableLeft = [
-			["Net profit", this.formatCurrency(result.profit)],
-			["Annual average profit", this.formatCurrency(result.annualAverageProfit)],
-			["Starting capital", this.formatCurrency(result.startingCash)],
-			["Total return", this.formatPercentage(result.totalReturn)],
-			["Compound annual growth rate", this.formatPercentage(result.compoundAnnualGrowthRate)],
-			["Interest accumulated", this.formatCurrency(result.interest)],
+			["Net profit", this.formatCurrency(bestResult.profit)],
+			["Annual average profit", this.formatCurrency(bestResult.annualAverageProfit)],
+			["Starting capital", this.formatCurrency(bestResult.startingCash)],
+			["Total return", this.formatPercentage(bestResult.totalReturn)],
+			["Compound annual growth rate", this.formatPercentage(bestResult.compoundAnnualGrowthRate)],
+			["Interest accumulated", this.formatCurrency(bestResult.interest)],
 		];
-		const ratioDigits = 2;
-		const maxDrawdownEnableColor = result.maxDrawdown < MAX_DRAWDOWN_WARNING;
-		const zeroToNull = number => number != 0 ? number : null;
+		const maxDrawdownEnableColor = bestResult.maxDrawdown < MAX_DRAWDOWN_WARNING;
 		const generalTableRight = [
-			["Sharpe ratio", this.formatNumber(result.sharpeRatio, ratioDigits, true)],
-			["Sortino ratio", this.formatNumber(result.sortinoRatio, ratioDigits, true)],
-			["Calmar ratio", this.formatNumber(result.calmarRatio, ratioDigits, true)],
-			["Max drawdown", this.formatPercentage(zeroToNull(result.maxDrawdown), false, maxDrawdownEnableColor)],
-			["Fees paid", this.formatCurrency(result.fees)],
-			["Fees per profit", this.formatPercentage(zeroToNull(result.feesPercent), false, false)],
+			["Sharpe ratio", this.formatNumber(bestResult.sharpeRatio, RATIO_DIGITS, true)],
+			["Sortino ratio", this.formatNumber(bestResult.sortinoRatio, RATIO_DIGITS, true)],
+			["Calmar ratio", this.formatNumber(bestResult.calmarRatio, RATIO_DIGITS, true)],
+			["Max drawdown", this.formatPercentage(zeroToNull(bestResult.maxDrawdown), false, maxDrawdownEnableColor)],
+			["Fees paid", this.formatCurrency(bestResult.fees)],
+			["Fees per profit", this.formatPercentage(zeroToNull(bestResult.feesPercent), false, false)],
 		];
 		const createTradesTable = (title, tradeResults) => {
 			const rows = [
@@ -209,10 +226,15 @@ export class WebUi {
 		};
 		createTable(generalTableLeft, generalStatsContainer);
 		createTable(generalTableRight, generalStatsContainer);
-		createTradesTable("All trades", result.allTrades);
-		createTradesTable("Long trades only", result.longTrades);
-		createTradesTable("Short trades only", result.shortTrades);
-		let eventRows = result.events.map(event => {
+		createTradesTable("All trades", bestResult.allTrades);
+		createTradesTable("Long trades only", bestResult.longTrades);
+		createTradesTable("Short trades only", bestResult.shortTrades);
+		this.createEventTable(bestResult, eventsContainer);
+		this.createParametersTable(result, container, createTable);
+	}
+
+	createEventTable(bestResult, eventsContainer) {
+		let eventRows = bestResult.events.map(event => {
 			const dateTime = luxon.DateTime.fromISO(event.time);
 			const short =
 				dateTime.hour === 0 &&
@@ -239,6 +261,88 @@ export class WebUi {
 			["Time", "Event", "Description"]
 		].concat(eventRows);
 		createTable(eventRows, eventsContainer);
+	}
+
+	createParametersTable(result, container, createTable) {
+		// Only render the performance overview in case of multiple strategy parameters having been evaluated
+		if (result.results.length <= 1) {
+			return;
+		}
+		const parameterContainer = createElement("div", container, {
+			className: "parameters"
+		});
+		const firstRow = result.results[0];
+		let headers = firstRow.parameters
+			.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
+			.map(parameter => this.getParameterName(parameter.name));
+		headers = headers.concat([
+			// "Profit",
+			"Total return",
+			"CAGR",
+			"Sharpe",
+			"Sortino",
+			// "Calmar",
+			"Drawdown"
+		]);
+		let parameterRows = result.results.map(simplifiedResult => {
+			const maxDrawdownEnableColor = simplifiedResult.maxDrawdown < MAX_DRAWDOWN_WARNING;
+			let output = simplifiedResult.parameters
+				.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
+				.map(parameter => this.getParameterContent(parameter));
+			const numericCells = [
+				// this.formatCurrency(simplifiedResult.profit),
+				this.formatPercentage(simplifiedResult.totalReturn),
+				this.formatPercentage(simplifiedResult.compoundAnnualGrowthRate),
+				this.formatNumber(simplifiedResult.sharpeRatio, RATIO_DIGITS, true),
+				this.formatNumber(simplifiedResult.sortinoRatio, RATIO_DIGITS, true),
+				// this.formatNumber(simplifiedResult.calmarRatio, RATIO_DIGITS, true),
+				this.formatPercentage(zeroToNull(simplifiedResult.maxDrawdown), false, maxDrawdownEnableColor)
+			].map(numericSpan);
+			output = output.concat(numericCells);
+			return output;
+		});
+		parameterRows = [
+			headers
+		].concat(parameterRows);
+		createTable(parameterRows, parameterContainer);
+		createElement("div", container, {
+			className: "statistics",
+			textContent: `Evaluated ${result.results.length} combinations in ${result.stopwatch} s`
+		});
+	}
+
+	isExpandedParameter(parameter, bestParameters) {
+		const baseParameter = bestParameters.find(x => x.name === parameter.name);
+		if (baseParameter == null) {
+			throw new Error("Unable to find a matching base parameter");
+		}
+		const isMulti = baseParameter.limit != null || baseParameter.values != null;
+		return baseParameter.name !== "contracts" && isMulti;
+	}
+
+	getParameterName(name) {
+		name = name.replace(/([A-Z])/g, " $1");
+		name = name.toLowerCase();
+		name = name[0].toUpperCase() + name.substring(1);
+		return name;
+	}
+
+	getParameterContent(parameter) {
+		if (parameter.value != null) {
+			return numericSpan(parameter.value.toString());
+		} else if (parameter.values != null) {
+			if (parameter.values.length != 1) {
+				return `[${parameter.values.join(", ")}]`;
+			} else {
+				return numericSpan(parameter.values[0].toString());
+			}
+		} else if (parameter.boolValue != null) {
+			return parameter.boolValue.toString();
+		} else if (parameter.stringValue != null) {
+			return parameter.stringValue;
+		} else {
+			return "(null)";
+		}
 	}
 
 	createChart(data, mode) {
@@ -972,8 +1076,8 @@ export class WebUi {
 			parameters.getJsonValue(),
 			timeFrame.getJsonValue(),
 		);
-		this.createBacktestTable(backtestResult);
-		this.createChart(backtestResult, ChartMode.EQUITY_CURVE);
+		this.createBacktestTables(backtestResult);
+		this.createChart(backtestResult.bestResult, ChartMode.EQUITY_CURVE);
 		console.log(backtestResult);
 	}
 

@@ -217,6 +217,7 @@ to render a table of parameters and their performance in the web UI.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestSeries {
+	best_parameters: StrategyParameters,
 	best_result: BacktestResult,
 	results: Vec<SimplifiedBacktestResult>,
 	stopwatch: WebF64
@@ -1098,27 +1099,28 @@ impl BacktestResult {
 			parameters,
 			final_cash: self.final_cash.clone(),
 			profit: self.profit.clone(),
-			annual_average_profit: self.profit.clone(),
-			total_return: self.profit.clone(),
-			annual_average_return: self.profit.clone(),
-			compound_annual_growth_rate: self.profit.clone(),
-			sharpe_ratio: self.profit.clone(),
-			sortino_ratio: self.profit.clone(),
-			calmar_ratio: self.profit.clone(),
-			max_drawdown: self.profit.clone()
+			annual_average_profit: self.annual_average_profit.clone(),
+			total_return: self.total_return.clone(),
+			annual_average_return: self.annual_average_return.clone(),
+			compound_annual_growth_rate: self.compound_annual_growth_rate.clone(),
+			sharpe_ratio: self.sharpe_ratio.clone(),
+			sortino_ratio: self.sortino_ratio.clone(),
+			calmar_ratio: self.calmar_ratio.clone(),
+			max_drawdown: self.max_drawdown.clone()
 		}
 	}
 }
 
 impl BacktestSeries {
-	pub fn new(best_result: BacktestResult, results: &Vec<(&StrategyParameters, BacktestResult)>, stopwatch: Stopwatch) -> BacktestSeries {
+	pub fn new(best_parameters: StrategyParameters, best_result: BacktestResult, results: &Vec<(&StrategyParameters, BacktestResult)>, stopwatch: Stopwatch) -> BacktestSeries {
 		let mut simplified_results: Vec<SimplifiedBacktestResult> = results
 			.iter()
 			.map(|(parameters, result)| result.simple((*parameters).clone()))
 			.collect();
-		simplified_results.sort_by_key(|x| OrderedFloat::<f64>(x.sortino_ratio.get()));
+		simplified_results.sort_by_key(|x| std::cmp::Reverse(OrderedFloat::<f64>(x.sortino_ratio.get())));
 		let stopwatch_secs = WebF64::new(stopwatch.elapsed().as_secs_f64());
 		Self {
+			best_parameters,
 			best_result,
 			results: simplified_results,
 			stopwatch: stopwatch_secs

@@ -325,6 +325,6 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 		.max_by_key(|x| x.get_key())
 		.cloned()
 		.with_context(|| "Failed to expand strategy parameters")?;
-	let series = BacktestSeries::new(best_result, &ok_results, stopwatch);
+	let series = BacktestSeries::new(parameters, best_result, &ok_results, stopwatch);
 	Ok(series)
 }
