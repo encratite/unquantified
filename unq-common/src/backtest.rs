@@ -6,12 +6,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use ordered_float::OrderedFloat;
 use serde::Serialize;
 use strum_macros::Display;
+use stopwatch::Stopwatch;
 use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}};
 use crate::globex::GlobexCode;
 use crate::manager::CsvTimeSeries;
 use crate::OhlcArchive;
 use crate::ohlc::{OhlcData, OhlcRecord, TimeFrame};
 use crate::stats::{mean, standard_deviation_mean};
+use crate::strategy::StrategyParameters;
 use crate::web::WebF64;
 
 const FOREX_USD: &str = "USD";
@@ -187,6 +189,37 @@ pub struct BacktestResult {
 	all_trades: TradeResults,
 	long_trades: TradeResults,
 	short_trades: TradeResults
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SimplifiedBacktestResult {
+	parameters: StrategyParameters,
+	final_cash: WebF64,
+	profit: WebF64,
+	annual_average_profit: WebF64,
+	total_return: WebF64,
+	annual_average_return: WebF64,
+	compound_annual_growth_rate: WebF64,
+	sharpe_ratio: WebF64,
+	sortino_ratio: WebF64,
+	calmar_ratio: WebF64,
+	max_drawdown: WebF64
+}
+
+/*
+This data type is the universal result wrapper for both a single backtest as well as a series of backtests
+performed by recursive strategy parameter expansion. Since it would be too costly to return the full set
+of BacktestResult objects, it only returns the one with the highest Sortino ratio and reduces the others
+to a simplified representation that doesn't require as much memory. This simplified representation is used
+to render a table of parameters and their performance in the web UI.
+*/
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestSeries {
+	best_result: BacktestResult,
+	results: Vec<SimplifiedBacktestResult>,
+	stopwatch: WebF64
 }
 
 #[derive(Serialize, Clone)]
@@ -1058,5 +1091,37 @@ impl BacktestResult {
 	pub fn get_key(&self) -> OrderedFloat<f64> {
 		let ratio = self.sortino_ratio.get();
 		OrderedFloat(ratio)
+	}
+
+	pub fn simple(&self, parameters: StrategyParameters) -> SimplifiedBacktestResult {
+		SimplifiedBacktestResult {
+			parameters,
+			final_cash: self.final_cash.clone(),
+			profit: self.profit.clone(),
+			annual_average_profit: self.profit.clone(),
+			total_return: self.profit.clone(),
+			annual_average_return: self.profit.clone(),
+			compound_annual_growth_rate: self.profit.clone(),
+			sharpe_ratio: self.profit.clone(),
+			sortino_ratio: self.profit.clone(),
+			calmar_ratio: self.profit.clone(),
+			max_drawdown: self.profit.clone()
+		}
+	}
+}
+
+impl BacktestSeries {
+	pub fn new(best_result: BacktestResult, results: &Vec<(&StrategyParameters, BacktestResult)>, stopwatch: Stopwatch) -> BacktestSeries {
+		let mut simplified_results: Vec<SimplifiedBacktestResult> = results
+			.iter()
+			.map(|(parameters, result)| result.simple((*parameters).clone()))
+			.collect();
+		simplified_results.sort_by_key(|x| OrderedFloat::<f64>(x.sortino_ratio.get()));
+		let stopwatch_secs = WebF64::new(stopwatch.elapsed().as_secs_f64());
+		Self {
+			best_result,
+			results: simplified_results,
+			stopwatch: stopwatch_secs
+		}
 	}
 }

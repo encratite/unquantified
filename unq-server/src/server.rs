@@ -10,7 +10,7 @@ use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use stopwatch::Stopwatch;
 use tokio::task;
 use tokio::task::JoinError;
-use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult};
+use unq_common::backtest::{Backtest, BacktestConfiguration, BacktestResult, BacktestSeries};
 use unq_common::manager::AssetManager;
 use unq_common::ohlc::{OhlcArchive, OhlcMap, OhlcRecord, TimeFrame};
 use unq_common::strategy::{StrategyParameter, StrategyParameterError, StrategyParameters};
@@ -266,7 +266,8 @@ fn get_unprocessed_records(from: &NaiveDateTime, to: &NaiveDateTime, source: &Oh
 		.collect()
 }
 
-fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager, backtest_configuration: &BacktestConfiguration) -> Result<BacktestResult> {
+fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager, backtest_configuration: &BacktestConfiguration) -> Result<BacktestSeries> {
+	let stopwatch = Stopwatch::start_new();
 	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
@@ -274,7 +275,7 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	// Expand range parameters/multi-value parameters and execute backtests in parallel
 	// This isn't very memory-efficient but might be faster than using a mutex for now
 	let expanded_parameters = expand_parameters(&parameters)?;
-	let results = expanded_parameters.par_iter().map(|parameters| -> Result<BacktestResult> {
+	let results = expanded_parameters.par_iter().map(|parameters| -> Result<(&StrategyParameters, BacktestResult)> {
 		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager)?;
 		let backtest_refcell = RefCell::new(backtest);
 		let strategy_result = get_strategy(&request.strategy, &request.symbols, parameters, &backtest_refcell);
@@ -291,9 +292,9 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 		let result;
 		let backtest = backtest_refcell.borrow_mut();
 		result = backtest.get_result()?;
-		Ok(result)
-	}).collect::<Vec<Result<BacktestResult>>>();
-	let ok_results: Vec<&BacktestResult> = results.iter().filter_map(|x| x.as_ref().ok()).collect();
+		Ok((parameters, result))
+	}).collect::<Vec<Result<(&StrategyParameters, BacktestResult)>>>();
+	let ok_results: Vec<(&StrategyParameters, BacktestResult)> = results.iter().filter_map(|x| x.as_ref().ok()).cloned().collect();
 	if ok_results.is_empty() {
 		if results.is_empty() {
 			bail!("Parameter expansion failed");
@@ -316,9 +317,14 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 			bail!(x.to_string());
 		};
 	}
+	// stopwatch.elapsed().as_secs_f64()
 	// Select best result by Sortino ratio and discard the others
-	let result = ok_results.into_iter().max_by_key(|x| x.get_key())
+	let best_result = ok_results
+		.iter()
+		.map(|(_, result)| result)
+		.max_by_key(|x| x.get_key())
 		.cloned()
 		.with_context(|| "Failed to expand strategy parameters")?;
-	Ok(result)
+	let series = BacktestSeries::new(best_result, &ok_results, stopwatch);
+	Ok(series)
 }

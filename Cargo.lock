@@ -1468,6 +1468,7 @@ dependencies = [
  "regex",
  "rkyv",
  "serde",
+ "stopwatch",
  "strum",
  "strum_macros",
  "zstd",

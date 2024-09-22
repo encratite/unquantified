@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Debug)]
 pub enum StrategyParameterType {
@@ -61,7 +61,7 @@ Strategy parameters specified in the "backtest" command.
 - increment: None
 - values: Some({1.2, 3.4, 4.5})
 */
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyParameter {
 	pub name: String,
@@ -73,7 +73,7 @@ pub struct StrategyParameter {
 	pub string_value: Option<String>
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 pub struct StrategyParameters(VecDeque<StrategyParameter>);
 
 impl StrategyParameter {
