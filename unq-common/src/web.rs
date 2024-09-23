@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use serde::{Deserialize, Serialize, Serializer};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -24,34 +23,6 @@ impl WebF64 {
 
 	pub fn get(&self) -> f64 {
 		self.value
-	}
-}
-
-impl PartialOrd for WebF64 {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		self.value.partial_cmp(&other.value)
-	}
-
-	fn lt(&self, other: &Self) -> bool {
-		self.value < other.value
-	}
-
-	fn le(&self, other: &Self) -> bool {
-		self.value <= other.value
-	}
-
-	fn gt(&self, other: &Self) -> bool {
-		self.value > other.value
-	}
-
-	fn ge(&self, other: &Self) -> bool {
-		self.value >= other.value
-	}
-}
-
-impl PartialEq for WebF64 {
-	fn eq(&self, other: &Self) -> bool {
-		self.value == other.value
 	}
 }
 
