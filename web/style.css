@@ -11,10 +11,10 @@ body {
 	border: 1px solid #bbb;
 	margin-bottom: 1.8em;
 	width: var(--base-width);
+}
 
-	.read-only {
-		background-color: #f8f8f8;
-	}
+.read-only {
+	background-color: #eee;
 }
 
 .plot {
@@ -234,7 +234,7 @@ body {
 	}
 
 	.parameters {
-		height: 14rem;
+		height: 11.8rem;
 		margin-top: 1.5em;
 		margin-bottom: 1em;
 

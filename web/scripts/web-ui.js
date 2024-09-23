@@ -91,6 +91,7 @@ export class WebUi {
 		this.engine = null;
 		this.history = [];
 		this.historyIndex = null;
+		this.executingQuery = false;
 	}
 
 	async initialize() {
@@ -903,19 +904,22 @@ export class WebUi {
 	}
 
 	async onEditorKeyDown(event) {
-		if (event.key === "Enter" && !event.shiftKey) {
+		const readOnlyClass = "read-only";
+		if (this.executingQuery === false && event.key === "Enter" && !event.shiftKey) {
 			event.preventDefault();
 			const script = this.editor.getValue();	
 			this.enableEditor(false);
+			this.executingQuery = true;
+			this.editorContainer.classList.add(readOnlyClass);
 			try {
 				await this.engine.run(script);
+				this.disableHighlight();
 				const data = this.getLocalStorageData();
 				data.lastScript = script;
 				this.history.push(script);
 				data.variables = this.engine.serializeVariables();
 				this.setLocalStorageData(data);
-				this.disableHighlight();
-				this.editorContainer.classList.add("read-only");
+				this.editorContainer.classList.remove(readOnlyClass);
 				this.createEditor();
 				window.scrollTo(0, document.body.scrollHeight);
 			}
@@ -923,7 +927,9 @@ export class WebUi {
 				toastr.error(error, "Script Error");
 				console.error(error);
 				this.enableEditor(true);
+				this.editorContainer.classList.remove(readOnlyClass);
 			}
+			this.executingQuery = false;
 		}
 	}
 
@@ -976,11 +982,16 @@ export class WebUi {
 		const editor = this.editor;
 		editor.session.setUseWorker(enable);
 		editor.setReadOnly(!enable);
+		this.enableCursor(enable);
+	}
+
+	enableCursor(enable) {
+		this.editor.renderer.$cursorLayer.element.style.display = enable ? "" : "none";
 	}
 
 	disableHighlight() {
 		const editor = this.editor;
-		editor.renderer.$cursorLayer.element.style.display = "none";
+		this.enableCursor(false);
 		editor.$highlightTagPending = true;
 		editor.$highlightPending = true;
 		const session = editor.session;
