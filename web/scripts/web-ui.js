@@ -276,6 +276,7 @@ export class WebUi {
 			.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
 			.map(parameter => this.getParameterName(parameter.name));
 		headers = headers.concat([
+			"Trades",
 			"Total return",
 			"CAGR",
 			"Sharpe",
@@ -288,6 +289,7 @@ export class WebUi {
 				.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
 				.map(parameter => this.getParameterContent(parameter));
 			const numericCells = [
+				this.formatInt(zeroToNull(simplifiedResult.trades)),
 				this.formatPercentage(simplifiedResult.totalReturn),
 				this.formatPercentage(simplifiedResult.compoundAnnualGrowthRate),
 				this.formatNumber(simplifiedResult.sharpeRatio, RATIO_DIGITS, true),

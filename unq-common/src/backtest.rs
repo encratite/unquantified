@@ -196,6 +196,7 @@ pub struct BacktestResult {
 #[serde(rename_all = "camelCase")]
 pub struct SimplifiedBacktestResult {
 	parameters: StrategyParameters,
+	trades: u32,
 	final_cash: WebF64,
 	profit: WebF64,
 	annual_average_profit: WebF64,
@@ -1094,6 +1095,7 @@ impl BacktestResult {
 	pub fn simple(&self, parameters: StrategyParameters) -> SimplifiedBacktestResult {
 		SimplifiedBacktestResult {
 			parameters,
+			trades: self.all_trades.trades,
 			final_cash: self.final_cash.clone(),
 			profit: self.profit.clone(),
 			annual_average_profit: self.annual_average_profit.clone(),
