@@ -197,23 +197,6 @@ export class WebUi {
 		const eventsContainer = createElement("div", container, {
 			className: "events"
 		});
-		const bestResult = result.bestResult;
-		const generalTableLeft = [
-			["Net profit", this.formatCurrency(bestResult.profit)],
-			["Annual average profit", this.formatCurrency(bestResult.annualAverageProfit)],
-			["Starting capital", this.formatCurrency(bestResult.startingCash)],
-			["Total return", this.formatPercentage(bestResult.totalReturn)],
-			["Compound annual growth rate", this.formatPercentage(bestResult.compoundAnnualGrowthRate)],
-			["Interest accumulated", this.formatCurrency(bestResult.interest)],
-		];
-		const generalTableRight = [
-			["Sharpe ratio", this.formatNumber(bestResult.sharpeRatio, RATIO_DIGITS, true)],
-			["Sortino ratio", this.formatNumber(bestResult.sortinoRatio, RATIO_DIGITS, true)],
-			["Calmar ratio", this.formatNumber(bestResult.calmarRatio, RATIO_DIGITS, true)],
-			["Max drawdown", this.formatMaxDrawdown(bestResult.maxDrawdown)],
-			["Fees paid", this.formatCurrency(bestResult.fees)],
-			["Fees per profit", this.formatPercentage(zeroToNull(bestResult.feesPercent), false, false)],
-		];
 		const createTradesTable = (title, tradeResults) => {
 			const rows = [
 				["Trades", this.formatInt(zeroToNull(tradeResults.trades))],
@@ -225,8 +208,10 @@ export class WebUi {
 			];
 			createTable(rows, tradesContainer, title);
 		};
-		createTable(generalTableLeft, generalStatsContainer);
-		createTable(generalTableRight, generalStatsContainer);
+		const bestResult = result.bestResult;
+		const tables = this.getGeneralTables(bestResult, true);
+		createTable(tables.left, generalStatsContainer);
+		createTable(tables.right, generalStatsContainer);
 		createTradesTable("All trades", bestResult.allTrades);
 		createTradesTable("Long trades only", bestResult.longTrades);
 		createTradesTable("Short trades only", bestResult.shortTrades);
@@ -330,20 +315,37 @@ export class WebUi {
 		let medianContainer = createElement("div", container, {
 			className: "median"
 		});
-		const tableLeft = [
-			["Net profit", this.formatCurrency(medianResult.profit)],
-			["Annual average profit", this.formatCurrency(medianResult.annualAverageProfit)],
-			["Total return", this.formatPercentage(medianResult.totalReturn)],
-			["Compound annual growth rate", this.formatPercentage(medianResult.compoundAnnualGrowthRate)]
+		const tables = this.getGeneralTables(medianResult, false);
+		createTable(tables.left, medianContainer);
+		createTable(tables.right, medianContainer);
+	}
+
+	getGeneralTables(result, fullVersion) {
+		const leftTable = [
+			["Net profit", this.formatCurrency(result.profit), true],
+			["Annual average profit", this.formatCurrency(result.annualAverageProfit), true],
+			["Starting capital", this.formatCurrency(result.startingCash), fullVersion],
+			["Total return", this.formatPercentage(result.totalReturn), true],
+			["Compound annual growth rate", this.formatPercentage(result.compoundAnnualGrowthRate), true],
+			["Interest accumulated", this.formatCurrency(result.interest), fullVersion],
 		];
-		const tableRight = [
-			["Sharpe ratio", this.formatNumber(medianResult.sharpeRatio, RATIO_DIGITS, true)],
-			["Sortino ratio", this.formatNumber(medianResult.sortinoRatio, RATIO_DIGITS, true)],
-			["Calmar ratio", this.formatNumber(medianResult.calmarRatio, RATIO_DIGITS, true)],
-			["Max drawdown", this.formatMaxDrawdown(medianResult.maxDrawdown)],
+		const rightTable = [
+			["Sharpe ratio", this.formatNumber(result.sharpeRatio, RATIO_DIGITS, true), true],
+			["Sortino ratio", this.formatNumber(result.sortinoRatio, RATIO_DIGITS, true), true],
+			["Calmar ratio", this.formatNumber(result.calmarRatio, RATIO_DIGITS, true), true],
+			["Max drawdown", this.formatMaxDrawdown(result.maxDrawdown), true],
+			["Fees paid", this.formatCurrency(result.fees), fullVersion],
+			["Fees per profit", this.formatPercentage(zeroToNull(result.feesPercent), false, false), fullVersion],
 		];
-		createTable(tableLeft, medianContainer);
-		createTable(tableRight, medianContainer);
+		const filterRows = rows => {
+			const filteredRows = rows.filter(row => row[2]);
+			const reducedRows = filteredRows.map(row => [row[0], row[1]]);
+			return reducedRows;
+		};
+		return {
+			left: filterRows(leftTable),
+			right: filterRows(rightTable)
+		};
 	}
 
 	isExpandedParameter(parameter, bestParameters) {
