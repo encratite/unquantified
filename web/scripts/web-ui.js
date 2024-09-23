@@ -97,6 +97,7 @@ export class WebUi {
 		this.content = document.getElementById("content");
 		this.createEditor();
 		const callHandlers = {
+			clear: this.clear.bind(this),
 			candle: this.plotCandlestick.bind(this),
 			plot: this.plotLine.bind(this),
 			correlation: this.correlation.bind(this),
@@ -1034,6 +1035,10 @@ export class WebUi {
 		this.validateTimeFrame(timeFrame);
 		const history = await this.getHistory(symbols, from.getJsonValue(), to.getJsonValue(), timeFrame.getJsonValue());
 		this.createChart(history, mode);
+	}
+
+	async clear(_callArguments) {
+		this.content.replaceChildren();
 	}
 
 	async plotCandlestick(callArguments) {

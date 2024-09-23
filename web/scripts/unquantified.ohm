@@ -1,6 +1,6 @@
 Unquantified {
 	Program = Statement*
-	Statement = (Assignment | Call) (eol | end)
+	Statement = (Assignment | Call | SimpleCall) (eol | end)
 	Assignment = variable "=" (Value | Parameters)
 	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | stringValue | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
@@ -8,6 +8,7 @@ Unquantified {
 	ValueRangeParameter = numeric ("to" numeric ("step" numeric)?)?
 	MultiValueParameter = "[" numeric ("," numeric)* "]"
 	Call = identifier Value ("," Value)*
+	SimpleCall = identifier
 	SymbolArray = "[" symbol SeparatedSymbol* "]"
 	SeparatedSymbol = ("," | "|") symbol
 	identifier = lower (alnum | "_") *

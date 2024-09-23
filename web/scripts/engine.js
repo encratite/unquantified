@@ -190,6 +190,10 @@ export class ScriptingEngine {
 				const call = new Call(identifier.sourceString, callArguments);
 				return call;
 			},
+			SimpleCall: (identifier) => {
+				const call = new Call(identifier.sourceString, []);
+				return call;
+			},
 			Parameters: (_, __, first, ___, ____, others, _____, ______) => {
 				const parameterArray = [first.eval()].concat(others.eval());
 				const parameters = new Parameters(parameterArray);
