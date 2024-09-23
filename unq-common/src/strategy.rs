@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use crate::web::WebF64;
 
 #[derive(PartialEq, Debug)]
 pub enum StrategyParameterType {
@@ -65,10 +66,10 @@ Strategy parameters specified in the "backtest" command.
 #[serde(rename_all = "camelCase")]
 pub struct StrategyParameter {
 	pub name: String,
-	pub value: Option<f64>,
-	pub limit: Option<f64>,
-	pub increment: Option<f64>,
-	pub values: Option<Vec<f64>>,
+	pub value: Option<WebF64>,
+	pub limit: Option<WebF64>,
+	pub increment: Option<WebF64>,
+	pub values: Option<Vec<WebF64>>,
 	pub bool_value: Option<bool>,
 	pub string_value: Option<String>
 }
@@ -80,7 +81,7 @@ impl StrategyParameter {
 	pub fn single(name: String, value: f64) -> Self {
 		Self {
 			name,
-			value: Some(value),
+			value: Some(WebF64::new(value)),
 			limit: None,
 			increment: None,
 			values: None,
@@ -108,36 +109,6 @@ impl StrategyParameter {
 			_ => bail!("Invalid combination of values in strategy parameter")
 		}
 	}
-
-	// Workaround for not using WebF64
-	fn round(&mut self) {
-		self.value = Self::round_opt(self.value);
-		self.limit = Self::round_opt(self.limit);
-		self.increment = Self::round_opt(self.increment);
-		self.values = self.round_values();
-	}
-
-	fn round_f64(value: f64) -> f64 {
-		const ROUND_FACTOR: f64 = 100.0;
-		(value * ROUND_FACTOR).round() / ROUND_FACTOR
-	}
-
-	fn round_opt(value: Option<f64>) -> Option<f64> {
-		match value {
-			Some(x) => Some(Self::round_f64(x)),
-			None => None
-		}
-	}
-
-	fn round_values(&self) -> Option<Vec<f64>> {
-		match &self.values {
-			Some(x) => {
-				let rounded_values = x.iter().map(|x| Self::round_f64(*x)).collect();
-				Some(rounded_values)
-			},
-			None => None
-		}
-	}
 }
 
 impl StrategyParameters {
@@ -150,15 +121,21 @@ impl StrategyParameters {
 	}
 
 	pub fn get_value(&self, name: &str) -> Result<Option<f64>> {
-		let select: StrategyParameterSelect<f64> = &|parameter| parameter.value;
+		let select: StrategyParameterSelect<f64> = &|parameter| parameter.value.clone().map(|x| x.get());
 		self.get_typed_parameter(name, StrategyParameterType::NumericSingle, select)
 	}
 
 	pub fn get_values(&self, name: &str) -> Result<Option<Vec<f64>>> {
 		if let Some(parameter) = self.get_parameter(name) {
 			match parameter.get_type()? {
-				StrategyParameterType::NumericSingle => Ok(Some(vec![parameter.value.unwrap()])),
-				StrategyParameterType::NumericMulti => Ok(parameter.values.clone()),
+				StrategyParameterType::NumericSingle => {
+					let values = vec![parameter.value.clone().unwrap().get()];
+					Ok(Some(values))
+				},
+				StrategyParameterType::NumericMulti => {
+					let values = parameter.values.clone().unwrap().iter().map(|x| x.get()).collect();
+					Ok(Some(values))
+				},
 				other => bail!("Found parameter type \"{other:?}\", expected a numeric type")
 			}
 		} else {
@@ -182,10 +159,6 @@ impl StrategyParameters {
 
 	pub fn pop_front(&mut self) -> Option<StrategyParameter> {
 		self.0.pop_front()
-	}
-
-	pub fn round(&mut self) {
-		self.0.iter_mut().for_each(|x| x.round());
 	}
 
 	fn get_parameter(&self, name: &str) -> Option<&StrategyParameter> {

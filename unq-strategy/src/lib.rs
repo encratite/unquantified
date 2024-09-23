@@ -66,14 +66,14 @@ fn generate_parameters(parameters_input: &StrategyParameters, parameters_output:
 	match parameter.get_type()? {
 		StrategyParameterType::NumericRange => {
 			// Expand {x: 5 to 15 step 5} to [{x: 5}, {x: 10}, {x: 15}]
-			let (Some(value), Some(limit)) = (parameter.value, parameter.limit) else {
+			let (Some(value), Some(limit)) = (parameter.value.map(|x| x.get()), parameter.limit.map(|x| x.get())) else {
 				bail!("Missing numeric range parameters");
 			};
 			if value >= limit {
 				bail!("Invalid from/to parameters in numeric range");
 			}
 			// Increment defaults to 1.0
-			let increment = parameter.increment.unwrap_or(1.0);
+			let increment = parameter.increment.map(|x| x.get()).unwrap_or(1.0);
 			if increment <= 0.0 {
 				bail!("Invalid from/to parameters in numeric range");
 			}
@@ -90,7 +90,7 @@ fn generate_parameters(parameters_input: &StrategyParameters, parameters_output:
 				bail!("Unable to extract values");
 			};
 			for x in values {
-				let iteration_parameter = StrategyParameter::single(parameter.name.clone(), x);
+				let iteration_parameter = StrategyParameter::single(parameter.name.clone(), x.get());
 				generate(iteration_parameter)?;
 			}
 		},
