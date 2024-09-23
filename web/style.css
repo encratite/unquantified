@@ -238,11 +238,7 @@ body {
 			white-space: nowrap;
 		}
 
-		tr:first-child td {
-			text-align: center;
-		}
-
-		td:has(span.numeric) {
+		td:has(span.numeric), td.numeric {
 			text-align: right;
 		}
 	}

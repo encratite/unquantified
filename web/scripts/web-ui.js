@@ -80,6 +80,7 @@ function createTable(rows, container, title) {
 			}
 		});
 	});
+	return table;
 }
 
 export class WebUi {
@@ -230,7 +231,7 @@ export class WebUi {
 		createTradesTable("Long trades only", bestResult.longTrades);
 		createTradesTable("Short trades only", bestResult.shortTrades);
 		this.createEventTable(bestResult, eventsContainer);
-		this.createParametersTable(result, container, createTable);
+		this.createParametersTable(result, container);
 	}
 
 	createEventTable(bestResult, eventsContainer) {
@@ -262,7 +263,7 @@ export class WebUi {
 		createTable(eventRows, eventsContainer);
 	}
 
-	createParametersTable(result, container, createTable) {
+	createParametersTable(result, container) {
 		// Only render the performance overview in case of multiple strategy parameters having been evaluated
 		if (result.results.length <= 1) {
 			return;
@@ -299,7 +300,20 @@ export class WebUi {
 		parameterRows = [
 			headers
 		].concat(parameterRows);
-		createTable(parameterRows, parameterContainer);
+		const table = createTable(parameterRows, parameterContainer);
+		const tableHeaders = table.firstChild;
+		const secondRow = table.querySelectorAll("tr:nth-child(2) td");
+		const className = "numeric";
+		for (let i = 0; i < secondRow.length; i++) {
+			const span = secondRow[i].firstChild;
+			if (
+				span != null &&
+				span instanceof HTMLSpanElement &&
+				span.className === className
+			) {
+				tableHeaders.childNodes[i].className = className;
+			}
+		}
 		createElement("div", container, {
 			className: "statistics",
 			textContent: `Evaluated ${result.results.length} combinations in ${result.stopwatch} s`
