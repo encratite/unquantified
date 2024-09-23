@@ -18,6 +18,7 @@ const NOT_AVAILABLE_SYMBOL = "-";
 // At what point should the max drawdown be highlighted in red?
 const MAX_DRAWDOWN_WARNING = -0.2;
 const RATIO_DIGITS = 2;
+const HISTORY_LIMIT = 25;
 
 const ChartMode = {
 	LINE: "line",
@@ -89,7 +90,6 @@ export class WebUi {
 		this.editor = null;
 		this.editorContainer = null;
 		this.engine = null;
-		this.history = [];
 		this.historyIndex = null;
 		this.executingQuery = false;
 	}
@@ -99,6 +99,8 @@ export class WebUi {
 		this.createEditor();
 		const callHandlers = {
 			clear: this.clear.bind(this),
+			history: this.history.bind(this),
+			clearHistory: this.clearHistory.bind(this),
 			candle: this.plotCandlestick.bind(this),
 			plot: this.plotLine.bind(this),
 			correlation: this.correlation.bind(this),
@@ -107,8 +109,10 @@ export class WebUi {
 		this.engine = new ScriptingEngine(callHandlers);
 		await this.engine.initialize();
 		const data = this.getLocalStorageData();
-		if (data.lastScript != null) {
-			this.editor.setValue(data.lastScript, 1);
+		const history = data.history;
+		if (history != null && history.length > 0) {
+			const lastScript = history[history.length - 1];
+			this.editor.setValue(lastScript, 1);
 		}
 		if (data.variables != null) {
 			this.engine.deserializeVariables(data.variables);
@@ -900,7 +904,6 @@ export class WebUi {
 		editor.navigateFileEnd();
 		this.editor = editor;
 		this.editorContainer = container;
-		this.enableHistory = true;
 	}
 
 	async onEditorKeyDown(event) {
@@ -915,8 +918,7 @@ export class WebUi {
 				await this.engine.run(script);
 				this.disableHighlight();
 				const data = this.getLocalStorageData();
-				data.lastScript = script;
-				this.history.push(script);
+				this.updateHistory(script, data);
 				data.variables = this.engine.serializeVariables();
 				this.setLocalStorageData(data);
 				this.editorContainer.classList.remove(readOnlyClass);
@@ -933,33 +935,56 @@ export class WebUi {
 		}
 	}
 
+	updateHistory(script, data) {
+		if (data.history == null) {
+			data.history = [];
+		}
+		// Only add the script to the history if it's different from the most recent entry
+		if (data.history.length > 0 && data.history[data.history.length - 1] === script) {
+			return;
+		}
+		// Also, don't add plain history commands to the history
+		if (script.trim() === "history") {
+			return;
+		}
+		data.history.push(script);
+		// Limit the history to n entries
+		if (data.history.length > HISTORY_LIMIT) {
+			data.history = data.history.slice(HISTORY_LIMIT - data.history.length);
+		}
+	}
+
 	onEditorKeyUp(event) {
-		const arrowUp = event.key === "ArrowUp";
-		const arrowDown = event.key === "ArrowDown";
-		const historyLast = this.history.length - 1;
+		const data = this.getLocalStorageData();
+		if (data.history == null) {
+			return;
+		}
+		const historyLast = data.history.length - 1;
 		const incrementIndex = direction => {
 			this.historyIndex += direction;
 			this.historyIndex = Math.max(this.historyIndex, 0);
 			this.historyIndex = Math.min(this.historyIndex, historyLast);
 		};
-		if (this.enableHistory && arrowUp) {
+		const ctrlArrowUp = event.ctrlKey && event.key === "ArrowUp";
+		const ctrlArrowDown = event.ctrlKey && event.key === "ArrowDown";
+		if (ctrlArrowUp) {
 			if (this.historyIndex === null) {
 				this.historyIndex = historyLast;
 			} else {
 				incrementIndex(-1);
 			}
 			this.showHistory(event);
-		} else if (this.enableHistory && arrowDown && this.historyIndex !== null) {
+		} else if (ctrlArrowDown && this.historyIndex !== null) {
 			incrementIndex(1);
 			this.showHistory(event);
-		} else if (event.key !== "Enter") {
-			this.enableHistory = false;
+		} else {
 			this.historyIndex = null;
 		}
 	}
 
 	showHistory(event) {
-		const history = this.history[this.historyIndex];
+		const data = this.getLocalStorageData();
+		const history = data.history[this.historyIndex];
 		this.editor.setValue(history, 1);
 		event.preventDefault();
 	}
@@ -1078,8 +1103,29 @@ export class WebUi {
 		this.createChart(history, mode);
 	}
 
-	async clear(_callArguments) {
+	async clear(callArguments) {
+		this.validateArgumentCount(callArguments, 0, 0);
 		this.content.replaceChildren();
+	}
+
+	async history(callArguments) {
+		this.validateArgumentCount(callArguments, 0, 0);
+		const data = this.getLocalStorageData();
+		const history = data.history;
+		if (history == null || history.length === 0) {
+			throw new Error("No history available yet");
+		}
+		const script = history.join("\n");
+		this.createEditor();
+		this.editor.setValue(script, 1);
+	}
+
+	async clearHistory(callArguments) {
+		this.validateArgumentCount(callArguments, 0, 0);
+		const data = this.getLocalStorageData();
+		delete data.history;
+		this.setLocalStorageData(data);
+		toastr.success("Command history has been cleared");
 	}
 
 	async plotCandlestick(callArguments) {
