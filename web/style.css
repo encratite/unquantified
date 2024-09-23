@@ -238,6 +238,10 @@ body {
 			white-space: nowrap;
 		}
 
+		tr:first-child td {
+			text-align: center;
+		}
+
 		td:has(span.numeric) {
 			text-align: right;
 		}
@@ -246,7 +250,7 @@ body {
 	.statistics {
 		text-align: right;
 		font-size: 0.85em;
-		margin-right: 1.3em;
+		margin-right: 0.6em;
 		color: #888;
 	}
 }

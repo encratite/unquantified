@@ -288,8 +288,8 @@ impl RelativeStrengthIndicator {
 			}
 			previous_close = close;
 		}
-		let up_mean = mean(up.iter()).unwrap();
-		let down_mean = mean(down.iter()).unwrap();
+		let up_mean = mean(up.iter()).unwrap_or(0.0);
+		let down_mean = mean(down.iter()).unwrap_or(0.0);
 		let rsi = 100.0 * up_mean / (up_mean + down_mean);
 		rsi
 	}

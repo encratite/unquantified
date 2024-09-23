@@ -317,12 +317,11 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 			bail!(x.to_string());
 		};
 	}
-	// stopwatch.elapsed().as_secs_f64()
 	// Select best result by Sortino ratio and discard the others
 	let best_result = ok_results
 		.iter()
 		.map(|(_, result)| result)
-		.max_by_key(|x| x.get_key())
+		.max()
 		.cloned()
 		.with_context(|| "Failed to expand strategy parameters")?;
 	let series = BacktestSeries::new(parameters, best_result, &ok_results, stopwatch);

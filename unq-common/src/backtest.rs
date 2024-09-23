@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
-use ordered_float::OrderedFloat;
 use serde::Serialize;
 use strum_macros::Display;
 use stopwatch::Stopwatch;
@@ -347,6 +346,7 @@ impl<'a> Backtest<'a> {
 
 	pub fn get_result(&self) -> Result<BacktestResult> {
 		const DAYS_PER_YEAR: f64 = 365.25;
+		let events = self.events.iter().rev().cloned().collect();
 		let profit = self.cash - self.configuration.starting_cash;
 		let time_difference = self.to - self.from;
 		let years = (time_difference.num_days() as f64) / DAYS_PER_YEAR;
@@ -368,7 +368,7 @@ impl<'a> Backtest<'a> {
 		let result = BacktestResult {
 			starting_cash: WebF64::new(self.configuration.starting_cash),
 			final_cash: WebF64::new(self.cash),
-			events: self.events.clone(),
+			events,
 			equity_curve_daily,
 			equity_curve_trades: self.equity_curve_trades.clone(),
 			fees: WebF64::new(self.fees),
@@ -1089,11 +1089,6 @@ impl<'a> Backtest<'a> {
 }
 
 impl BacktestResult {
-	pub fn get_key(&self) -> OrderedFloat<f64> {
-		let ratio = self.sortino_ratio.get();
-		OrderedFloat(ratio)
-	}
-
 	pub fn simple(&self, parameters: StrategyParameters) -> SimplifiedBacktestResult {
 		SimplifiedBacktestResult {
 			parameters,
@@ -1117,7 +1112,7 @@ impl BacktestSeries {
 			.iter()
 			.map(|(parameters, result)| result.simple((*parameters).clone()))
 			.collect();
-		simplified_results.sort_by_key(|x| std::cmp::Reverse(OrderedFloat::<f64>(x.sortino_ratio.get())));
+		simplified_results.sort_by(|x, y| y.cmp(x));
 		let stopwatch_secs = WebF64::new(stopwatch.elapsed().as_secs_f64());
 		Self {
 			best_parameters,
@@ -1125,5 +1120,64 @@ impl BacktestSeries {
 			results: simplified_results,
 			stopwatch: stopwatch_secs
 		}
+	}
+}
+
+impl PartialEq for BacktestResult {
+	fn eq(&self, other: &Self) -> bool {
+		compare_webf64(&self.sortino_ratio, &other.sortino_ratio) == Ordering::Equal &&
+		compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio) == Ordering::Equal &&
+		compare_webf64(&self.total_return, &other.total_return) == Ordering::Equal
+	}
+}
+
+impl Eq for BacktestResult {}
+
+impl PartialOrd for BacktestResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for BacktestResult {
+	fn cmp(&self, other: &Self) -> Ordering {
+		compare_webf64(&self.sortino_ratio, &other.sortino_ratio)
+			.then(compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio))
+			.then(compare_webf64(&self.total_return, &self.total_return))
+	}
+}
+
+impl PartialEq for SimplifiedBacktestResult {
+	fn eq(&self, other: &Self) -> bool {
+		compare_webf64(&self.sortino_ratio, &other.sortino_ratio) == Ordering::Equal &&
+			compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio) == Ordering::Equal &&
+			compare_webf64(&self.total_return, &other.total_return) == Ordering::Equal
+	}
+}
+
+impl Eq for SimplifiedBacktestResult {}
+
+impl PartialOrd for SimplifiedBacktestResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for SimplifiedBacktestResult {
+	fn cmp(&self, other: &Self) -> Ordering {
+		compare_webf64(&self.sortino_ratio, &other.sortino_ratio)
+			.then(compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio))
+			.then(compare_webf64(&self.total_return, &self.total_return))
+	}
+}
+
+fn compare_webf64(x: &WebF64, y: &WebF64) -> Ordering {
+	let x = x.get();
+	let y = y.get();
+	match (x.is_nan(), y.is_nan()) {
+		(true, true) => Ordering::Equal,
+		(true, false) => Ordering::Less,
+		(false, true) => Ordering::Greater,
+		(false, false) => x.partial_cmp(&y).unwrap()
 	}
 }

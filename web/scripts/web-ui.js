@@ -256,7 +256,6 @@ export class WebUi {
 				event.message
 			];
 		});
-		eventRows.reverse();
 		eventRows = [
 			["Time", "Event", "Description"]
 		].concat(eventRows);
@@ -276,12 +275,10 @@ export class WebUi {
 			.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
 			.map(parameter => this.getParameterName(parameter.name));
 		headers = headers.concat([
-			// "Profit",
 			"Total return",
 			"CAGR",
 			"Sharpe",
 			"Sortino",
-			// "Calmar",
 			"Drawdown"
 		]);
 		let parameterRows = result.results.map(simplifiedResult => {
@@ -290,12 +287,10 @@ export class WebUi {
 				.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
 				.map(parameter => this.getParameterContent(parameter));
 			const numericCells = [
-				// this.formatCurrency(simplifiedResult.profit),
 				this.formatPercentage(simplifiedResult.totalReturn),
 				this.formatPercentage(simplifiedResult.compoundAnnualGrowthRate),
 				this.formatNumber(simplifiedResult.sharpeRatio, RATIO_DIGITS, true),
 				this.formatNumber(simplifiedResult.sortinoRatio, RATIO_DIGITS, true),
-				// this.formatNumber(simplifiedResult.calmarRatio, RATIO_DIGITS, true),
 				this.formatPercentage(zeroToNull(simplifiedResult.maxDrawdown), false, maxDrawdownEnableColor)
 			].map(numericSpan);
 			output = output.concat(numericCells);
