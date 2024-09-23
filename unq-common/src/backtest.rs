@@ -32,6 +32,8 @@ lazy_static! {
 	};
 }
 
+type BacktestOrderKeys = (f64, f64, f64);
+
 #[derive(Clone, PartialEq, Display, Debug)]
 pub enum PositionSide {
 	#[strum(serialize = "long")]
@@ -1104,6 +1106,64 @@ impl BacktestResult {
 			max_drawdown: self.max_drawdown.clone()
 		}
 	}
+
+	fn get_keys(&self) -> BacktestOrderKeys {
+		(self.sortino_ratio.get(), self.sharpe_ratio.get(), self.total_return.get())
+	}
+}
+
+impl PartialEq for BacktestResult {
+	fn eq(&self, other: &Self) -> bool {
+		let key1 = self.get_keys();
+		let key2 = other.get_keys();
+		keys_partial_eq(key1, key2)
+	}
+}
+
+impl Eq for BacktestResult {}
+
+impl PartialOrd for BacktestResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for BacktestResult {
+	fn cmp(&self, other: &Self) -> Ordering {
+		let keys1 = self.get_keys();
+		let keys2 = other.get_keys();
+		keys_cmp(keys1, keys2)
+	}
+}
+
+impl SimplifiedBacktestResult {
+	fn get_keys(&self) -> BacktestOrderKeys {
+		(self.sortino_ratio.get(), self.sharpe_ratio.get(), self.total_return.get())
+	}
+}
+
+impl PartialEq for SimplifiedBacktestResult {
+	fn eq(&self, other: &Self) -> bool {
+		let keys1 = self.get_keys();
+		let keys2 = other.get_keys();
+		keys_partial_eq(keys1, keys2)
+	}
+}
+
+impl Eq for SimplifiedBacktestResult {}
+
+impl PartialOrd for SimplifiedBacktestResult {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for SimplifiedBacktestResult {
+	fn cmp(&self, other: &Self) -> Ordering {
+		let key1 = self.get_keys();
+		let key2 = other.get_keys();
+		keys_cmp(key1, key2)
+	}
 }
 
 impl BacktestSeries {
@@ -1123,57 +1183,19 @@ impl BacktestSeries {
 	}
 }
 
-impl PartialEq for BacktestResult {
-	fn eq(&self, other: &Self) -> bool {
-		compare_webf64(&self.sortino_ratio, &other.sortino_ratio) == Ordering::Equal &&
-		compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio) == Ordering::Equal &&
-		compare_webf64(&self.total_return, &other.total_return) == Ordering::Equal
-	}
+fn keys_partial_eq(keys1: BacktestOrderKeys, keys2: BacktestOrderKeys) -> bool {
+	compare_f64(keys1.0, keys2.0) == Ordering::Equal &&
+		compare_f64(keys1.1, keys2.1) == Ordering::Equal &&
+		compare_f64(keys1.2, keys2.2) == Ordering::Equal
 }
 
-impl Eq for BacktestResult {}
-
-impl PartialOrd for BacktestResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
+fn keys_cmp(keys1: BacktestOrderKeys, keys2: BacktestOrderKeys) -> Ordering {
+	compare_f64(keys1.0, keys2.0)
+		.then(compare_f64(keys1.1, keys2.1))
+		.then(compare_f64(keys1.2, keys2.2))
 }
 
-impl Ord for BacktestResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		compare_webf64(&self.sortino_ratio, &other.sortino_ratio)
-			.then(compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio))
-			.then(compare_webf64(&self.total_return, &self.total_return))
-	}
-}
-
-impl PartialEq for SimplifiedBacktestResult {
-	fn eq(&self, other: &Self) -> bool {
-		compare_webf64(&self.sortino_ratio, &other.sortino_ratio) == Ordering::Equal &&
-			compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio) == Ordering::Equal &&
-			compare_webf64(&self.total_return, &other.total_return) == Ordering::Equal
-	}
-}
-
-impl Eq for SimplifiedBacktestResult {}
-
-impl PartialOrd for SimplifiedBacktestResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for SimplifiedBacktestResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		compare_webf64(&self.sortino_ratio, &other.sortino_ratio)
-			.then(compare_webf64(&self.sharpe_ratio, &other.sharpe_ratio))
-			.then(compare_webf64(&self.total_return, &self.total_return))
-	}
-}
-
-fn compare_webf64(x: &WebF64, y: &WebF64) -> Ordering {
-	let x = x.get();
-	let y = y.get();
+fn compare_f64(x: f64, y: f64) -> Ordering {
 	match (x.is_nan(), y.is_nan()) {
 		(true, true) => Ordering::Equal,
 		(true, false) => Ordering::Less,

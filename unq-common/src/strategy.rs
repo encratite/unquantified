@@ -108,6 +108,36 @@ impl StrategyParameter {
 			_ => bail!("Invalid combination of values in strategy parameter")
 		}
 	}
+
+	// Workaround for not using WebF64
+	fn round(&mut self) {
+		self.value = Self::round_opt(self.value);
+		self.limit = Self::round_opt(self.limit);
+		self.increment = Self::round_opt(self.increment);
+		self.values = self.round_values();
+	}
+
+	fn round_f64(value: f64) -> f64 {
+		const ROUND_FACTOR: f64 = 100.0;
+		(value * ROUND_FACTOR).round() / ROUND_FACTOR
+	}
+
+	fn round_opt(value: Option<f64>) -> Option<f64> {
+		match value {
+			Some(x) => Some(Self::round_f64(x)),
+			None => None
+		}
+	}
+
+	fn round_values(&self) -> Option<Vec<f64>> {
+		match &self.values {
+			Some(x) => {
+				let rounded_values = x.iter().map(|x| Self::round_f64(*x)).collect();
+				Some(rounded_values)
+			},
+			None => None
+		}
+	}
 }
 
 impl StrategyParameters {
@@ -152,6 +182,10 @@ impl StrategyParameters {
 
 	pub fn pop_front(&mut self) -> Option<StrategyParameter> {
 		self.0.pop_front()
+	}
+
+	pub fn round(&mut self) {
+		self.0.iter_mut().for_each(|x| x.round());
 	}
 
 	fn get_parameter(&self, name: &str) -> Option<&StrategyParameter> {
