@@ -222,6 +222,7 @@ pub struct BacktestSeries {
 	best_parameters: StrategyParameters,
 	best_result: BacktestResult,
 	results: Vec<SimplifiedBacktestResult>,
+	median_result: SimplifiedBacktestResult,
 	stopwatch: WebF64
 }
 
@@ -1142,6 +1143,35 @@ impl SimplifiedBacktestResult {
 	fn get_keys(&self) -> BacktestOrderKeys {
 		(self.sortino_ratio.get(), self.sharpe_ratio.get(), self.total_return.get())
 	}
+
+	fn average(&self, other: &Self) -> Self {
+		let parameters = self.parameters.clone();
+		let trades = (self.trades + other.trades) / 2;
+		let final_cash = self.final_cash.average(&other.final_cash);
+		let profit = self.profit.average(&other.profit);
+		let annual_average_profit = self.annual_average_profit.average(&other.annual_average_profit);
+		let total_return = self.total_return.average(&other.total_return);
+		let annual_average_return = self.annual_average_return.average(&other.annual_average_return);
+		let compound_annual_growth_rate = self.compound_annual_growth_rate.average(&other.compound_annual_growth_rate);
+		let sharpe_ratio = self.sharpe_ratio.average(&other.sharpe_ratio);
+		let sortino_ratio = self.sortino_ratio.average(&other.sortino_ratio);
+		let calmar_ratio = self.calmar_ratio.average(&other.calmar_ratio);
+		let max_drawdown = self.max_drawdown.average(&other.max_drawdown);
+		SimplifiedBacktestResult {
+			parameters,
+			trades,
+			final_cash,
+			profit,
+			annual_average_profit,
+			total_return,
+			annual_average_return,
+			compound_annual_growth_rate,
+			sharpe_ratio,
+			sortino_ratio,
+			calmar_ratio,
+			max_drawdown
+		}
+	}
 }
 
 impl PartialEq for SimplifiedBacktestResult {
@@ -1175,12 +1205,28 @@ impl BacktestSeries {
 			.map(|(parameters, result)| result.simple((*parameters).clone()))
 			.collect();
 		simplified_results.sort_by(|x, y| y.cmp(x));
+		let median_result = Self::get_median_result(&simplified_results);
 		let stopwatch_secs = WebF64::new(stopwatch.elapsed().as_secs_f64());
 		Self {
 			best_parameters,
 			best_result,
 			results: simplified_results,
+			median_result,
 			stopwatch: stopwatch_secs
+		}
+	}
+
+	fn get_median_result(simplified_results: &Vec<SimplifiedBacktestResult>) -> SimplifiedBacktestResult {
+		let n = simplified_results.len();
+		let odd = n % 2 == 1;
+		let index1 = n / 2;
+		let index2 = index1 + 1;
+		let result1 = &simplified_results[index1];
+		if odd {
+			result1.clone()
+		} else {
+			let result2 = &simplified_results[index2];
+			result1.average(&result2)
 		}
 	}
 }

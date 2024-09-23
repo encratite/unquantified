@@ -206,12 +206,11 @@ export class WebUi {
 			["Compound annual growth rate", this.formatPercentage(bestResult.compoundAnnualGrowthRate)],
 			["Interest accumulated", this.formatCurrency(bestResult.interest)],
 		];
-		const maxDrawdownEnableColor = bestResult.maxDrawdown < MAX_DRAWDOWN_WARNING;
 		const generalTableRight = [
 			["Sharpe ratio", this.formatNumber(bestResult.sharpeRatio, RATIO_DIGITS, true)],
 			["Sortino ratio", this.formatNumber(bestResult.sortinoRatio, RATIO_DIGITS, true)],
 			["Calmar ratio", this.formatNumber(bestResult.calmarRatio, RATIO_DIGITS, true)],
-			["Max drawdown", this.formatPercentage(zeroToNull(bestResult.maxDrawdown), false, maxDrawdownEnableColor)],
+			["Max drawdown", this.formatMaxDrawdown(bestResult.maxDrawdown)],
 			["Fees paid", this.formatCurrency(bestResult.fees)],
 			["Fees per profit", this.formatPercentage(zeroToNull(bestResult.feesPercent), false, false)],
 		];
@@ -285,7 +284,6 @@ export class WebUi {
 			"Drawdown"
 		]);
 		let parameterRows = result.results.map(simplifiedResult => {
-			const maxDrawdownEnableColor = simplifiedResult.maxDrawdown < MAX_DRAWDOWN_WARNING;
 			let output = simplifiedResult.parameters
 				.filter(parameter => this.isExpandedParameter(parameter, result.bestParameters))
 				.map(parameter => this.getParameterContent(parameter));
@@ -295,7 +293,7 @@ export class WebUi {
 				this.formatPercentage(simplifiedResult.compoundAnnualGrowthRate),
 				this.formatNumber(simplifiedResult.sharpeRatio, RATIO_DIGITS, true),
 				this.formatNumber(simplifiedResult.sortinoRatio, RATIO_DIGITS, true),
-				this.formatPercentage(zeroToNull(simplifiedResult.maxDrawdown), false, maxDrawdownEnableColor)
+				this.formatMaxDrawdown(simplifiedResult.maxDrawdown)
 			].map(numericSpan);
 			output = output.concat(numericCells);
 			return output;
@@ -317,10 +315,35 @@ export class WebUi {
 				tableHeaders.childNodes[i].className = className;
 			}
 		}
+		this.createMedianResultTables(result.medianResult, container);
 		createElement("div", container, {
 			className: "statistics",
 			textContent: `Evaluated ${result.results.length} combinations in ${result.stopwatch} s`
 		});
+	}
+
+	createMedianResultTables(medianResult, container) {
+		createElement("div", container, {
+			className: "medianTitle",
+			textContent: "Median performance across all parameter permutations"
+		});
+		let medianContainer = createElement("div", container, {
+			className: "median"
+		});
+		const tableLeft = [
+			["Net profit", this.formatCurrency(medianResult.profit)],
+			["Annual average profit", this.formatCurrency(medianResult.annualAverageProfit)],
+			["Total return", this.formatPercentage(medianResult.totalReturn)],
+			["Compound annual growth rate", this.formatPercentage(medianResult.compoundAnnualGrowthRate)]
+		];
+		const tableRight = [
+			["Sharpe ratio", this.formatNumber(medianResult.sharpeRatio, RATIO_DIGITS, true)],
+			["Sortino ratio", this.formatNumber(medianResult.sortinoRatio, RATIO_DIGITS, true)],
+			["Calmar ratio", this.formatNumber(medianResult.calmarRatio, RATIO_DIGITS, true)],
+			["Max drawdown", this.formatMaxDrawdown(medianResult.maxDrawdown)],
+		];
+		createTable(tableLeft, medianContainer);
+		createTable(tableRight, medianContainer);
 	}
 
 	isExpandedParameter(parameter, bestParameters) {
@@ -824,6 +847,11 @@ export class WebUi {
 			}
 			return this.getNegativeSpan(text, enableColor);
 		}
+	}
+
+	formatMaxDrawdown(maxDrawdown) {
+		const maxDrawdownEnableColor = maxDrawdown < MAX_DRAWDOWN_WARNING;
+		return this.formatPercentage(zeroToNull(maxDrawdown), false, maxDrawdownEnableColor);
 	}
 
 	getNegativeSpan(text, enableColor) {

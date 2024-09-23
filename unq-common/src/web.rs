@@ -24,6 +24,15 @@ impl WebF64 {
 	pub fn get(&self) -> f64 {
 		self.value
 	}
+
+	pub fn average(&self, other: &Self) -> WebF64 {
+		let value = (self.value + other.value) / 2.0;
+		let precision = self.precision;
+		WebF64 {
+			value,
+			precision
+		}
+	}
 }
 
 impl Serialize for WebF64 {
