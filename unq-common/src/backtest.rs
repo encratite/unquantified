@@ -49,6 +49,7 @@ pub enum EventType {
 	ClosePosition,
 	Rollover,
 	MarginCall,
+	Information,
 	Warning,
 	Error
 }
@@ -120,7 +121,9 @@ pub struct BacktestConfiguration {
 	// When account value drops below ruin_ratio * starting_cash, the simulation terminates prematurely
 	pub ruin_ratio: f64,
 	// If enabled, cash in the margin account will gain interest based on a fixed formula
-	pub enable_interest: bool
+	pub enable_interest: bool,
+	// Enables/disables the event log,
+	pub enable_logging: bool
 }
 
 #[derive(Clone)]
@@ -162,34 +165,34 @@ pub struct SimplePosition {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestEvent {
-	time: NaiveDateTime,
-	event_type: EventType,
-	message: String
+	pub time: NaiveDateTime,
+	pub event_type: EventType,
+	pub message: String
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestResult {
-	starting_cash: WebF64,
-	final_cash: WebF64,
-	events: Vec<BacktestEvent>,
-	equity_curve_daily: Vec<DailyStats>,
-	equity_curve_trades: Vec<EquityCurveData>,
-	fees: WebF64,
-	fees_percent: WebF64,
-	interest: WebF64,
-	profit: WebF64,
-	annual_average_profit: WebF64,
-	total_return: WebF64,
-	annual_average_return: WebF64,
-	compound_annual_growth_rate: WebF64,
-	sharpe_ratio: WebF64,
-	sortino_ratio: WebF64,
-	calmar_ratio: WebF64,
-	max_drawdown: WebF64,
-	all_trades: TradeResults,
-	long_trades: TradeResults,
-	short_trades: TradeResults
+	pub starting_cash: WebF64,
+	pub final_cash: WebF64,
+	pub events: Vec<BacktestEvent>,
+	pub equity_curve_daily: Vec<DailyStats>,
+	pub equity_curve_trades: Vec<EquityCurveData>,
+	pub fees: WebF64,
+	pub fees_percent: WebF64,
+	pub interest: WebF64,
+	pub profit: WebF64,
+	pub annual_average_profit: WebF64,
+	pub total_return: WebF64,
+	pub annual_average_return: WebF64,
+	pub compound_annual_growth_rate: WebF64,
+	pub sharpe_ratio: WebF64,
+	pub sortino_ratio: WebF64,
+	pub calmar_ratio: WebF64,
+	pub max_drawdown: WebF64,
+	pub all_trades: TradeResults,
+	pub long_trades: TradeResults,
+	pub short_trades: TradeResults
 }
 
 #[derive(Serialize, Clone)]
@@ -448,12 +451,18 @@ impl<'a> Backtest<'a> {
 	}
 
 	pub fn log_event(&mut self, event_type: EventType, message: String) {
-		let event = BacktestEvent {
-			time: self.now,
-			event_type,
-			message
-		};
-		self.events.push(event);
+		if self.configuration.enable_logging {
+			let event = BacktestEvent {
+				time: self.now,
+				event_type,
+				message
+			};
+			self.events.push(event);
+		}
+	}
+
+	pub fn disable_logging(&mut self) {
+		self.configuration.enable_logging = false;
 	}
 
 	pub fn get_state(&self) -> (&NaiveDateTime, &TimeFrame, &BacktestConfiguration, &'a AssetManager) {

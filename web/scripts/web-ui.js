@@ -1255,6 +1255,7 @@ export class WebUi {
 			closePosition: ["Closed position", null],
 			rollover: ["Rollover", null],
 			marginCall: ["Margin call", "error"],
+			information: ["Information", null],
 			warning: ["Warning", "warning"],
 			error: ["Error", "error"]
 		};

@@ -3,7 +3,7 @@ use std::ops::Add;
 use anyhow::{bail, Result};
 use chrono::TimeDelta;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use unq_common::backtest::{Backtest, BacktestResult};
+use unq_common::backtest::{Backtest, BacktestResult, EventType};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::strategy::indicator::{IndicatorStrategy, SymbolIndicator};
 use crate::{get_symbol_contracts, SymbolContracts};
@@ -92,7 +92,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	fn optimize_indicator(&self, symbol: &String, contracts: u32, backtest: &Ref<Backtest>) -> Result<AutoIndicator> {
+	fn optimize_indicator(&self, symbol: &String, contracts: u32, backtest: &Ref<Backtest>) -> Result<(AutoIndicator, BacktestResult)> {
 		let (now, time_frame, configuration, asset_manager) = backtest.get_state();
 		let from = now.add(TimeDelta::days(- self.walk_forward_window));
 		let to = now.clone();
@@ -106,7 +106,9 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			enable_table.iter().map(|(enable_long, enable_short)| {
 				let enable_long = *enable_long;
 				let enable_short = *enable_short;
-				let optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager)?;
+				let mut optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager)?;
+				// Disable logging in order to improve performance of optimization runs
+				optimization_backtest.disable_logging();
 				let backtest_refcell = RefCell::new(optimization_backtest);
 				let strategy_indicators = vec![symbol_indicator.clone()];
 				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, &backtest_refcell)?;
@@ -133,10 +135,10 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			.flatten()
 			.collect::<Vec<(AutoIndicator, BacktestResult)>>();
 		// Select best indicator by Sortino ratio, Sharpe ratio and total returns for the optimization period
-		let Some((best_indicator, _)) = performance.into_iter().max_by(|(_, result1), (_, result2)| result2.cmp(result1)) else {
+		let Some((best_indicator, best_result)) = performance.into_iter().max_by(|(_, result1), (_, result2)| result1.cmp(result2)) else {
 			bail!("Unable to determine best indicator");
 		};
-		Ok(best_indicator)
+		Ok((best_indicator, best_result))
 	}
 
 	fn get_indicators(&self, symbol: &String, contracts: u32) -> Result<Vec<SymbolIndicator>> {
@@ -264,27 +266,30 @@ impl<'a> Strategy for AutoIndicatorStrategy<'a> {
 			self.periods_since_optimization = 0;
 		}
 		for (symbol, contracts) in self.symbol_contracts.iter() {
-			let backtest = self.backtest.borrow();
-			if !backtest.is_available(symbol)? {
+			if !self.backtest.borrow().is_available(symbol)? {
 				// This symbol isn't available on the exchange yet, skip it
 				continue;
 			}
-			let auto_indicator: &mut AutoIndicator = if let Some(auto_indicator) = self.indicators.iter_mut().find(|x| x.symbol_indicator.symbol == *symbol) {
+			let auto_indicator = if let Some(auto_indicator) = self.indicators.iter_mut().find(|x| x.symbol_indicator.symbol == *symbol) {
 				// Reuse optimized indicator
 				auto_indicator
 			} else {
 				// There is no indicator available for this symbol, train a new one
-				let auto_indicator = self.optimize_indicator(symbol, *contracts, &backtest)?;
+				let (auto_indicator, backtest_result) = self.optimize_indicator(symbol, *contracts, &self.backtest.borrow())?;
+				let description = auto_indicator.symbol_indicator.indicator.get_description();
+				let message = format!("New indicator for {symbol}: {description} (Sortino ratio {:.2})", backtest_result.sortino_ratio.get());
+				self.backtest.borrow_mut().log_event(EventType::Information, message);
 				self.indicators.push(auto_indicator);
 				self.indicators.last_mut().unwrap()
 			};
 			let indicator = &mut auto_indicator.symbol_indicator.indicator;
 			if let Some(initialization_bars) = indicator.needs_initialization() {
+				let backtest = self.backtest.borrow();
 				let initialization_records = backtest.get_records(symbol, initialization_bars)?;
 				indicator.initialize(&initialization_records);
 			}
-			let record = backtest.most_recent_record(symbol)?;
-			let state = IndicatorStrategy::get_position_state(symbol, &backtest);
+			let record = self.backtest.borrow().most_recent_record(symbol)?;
+			let state = IndicatorStrategy::get_position_state(symbol, &self.backtest.borrow());
 			let Some(signal) = indicator.next(&record, state) else {
 				return Ok(());
 			};

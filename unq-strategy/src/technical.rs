@@ -20,6 +20,7 @@ pub enum PositionState {
 }
 
 pub trait Indicator: Send + Sync {
+	fn get_description(&self) -> String;
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal>;
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
@@ -90,6 +91,10 @@ impl MomentumIndicator {
 }
 
 impl Indicator for MomentumIndicator {
+	fn get_description(&self) -> String {
+		format!("MOM({})", self.0.size)
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let filled = self.0.add(record.close);
 		if !filled {
@@ -165,6 +170,14 @@ impl SimpleMovingAverage {
 }
 
 impl Indicator for SimpleMovingAverage {
+	fn get_description(&self) -> String {
+		if let Some(slow_period) = self.0.slow_period {
+			format!("SMAC({}, {})", self.0.fast_period, slow_period)
+		} else {
+			format!("P-SMA({})", self.0.fast_period)
+		}
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let sum: f64 = buffer.iter().take(period).sum();
@@ -198,6 +211,14 @@ impl LinearMovingAverage {
 }
 
 impl Indicator for LinearMovingAverage {
+	fn get_description(&self) -> String {
+		if let Some(slow_period) = self.0.slow_period {
+			format!("LMAC({}, {})", self.0.fast_period, slow_period)
+		} else {
+			format!("P-LMA({})", self.0.fast_period)
+		}
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let mut average = 0.0;
@@ -225,7 +246,7 @@ impl Indicator for LinearMovingAverage {
 pub struct ExponentialMovingAverage(MovingAverage);
 
 impl ExponentialMovingAverage {
-	pub const ID: &'static str = "e-lma";
+	pub const ID: &'static str = "p-ema";
 	pub const CROSSOVER_ID: &'static str = "emac";
 
 	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
@@ -253,6 +274,14 @@ impl ExponentialMovingAverage {
 }
 
 impl Indicator for ExponentialMovingAverage {
+	fn get_description(&self) -> String {
+		if let Some(slow_period) = self.0.slow_period {
+			format!("EMAC({}, {})", self.0.fast_period, slow_period)
+		} else {
+			format!("P-EMA({})", self.0.fast_period)
+		}
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let calculate = ExponentialMovingAverage::calculate;
 		self.0.calculate_next(record, &calculate)
@@ -269,6 +298,7 @@ impl Indicator for ExponentialMovingAverage {
 
 #[derive(Clone)]
 pub struct RelativeStrengthIndicator {
+	period: usize,
 	upper_band: f64,
 	lower_band: f64,
 	buffer: IndicatorBuffer,
@@ -280,6 +310,7 @@ impl RelativeStrengthIndicator {
 	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
 		validate_period(period)?;
 		let output = Self {
+			period,
 			upper_band: high_threshold,
 			lower_band: low_threshold,
 			buffer: IndicatorBuffer::new(period + 1)
@@ -309,6 +340,10 @@ impl RelativeStrengthIndicator {
 }
 
 impl Indicator for RelativeStrengthIndicator {
+	fn get_description(&self) -> String {
+		format!("RSI({}, {}, {})", self.period, self.upper_band, self.lower_band)
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let filled = self.buffer.add(record.close);
 		if filled {
@@ -366,6 +401,10 @@ impl MovingAverageConvergence {
 }
 
 impl Indicator for MovingAverageConvergence {
+	fn get_description(&self) -> String {
+		format!("MACD({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let close_filled = self.close_buffer.add(record.close);
 		if !close_filled {
@@ -423,6 +462,10 @@ impl PercentagePriceOscillator {
 }
 
 impl Indicator for PercentagePriceOscillator {
+	fn get_description(&self) -> String {
+		format!("PPO({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
+	}
+
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let close_filled = self.close_buffer.add(record.close);
 		if !close_filled {
@@ -476,6 +519,10 @@ impl BollingerBands {
 }
 
 impl Indicator for BollingerBands {
+	fn get_description(&self) -> String {
+		format!("BB({}, {:.2})", self.buffer.size, self.multiplier)
+	}
+
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
 		let close = record.close;
 		let filled = self.buffer.add(close);

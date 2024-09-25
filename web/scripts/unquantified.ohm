@@ -4,9 +4,10 @@ Unquantified {
 	Assignment = variable "=" (Value | Parameters)
 	Value = variable | dateTime | date | offset | timeFrame | symbol | numeric | keyword | stringValue | SymbolArray | Parameters
 	Parameters = "{" whitespace* Parameter ("," whitespace* Parameter)* whitespace* "}"
-	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter | stringParameter | bool)
+	Parameter = identifier ":" (ValueRangeParameter | MultiValueParameter | MultiStringParameter | stringParameter | bool)
 	ValueRangeParameter = numeric ("to" numeric ("step" numeric)?)?
 	MultiValueParameter = "[" numeric ("," numeric)* "]"
+	MultiStringParameter = "[" string ("," string)* "]"
 	Call = identifier Value ("," Value)*
 	SimpleCall = identifier
 	SymbolArray = "[" symbol SeparatedSymbol* "]"

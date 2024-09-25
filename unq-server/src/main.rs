@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
 	let overnight_margin_ratio = get_f64(backtest_section, "overnight_margin_ratio")?;
 	let ruin_ratio = get_f64(backtest_section, "ruin_ratio")?;
 	let enable_interest = get_bool(backtest_section, "enable_interest")?;
+	let enable_logging = true;
 	let backtest_configuration = BacktestConfiguration {
 		starting_cash,
 		forex_order_fee,
@@ -53,7 +54,8 @@ async fn main() -> Result<()> {
 		initial_margin_ratio,
 		overnight_margin_ratio,
 		ruin_ratio,
-		enable_interest
+		enable_interest,
+		enable_logging
 	};
 	server::run(address, ticker_directory, csv_directory, assets_path, backtest_configuration).await?;
 	Ok(())
