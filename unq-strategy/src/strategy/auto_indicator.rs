@@ -10,7 +10,7 @@ use crate::{get_symbol_contracts, SymbolContracts};
 use crate::technical::*;
 
 const WALK_FORWARD_WINDOW_MINIMUM: i64 = 60;
-const OPTIMIZATION_PERIOD_MINIMUM: usize = 20;
+const OPTIMIZATION_PERIOD_MINIMUM: usize = 5;
 
 pub struct AutoIndicatorStrategy<'a> {
 	symbol_contracts: SymbolContracts,
@@ -92,7 +92,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	fn optimize_indicator(&self, symbol: &String, contracts: u32, backtest: &Ref<Backtest>) -> Result<(AutoIndicator, BacktestResult)> {
+	fn optimize_indicator(&self, symbol: &String, contracts: u32, backtest: &Ref<Backtest>) -> Result<AutoIndicator> {
 		let (now, time_frame, configuration, asset_manager) = backtest.get_state();
 		let from = now.add(TimeDelta::days(- self.walk_forward_window));
 		let to = now.clone();
@@ -135,10 +135,10 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			.flatten()
 			.collect::<Vec<(AutoIndicator, BacktestResult)>>();
 		// Select best indicator by Sortino ratio, Sharpe ratio and total returns for the optimization period
-		let Some((best_indicator, best_result)) = performance.into_iter().max_by(|(_, result1), (_, result2)| result1.cmp(result2)) else {
+		let Some((best_indicator, _)) = performance.into_iter().max_by(|(_, result1), (_, result2)| result1.cmp(result2)) else {
 			bail!("Unable to determine best indicator");
 		};
-		Ok((best_indicator, best_result))
+		Ok(best_indicator)
 	}
 
 	fn get_indicators(&self, symbol: &String, contracts: u32) -> Result<Vec<SymbolIndicator>> {
@@ -275,9 +275,15 @@ impl<'a> Strategy for AutoIndicatorStrategy<'a> {
 				auto_indicator
 			} else {
 				// There is no indicator available for this symbol, train a new one
-				let (auto_indicator, backtest_result) = self.optimize_indicator(symbol, *contracts, &self.backtest.borrow())?;
-				let description = auto_indicator.symbol_indicator.indicator.get_description();
-				let message = format!("New indicator for {symbol}: {description} (Sortino ratio {:.2})", backtest_result.sortino_ratio.get());
+				let auto_indicator = self.optimize_indicator(symbol, *contracts, &self.backtest.borrow())?;
+				let indicator_description = auto_indicator.symbol_indicator.indicator.get_description();
+				let long_short_description = match (auto_indicator.enable_long, auto_indicator.enable_short) {
+					(true, true) => "both long and short",
+					(true, false) => "long only",
+					(false, true) => "short only",
+					_ => bail!("Invalid long/short flags")
+				};
+				let message = format!("New indicator for {symbol}: {indicator_description} ({long_short_description})");
 				self.backtest.borrow_mut().log_event(EventType::Information, message);
 				self.indicators.push(auto_indicator);
 				self.indicators.last_mut().unwrap()

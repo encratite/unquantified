@@ -165,34 +165,34 @@ pub struct SimplePosition {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestEvent {
-	pub time: NaiveDateTime,
-	pub event_type: EventType,
-	pub message: String
+	time: NaiveDateTime,
+	event_type: EventType,
+	message: String
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BacktestResult {
-	pub starting_cash: WebF64,
-	pub final_cash: WebF64,
-	pub events: Vec<BacktestEvent>,
-	pub equity_curve_daily: Vec<DailyStats>,
-	pub equity_curve_trades: Vec<EquityCurveData>,
-	pub fees: WebF64,
-	pub fees_percent: WebF64,
-	pub interest: WebF64,
-	pub profit: WebF64,
-	pub annual_average_profit: WebF64,
-	pub total_return: WebF64,
-	pub annual_average_return: WebF64,
-	pub compound_annual_growth_rate: WebF64,
-	pub sharpe_ratio: WebF64,
-	pub sortino_ratio: WebF64,
-	pub calmar_ratio: WebF64,
-	pub max_drawdown: WebF64,
-	pub all_trades: TradeResults,
-	pub long_trades: TradeResults,
-	pub short_trades: TradeResults
+	starting_cash: WebF64,
+	final_cash: WebF64,
+	events: Vec<BacktestEvent>,
+	equity_curve_daily: Vec<DailyStats>,
+	equity_curve_trades: Vec<EquityCurveData>,
+	fees: WebF64,
+	fees_percent: WebF64,
+	interest: WebF64,
+	profit: WebF64,
+	annual_average_profit: WebF64,
+	total_return: WebF64,
+	annual_average_return: WebF64,
+	compound_annual_growth_rate: WebF64,
+	sharpe_ratio: WebF64,
+	sortino_ratio: WebF64,
+	calmar_ratio: WebF64,
+	max_drawdown: WebF64,
+	all_trades: TradeResults,
+	long_trades: TradeResults,
+	short_trades: TradeResults
 }
 
 #[derive(Serialize, Clone)]
@@ -878,10 +878,20 @@ impl<'a> Backtest<'a> {
 				let globex_new = Self::get_globex_code(&record_now.symbol)?;
 				if globex_current.cmp(&globex_new) == Ordering::Less {
 					self.close_position_internal(position.id, position.count, false, false, false)?;
-					let position_id = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, true, false)?;
-					let new_position = self.get_position(position_id)?;
-					let message = format!("Rolled over {} position: {} x {} @ {:.2} (ID {})", new_position.side, new_position.count, new_position.symbol, new_position.price, new_position.id);
-					self.log_event(EventType::Rollover, message);
+					let open_position_result = self.open_position_internal(&record_now.symbol, position.count, position.side.clone(), position.automatic_rollover, true, false);
+					match open_position_result {
+						Ok(position_id) => {
+							let new_position = self.get_position(position_id)?;
+							let message = format!("Rolled over {} position: {} x {} @ {:.2} (ID {})", new_position.side, new_position.count, new_position.symbol, new_position.price, new_position.id);
+							self.log_event(EventType::Rollover, message);
+						},
+						Err(error) => {
+							// The automatic rollover failed, possibly due to a lack of funds
+							// Log the error but do not attempt to re-open the position, let the strategy deal with it
+							let message = format!("Rollover failed: {error}");
+							self.log_event(EventType::Error, message);
+						}
+					}
 				}
 			}
 		}

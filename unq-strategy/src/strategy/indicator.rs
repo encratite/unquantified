@@ -111,9 +111,9 @@ impl<'a> IndicatorStrategy<'a> {
 			},
 			RelativeStrengthIndicator::ID => {
 				let period = get_period(period_opt)?;
-				let high_threshold = get_high_low("highThreshold")?;
 				let low_threshold = get_high_low("lowThreshold")?;
-				let indicator = RelativeStrengthIndicator::new(period, high_threshold, low_threshold)?;
+				let high_threshold = get_high_low("highThreshold")?;
+				let indicator = RelativeStrengthIndicator::new(period, low_threshold, high_threshold)?;
 				Box::new(indicator)
 			},
 			MovingAverageConvergence::ID => {

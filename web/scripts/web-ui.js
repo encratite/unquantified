@@ -221,7 +221,15 @@ export class WebUi {
 		createTradesTable("Long trades only", bestResult.longTrades);
 		createTradesTable("Short trades only", bestResult.shortTrades);
 		this.createEventTable(bestResult, eventsContainer);
-		this.createParametersTable(result, container);
+		// Only render the performance overview in case of multiple strategy parameters having been evaluated
+		if (result.results.length > 1) {
+			this.createParametersTable(result, container);
+		} else {
+			createElement("div", container, {
+				className: "statistics",
+				textContent: `Evaluated strategy in ${result.stopwatch} s`
+			});
+		}
 	}
 
 	createEventTable(bestResult, eventsContainer) {
@@ -254,10 +262,6 @@ export class WebUi {
 	}
 
 	createParametersTable(result, container) {
-		// Only render the performance overview in case of multiple strategy parameters having been evaluated
-		if (result.results.length <= 1) {
-			return;
-		}
 		const parameterContainer = createElement("div", container, {
 			className: "parameters"
 		});
@@ -986,6 +990,8 @@ export class WebUi {
 		const data = this.getLocalStorageData();
 		const history = data.history[this.historyIndex];
 		this.editor.setValue(history, 1);
+		this.editor.focus();
+		this.editor.navigateFileEnd();
 		event.preventDefault();
 	}
 

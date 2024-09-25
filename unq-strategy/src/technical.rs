@@ -299,20 +299,20 @@ impl Indicator for ExponentialMovingAverage {
 #[derive(Clone)]
 pub struct RelativeStrengthIndicator {
 	period: usize,
-	upper_band: f64,
 	lower_band: f64,
+	upper_band: f64,
 	buffer: IndicatorBuffer,
 }
 
 impl RelativeStrengthIndicator {
 	pub const ID: &'static str = "rsi";
 
-	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
+	pub fn new(period: usize, low_threshold: f64, high_threshold: f64) -> Result<Self> {
 		validate_period(period)?;
 		let output = Self {
 			period,
-			upper_band: high_threshold,
 			lower_band: low_threshold,
+			upper_band: high_threshold,
 			buffer: IndicatorBuffer::new(period + 1)
 		};
 		Ok(output)
@@ -341,14 +341,14 @@ impl RelativeStrengthIndicator {
 
 impl Indicator for RelativeStrengthIndicator {
 	fn get_description(&self) -> String {
-		format!("RSI({}, {}, {})", self.period, self.upper_band, self.lower_band)
+		format!("RSI({}, {}, {})", self.period, self.lower_band, self.upper_band)
 	}
 
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
 		let filled = self.buffer.add(record.close);
 		if filled {
 			let rsi = self.calculate();
-			translate_band_signal(rsi, self.upper_band, self.lower_band)
+			translate_band_signal(rsi, self.lower_band, self.upper_band)
 		} else {
 			None
 		}
@@ -623,11 +623,11 @@ fn translate_signal(signal: f64) -> Option<TradeSignal> {
 	}
 }
 
-fn translate_band_signal(signal: f64, upper: f64, lower: f64) -> Option<TradeSignal> {
-	if signal > upper {
-		Some(TradeSignal::Long)
-	} else if signal < lower {
+fn translate_band_signal(signal: f64, lower: f64, upper: f64) -> Option<TradeSignal> {
+	if signal < lower {
 		Some(TradeSignal::Short)
+	} else if signal > upper {
+		Some(TradeSignal::Long)
 	} else {
 		Some(TradeSignal::Close)
 	}

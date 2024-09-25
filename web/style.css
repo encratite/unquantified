@@ -142,7 +142,7 @@ body {
 
 .results {
 	width: var(--base-width);
-	margin-bottom: 2.5em;
+	margin-bottom: 2em;
 
 	table {
 		border-collapse: collapse;
