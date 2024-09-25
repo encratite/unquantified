@@ -10,10 +10,12 @@ pub enum StrategyParameterType {
 	NumericMulti,
 	NumericRange,
 	Bool,
-	String
+	StringSingle,
+	StringMulti,
 }
 
 type StrategyParameterSelect<'a, T> = &'a dyn Fn(&StrategyParameter) -> Option<T>;
+type StrategyParameterValueSelect<'a, T> = (StrategyParameterType, &'a dyn Fn(&StrategyParameter) -> Vec<T>);
 
 pub trait Strategy {
 	fn next(&mut self) -> Result<()>;
@@ -71,7 +73,8 @@ pub struct StrategyParameter {
 	pub increment: Option<WebF64>,
 	pub values: Option<Vec<WebF64>>,
 	pub bool_value: Option<bool>,
-	pub string_value: Option<String>
+	pub string_value: Option<String>,
+	pub string_values: Option<Vec<String>>
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -86,7 +89,8 @@ impl StrategyParameter {
 			increment: None,
 			values: None,
 			bool_value: None,
-			string_value: None
+			string_value: None,
+			string_values: None
 		}
 	}
 
@@ -97,15 +101,17 @@ impl StrategyParameter {
 			self.increment.is_some(),
 			self.values.is_some(),
 			self.bool_value.is_some(),
-			self.string_value.is_some()
+			self.string_value.is_some(),
+			self.string_values.is_some(),
 		);
 		match tuple {
-			(true, false, false, false, false, false) => Ok(StrategyParameterType::NumericSingle),
-			(true, true, false, false, false, false) => Ok(StrategyParameterType::NumericRange),
-			(true, true, true, false, false, false) => Ok(StrategyParameterType::NumericRange),
-			(false, false, false, true, false, false) => Ok(StrategyParameterType::NumericMulti),
-			(false, false, false, false, true, false) => Ok(StrategyParameterType::Bool),
-			(false, false, false, false, false, true) => Ok(StrategyParameterType::String),
+			(true, false, false, false, false, false, false) => Ok(StrategyParameterType::NumericSingle),
+			(true, true, false, false, false, false, false) => Ok(StrategyParameterType::NumericRange),
+			(true, true, true, false, false, false, false) => Ok(StrategyParameterType::NumericRange),
+			(false, false, false, true, false, false, false) => Ok(StrategyParameterType::NumericMulti),
+			(false, false, false, false, true, false, false) => Ok(StrategyParameterType::Bool),
+			(false, false, false, false, false, true, false) => Ok(StrategyParameterType::StringSingle),
+			(false, false, false, false, false, false, true) => Ok(StrategyParameterType::StringMulti),
 			_ => bail!("Invalid combination of values in strategy parameter")
 		}
 	}
@@ -126,21 +132,22 @@ impl StrategyParameters {
 	}
 
 	pub fn get_values(&self, name: &str) -> Result<Option<Vec<f64>>> {
-		if let Some(parameter) = self.get_parameter(name) {
-			match parameter.get_type()? {
-				StrategyParameterType::NumericSingle => {
-					let values = vec![parameter.value.clone().unwrap().get()];
-					Ok(Some(values))
-				},
-				StrategyParameterType::NumericMulti => {
-					let values = parameter.values.clone().unwrap().iter().map(|x| x.get()).collect();
-					Ok(Some(values))
-				},
-				other => bail!("Found parameter type \"{other:?}\", expected a numeric type")
-			}
-		} else {
-			Ok(None)
-		}
+		let single: StrategyParameterValueSelect<f64> = (StrategyParameterType::NumericSingle, &|parameter: &StrategyParameter| -> Vec<f64> {
+			let value = parameter.value
+				.clone()
+				.unwrap()
+				.get();
+			vec![value]
+		});
+		let multi: StrategyParameterValueSelect<f64> = (StrategyParameterType::NumericMulti, &|parameter: &StrategyParameter| -> Vec<f64> {
+			parameter.values
+				.clone()
+				.unwrap()
+				.iter()
+				.map(|x| x.get())
+				.collect()
+		});
+		self.get_multi_value(name, single, multi)
 	}
 
 	pub fn get_bool(&self, name: &str) -> Result<Option<bool>> {
@@ -150,7 +157,18 @@ impl StrategyParameters {
 
 	pub fn get_string(&self, name: &str) -> Result<Option<String>> {
 		let select: StrategyParameterSelect<String> = &|parameter| parameter.string_value.clone();
-		self.get_typed_parameter(name, StrategyParameterType::String, select)
+		self.get_typed_parameter(name, StrategyParameterType::StringSingle, select)
+	}
+
+	pub fn get_strings(&self, name: &str) -> Result<Option<Vec<String>>> {
+		let single: StrategyParameterValueSelect<String> = (StrategyParameterType::StringSingle, &|parameter: &StrategyParameter| -> Vec<String> {
+			let value = parameter.string_value.clone().unwrap();
+			vec![value]
+		});
+		let multi: StrategyParameterValueSelect<String> = (StrategyParameterType::StringMulti, &|parameter: &StrategyParameter| -> Vec<String> {
+			parameter.string_values.clone().unwrap()
+		});
+		self.get_multi_value(name, single, multi)
 	}
 
 	pub fn push_back(&mut self, parameter: StrategyParameter) {
@@ -174,6 +192,25 @@ impl StrategyParameters {
 				 Ok(select(parameter))
 			} else {
 				bail!("Found parameter type \"{parameter_type:?}\", expected \"{expected_type:?}\"")
+			}
+		} else {
+			Ok(None)
+		}
+	}
+
+	fn get_multi_value<T>(&self, name: &str, single: StrategyParameterValueSelect<T>, multi: StrategyParameterValueSelect<T>) -> Result<Option<Vec<T>>> {
+		if let Some(parameter) = self.get_parameter(name) {
+			let (single_type, single_select) = single;
+			let (multi_type, multi_select) = multi;
+			let parameter_type = parameter.get_type()?;
+			if parameter_type == single_type {
+				let values = single_select(parameter);
+				Ok(Some(values))
+			} else if parameter_type == multi_type {
+				let values = multi_select(parameter);
+				Ok(Some(values))
+			} else {
+				bail!("Found parameter type \"{parameter_type:?}\", expected \"{single_type:?}\" or \"{multi_type:?}\"")
 			}
 		} else {
 			Ok(None)

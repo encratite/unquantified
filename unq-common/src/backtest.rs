@@ -456,6 +456,10 @@ impl<'a> Backtest<'a> {
 		self.events.push(event);
 	}
 
+	pub fn get_state(&self) -> (&NaiveDateTime, &TimeFrame, &BacktestConfiguration, &'a AssetManager) {
+		(&self.now, &self.time_frame, &self.configuration, self.asset_manager)
+	}
+
 	fn next_internal(&mut self) -> Result<bool> {
 		if let Some(now) = self.time_sequence.pop_front() {
 			self.margin_call_check()?;

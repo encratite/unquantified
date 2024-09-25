@@ -19,7 +19,7 @@ pub enum PositionState {
 	Short
 }
 
-pub trait Indicator {
+pub trait Indicator: Send + Sync {
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal>;
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
@@ -80,6 +80,8 @@ impl IndicatorBuffer {
 pub struct MomentumIndicator(IndicatorBuffer);
 
 impl MomentumIndicator {
+	pub const ID: &'static str = "momentum";
+
 	pub fn new(period: usize) -> Result<Self> {
 		validate_period(period)?;
 		let output = Self(IndicatorBuffer::new(period));
@@ -152,6 +154,9 @@ impl MovingAverage {
 pub struct SimpleMovingAverage(MovingAverage);
 
 impl SimpleMovingAverage {
+	pub const ID: &'static str = "p-sma";
+	pub const CROSSOVER_ID: &'static str = "smac";
+
 	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
 		let moving_average = MovingAverage::new(fast_period, slow_period, 1)?;
 		let output = SimpleMovingAverage(moving_average);
@@ -182,6 +187,9 @@ impl Indicator for SimpleMovingAverage {
 pub struct LinearMovingAverage(MovingAverage);
 
 impl LinearMovingAverage {
+	pub const ID: &'static str = "p-lma";
+	pub const CROSSOVER_ID: &'static str = "lmac";
+
 	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
 		let moving_average = MovingAverage::new(fast_period, slow_period, 1)?;
 		let output = LinearMovingAverage(moving_average);
@@ -217,6 +225,9 @@ impl Indicator for LinearMovingAverage {
 pub struct ExponentialMovingAverage(MovingAverage);
 
 impl ExponentialMovingAverage {
+	pub const ID: &'static str = "e-lma";
+	pub const CROSSOVER_ID: &'static str = "emac";
+
 	pub fn new(fast_period: usize, slow_period: Option<usize>) -> Result<Self> {
 		// Increase the buffer size to twice the normal size for moving averages
 		let moving_average = MovingAverage::new(fast_period, slow_period, EMA_BUFFER_SIZE_MULTIPLIER)?;
@@ -264,6 +275,8 @@ pub struct RelativeStrengthIndicator {
 }
 
 impl RelativeStrengthIndicator {
+	pub const ID: &'static str = "rsi";
+
 	pub fn new(period: usize, high_threshold: f64, low_threshold: f64) -> Result<Self> {
 		validate_period(period)?;
 		let output = Self {
@@ -325,6 +338,8 @@ pub struct MovingAverageConvergence {
 }
 
 impl MovingAverageConvergence {
+	pub const ID: &'static str = "macd";
+
 	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
 		validate_signal_parameters(signal_period, fast_period, slow_period)?;
 		let close_buffer_size = EMA_BUFFER_SIZE_MULTIPLIER * fast_period.max(slow_period);
@@ -383,6 +398,8 @@ pub struct PercentagePriceOscillator {
 }
 
 impl PercentagePriceOscillator {
+	pub const ID: &'static str = "ppo";
+
 	pub fn new(signal_period: usize, fast_period: usize, slow_period: usize) -> Result<Self> {
 		validate_signal_parameters(signal_period, fast_period, slow_period)?;
 		let close_buffer_size = fast_period.max(slow_period);
@@ -436,6 +453,8 @@ pub struct BollingerBands {
 }
 
 impl BollingerBands {
+	pub const ID: &'static str = "bollinger";
+
 	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
 		validate_period(period)?;
 		validate_multiplier(multiplier)?;

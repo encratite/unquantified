@@ -6,9 +6,9 @@ use crate::get_symbol_contracts;
 use crate::technical::*;
 
 pub struct SymbolIndicator {
-	symbol: String,
-	contracts: u32,
-	indicator: Box<dyn Indicator>
+	pub symbol: String,
+	pub contracts: u32,
+	pub indicator: Box<dyn Indicator>
 }
 
 pub struct IndicatorStrategy<'a> {
@@ -19,6 +19,8 @@ pub struct IndicatorStrategy<'a> {
 }
 
 impl<'a> IndicatorStrategy<'a> {
+	pub const ID: &'static str = "indicator";
+
 	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let strategy = Self {
 			indicators,
@@ -62,63 +64,63 @@ impl<'a> IndicatorStrategy<'a> {
 		let fast_period_opt = Self::get_period("fastPeriod", parameters)?;
 		let slow_period_opt = Self::get_period("slowPeriod", parameters)?;
 		let indicator: Box<dyn Indicator> = match indicator_string.as_str() {
-			"momentum" => {
+			MomentumIndicator::ID => {
 				let period = get_period(period_opt)?;
 				let indicator = MomentumIndicator::new(period)?;
 				Box::new(indicator)
 			},
-			"p-sma" => {
+			SimpleMovingAverage::ID => {
 				let period = get_period(period_opt)?;
 				let indicator = SimpleMovingAverage::new(period, None)?;
 				Box::new(indicator)
 			},
-			"p-lma" => {
+			LinearMovingAverage::ID => {
 				let period = get_period(period_opt)?;
 				let indicator = LinearMovingAverage::new(period, None)?;
 				Box::new(indicator)
 			},
-			"p-ema" => {
+			ExponentialMovingAverage::ID => {
 				let period = get_period(period_opt)?;
 				let indicator = ExponentialMovingAverage::new(period, None)?;
 				Box::new(indicator)
 			},
-			"smac" => {
+			SimpleMovingAverage::CROSSOVER_ID => {
 				let fast_period = get_period(fast_period_opt)?;
 				let indicator = SimpleMovingAverage::new(fast_period, slow_period_opt)?;
 				Box::new(indicator)
 			},
-			"lmac" => {
+			LinearMovingAverage::CROSSOVER_ID => {
 				let fast_period = get_period(fast_period_opt)?;
 				let indicator = LinearMovingAverage::new(fast_period, slow_period_opt)?;
 				Box::new(indicator)
 			},
-			"emac" => {
+			ExponentialMovingAverage::CROSSOVER_ID => {
 				let fast_period = get_period(fast_period_opt)?;
 				let indicator = ExponentialMovingAverage::new(fast_period, slow_period_opt)?;
 				Box::new(indicator)
 			},
-			"rsi" => {
+			RelativeStrengthIndicator::ID => {
 				let period = get_period(period_opt)?;
 				let high_threshold = get_high_low("highThreshold")?;
 				let low_threshold = get_high_low("lowThreshold")?;
 				let indicator = RelativeStrengthIndicator::new(period, high_threshold, low_threshold)?;
 				Box::new(indicator)
 			},
-			"macd" => {
+			MovingAverageConvergence::ID => {
 				let signal_period = get_period(signal_period_opt)?;
 				let fast_period = get_period(fast_period_opt)?;
 				let slow_period = get_period(slow_period_opt)?;
 				let indicator = MovingAverageConvergence::new(signal_period, fast_period, slow_period)?;
 				Box::new(indicator)
 			},
-			"ppo" => {
+			PercentagePriceOscillator::ID => {
 				let signal_period = get_period(signal_period_opt)?;
 				let fast_period = get_period(fast_period_opt)?;
 				let slow_period = get_period(slow_period_opt)?;
 				let indicator = PercentagePriceOscillator::new(signal_period, fast_period, slow_period)?;
 				Box::new(indicator)
 			},
-			"bollinger" => {
+			BollingerBands::ID => {
 				let period = get_period(period_opt)?;
 				let multiplier = get_multiplier()?;
 				let indicator = BollingerBands::new(period, multiplier)?;
@@ -141,13 +143,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	fn get_period(name: &str, parameters: &StrategyParameters) -> Result<Option<usize>> {
-		let value = parameters.get_value(name)?;
-		let output = value.map(|x| x as usize);
-		Ok(output)
-	}
-
-	fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) -> Result<()> {
+	pub fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) -> Result<()> {
 		let position_opt = backtest
 			.borrow()
 			.get_position_by_root(&indicator_data.symbol)
@@ -177,6 +173,26 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(())
 	}
 
+	pub fn get_position_state(symbol: &String, backtest: &Ref<Backtest>) -> PositionState {
+		let position_opt = backtest.get_position_by_root(symbol);
+		let state = if let Some(position) = position_opt {
+			if position.side == PositionSide::Long {
+				PositionState::Long
+			} else {
+				PositionState::Short
+			}
+		} else {
+			PositionState::None
+		};
+		state
+	}
+
+	fn get_period(name: &str, parameters: &StrategyParameters) -> Result<Option<usize>> {
+		let value = parameters.get_value(name)?;
+		let output = value.map(|x| x as usize);
+		Ok(output)
+	}
+
 	fn get_target_side(signal: &TradeSignal) -> Result<PositionSide> {
 		let target_side = match signal {
 			TradeSignal::Long => PositionSide::Long,
@@ -203,20 +219,6 @@ impl<'a> IndicatorStrategy<'a> {
 				.borrow_mut()
 				.close_position(position.id, position.count);
 		}
-	}
-
-	fn get_position_state(symbol: &String, backtest: &Ref<Backtest>) -> PositionState {
-		let position_opt = backtest.get_position_by_root(symbol);
-		let state = if let Some(position) = position_opt {
-			if position.side == PositionSide::Long {
-				PositionState::Long
-			} else {
-				PositionState::Short
-			}
-		} else {
-			PositionState::None
-		};
-		state
 	}
 }
 

@@ -23,6 +23,8 @@ By default, all positions are long and one contract of each asset is held, but t
 This would change the number of contracts for NG and CL to 2 each.
 */
 impl<'a> BuyAndHoldStrategy<'a> {
+	pub const ID: &'static str = "buy and hold";
+
 	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		if symbol_contracts.is_empty() {
 			bail!("Need at least one symbol");
