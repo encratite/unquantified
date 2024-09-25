@@ -11,6 +11,16 @@ pub struct SymbolIndicator {
 	pub indicator: Box<dyn Indicator>
 }
 
+impl Clone for SymbolIndicator {
+	fn clone(&self) -> Self {
+		SymbolIndicator {
+			symbol: self.symbol.clone(),
+			contracts: self.contracts,
+			indicator: self.indicator.clone_box()
+		}
+	}
+}
+
 pub struct IndicatorStrategy<'a> {
 	indicators: Vec<SymbolIndicator>,
 	enable_long: bool,

@@ -2,8 +2,8 @@ use std::cell::{Ref, RefCell};
 use std::ops::Add;
 use anyhow::{bail, Result};
 use chrono::TimeDelta;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
-use unq_common::backtest::Backtest;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use unq_common::backtest::{Backtest, BacktestResult};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::strategy::indicator::{IndicatorStrategy, SymbolIndicator};
 use crate::{get_symbol_contracts, SymbolContracts};
@@ -22,6 +22,7 @@ pub struct AutoIndicatorStrategy<'a> {
 	backtest: &'a RefCell<Backtest<'a>>
 }
 
+#[derive(Clone)]
 pub struct AutoIndicator {
 	symbol_indicator: SymbolIndicator,
 	enable_long: bool,
@@ -95,54 +96,90 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		let (now, time_frame, configuration, asset_manager) = backtest.get_state();
 		let from = now.add(TimeDelta::days(- self.walk_forward_window));
 		let to = now.clone();
-		let indicators = self.get_indicators()?;
-		let performance_results = indicators.par_iter().map(|indicator| {
-			let optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager);
-			todo!()
-		});
-		todo!()
+		let indicators = self.get_indicators(symbol, contracts)?;
+		let enable_table = vec![
+			(false, true),
+			(true, false),
+			(true, true)
+		];
+		let performance = indicators.into_par_iter().map(|symbol_indicator| -> Result<Vec<(AutoIndicator, BacktestResult)>> {
+			enable_table.iter().map(|(enable_long, enable_short)| {
+				let enable_long = *enable_long;
+				let enable_short = *enable_short;
+				let optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager)?;
+				let backtest_refcell = RefCell::new(optimization_backtest);
+				let strategy_indicators = vec![symbol_indicator.clone()];
+				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, &backtest_refcell)?;
+				let mut done = false;
+				while !done {
+					strategy.next()?;
+					let mut backtest_mut = backtest_refcell.borrow_mut();
+					done = backtest_mut.next()?;
+				}
+				let backtest = backtest_refcell.borrow_mut();
+				let result = backtest.get_result()?;
+				let auto_indicator = AutoIndicator {
+					symbol_indicator: symbol_indicator.clone(),
+					enable_long,
+					enable_short
+				};
+				let output = (auto_indicator, result);
+				Ok(output)
+			})
+				.collect::<Result<Vec<(AutoIndicator, BacktestResult)>>>()
+		})
+			.collect::<Result<Vec<Vec<(AutoIndicator, BacktestResult)>>>>()?
+			.into_iter()
+			.flatten()
+			.collect::<Vec<(AutoIndicator, BacktestResult)>>();
+		// Select best indicator by Sortino ratio, Sharpe ratio and total returns for the optimization period
+		let Some((best_indicator, _)) = performance.into_iter().max_by(|(_, result1), (_, result2)| result2.cmp(result1)) else {
+			bail!("Unable to determine best indicator");
+		};
+		Ok(best_indicator)
 	}
 
-	fn get_indicators(&self) -> Result<Vec<Box<dyn Indicator>>> {
-		let mut indicators: Vec<Box<dyn Indicator>> = Vec::new();
+	fn get_indicators(&self, symbol: &String, contracts: u32) -> Result<Vec<SymbolIndicator>> {
+		let mut indicators: Vec<SymbolIndicator> = Vec::new();
+		// Brute-force parameter space for all indicators
 		let periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50];
 		let fast_periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20];
 		let slow_periods = vec![10, 15, 20, 25, 30, 40, 50];
 		let signal_periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-		let high_thresholds = vec![70.0, 80.0, 85.0, 90.0, 95.0];
-		let low_thresholds = vec![5.0, 10.0, 15.0, 20.0, 30.0];
+		let high_thresholds = vec![70.0, 75.0, 80.0, 85.0, 90.0];
+		let low_thresholds = vec![10.0, 15.0, 20.0, 25.0, 30.0];
 		let multipliers = vec![1.0, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0];
 		for indicator_string in self.enabled_indicators.iter() {
 			match indicator_string.as_str() {
 				MomentumIndicator::ID => {
 					for period in periods.iter() {
 						let indicator_result = MomentumIndicator::new(*period);
-						Self::add_indicator(indicator_result, &mut indicators);
+						Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 					}
 				},
 				SimpleMovingAverage::ID => {
 					for period in periods.iter() {
 						let indicator_result = SimpleMovingAverage::new(*period, None);
-						Self::add_indicator(indicator_result, &mut indicators);
+						Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 					}
 				},
 				LinearMovingAverage::ID => {
 					for period in periods.iter() {
 						let indicator_result = LinearMovingAverage::new(*period, None);
-						Self::add_indicator(indicator_result, &mut indicators);
+						Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 					}
 				},
 				ExponentialMovingAverage::ID => {
 					for period in periods.iter() {
 						let indicator_result = ExponentialMovingAverage::new(*period, None);
-						Self::add_indicator(indicator_result, &mut indicators);
+						Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 					}
 				},
 				SimpleMovingAverage::CROSSOVER_ID => {
 					for fast_period in fast_periods.iter() {
 						for slow_period in slow_periods.iter() {
 							let indicator_result = SimpleMovingAverage::new(*fast_period, Some(*slow_period));
-							Self::add_indicator(indicator_result, &mut indicators);
+							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 						}
 					}
 				},
@@ -150,7 +187,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 					for fast_period in fast_periods.iter() {
 						for slow_period in slow_periods.iter() {
 							let indicator_result = LinearMovingAverage::new(*fast_period, Some(*slow_period));
-							Self::add_indicator(indicator_result, &mut indicators);
+							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 						}
 					}
 				},
@@ -158,7 +195,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 					for fast_period in fast_periods.iter() {
 						for slow_period in slow_periods.iter() {
 							let indicator_result = ExponentialMovingAverage::new(*fast_period, Some(*slow_period));
-							Self::add_indicator(indicator_result, &mut indicators);
+							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 						}
 					}
 				},
@@ -167,7 +204,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 						for high_threshold in high_thresholds.iter() {
 							for low_threshold in low_thresholds.iter() {
 								let indicator_result = RelativeStrengthIndicator::new(*period, *high_threshold, *low_threshold);
-								Self::add_indicator(indicator_result, &mut indicators);
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 							}
 						}
 					}
@@ -177,7 +214,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 						for fast_period in fast_periods.iter() {
 							for slow_period in slow_periods.iter() {
 								let indicator_result = MovingAverageConvergence::new(*signal_period, *fast_period, *slow_period);
-								Self::add_indicator(indicator_result, &mut indicators);
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 							}
 						}
 					}
@@ -187,7 +224,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 						for fast_period in fast_periods.iter() {
 							for slow_period in slow_periods.iter() {
 								let indicator_result = PercentagePriceOscillator::new(*signal_period, *fast_period, *slow_period);
-								Self::add_indicator(indicator_result, &mut indicators);
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 							}
 						}
 					}
@@ -196,7 +233,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 					for period in periods.iter() {
 						for multiplier in multipliers.iter() {
 							let indicator_result = BollingerBands::new(*period, *multiplier);
-							Self::add_indicator(indicator_result, &mut indicators);
+							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 						}
 					}
 				},
@@ -206,9 +243,14 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		Ok(indicators)
 	}
 
-	fn add_indicator<T: Indicator + 'static>(indicator_result: Result<T>, indicators: &mut Vec<Box<dyn Indicator>>) {
+	fn add_indicator<T: Indicator + 'static>(symbol: &String, contracts: u32, indicator_result: Result<T>, indicators: &mut Vec<SymbolIndicator>) {
 		if let Ok(indicator) = indicator_result {
-			indicators.push(Box::new(indicator));
+			let symbol_indicator = SymbolIndicator {
+				symbol: symbol.clone(),
+				contracts,
+				indicator: Box::new(indicator)
+			};
+			indicators.push(symbol_indicator);
 		}
 	}
 }
@@ -227,11 +269,16 @@ impl<'a> Strategy for AutoIndicatorStrategy<'a> {
 				// This symbol isn't available on the exchange yet, skip it
 				continue;
 			}
-			let Some(auto_indicator) = self.indicators.iter_mut().find(|x| x.symbol_indicator.symbol == *symbol) else {
+			let auto_indicator: &mut AutoIndicator = if let Some(auto_indicator) = self.indicators.iter_mut().find(|x| x.symbol_indicator.symbol == *symbol) {
+				// Reuse optimized indicator
+				auto_indicator
+			} else {
 				// There is no indicator available for this symbol, train a new one
-				todo!()
+				let auto_indicator = self.optimize_indicator(symbol, *contracts, &backtest)?;
+				self.indicators.push(auto_indicator);
+				self.indicators.last_mut().unwrap()
 			};
-			let mut indicator = &mut auto_indicator.symbol_indicator.indicator;
+			let indicator = &mut auto_indicator.symbol_indicator.indicator;
 			if let Some(initialization_bars) = indicator.needs_initialization() {
 				let initialization_records = backtest.get_records(symbol, initialization_bars)?;
 				indicator.initialize(&initialization_records);
