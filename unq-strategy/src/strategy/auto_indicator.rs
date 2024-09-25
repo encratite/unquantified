@@ -205,7 +205,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 					for period in periods.iter() {
 						for high_threshold in high_thresholds.iter() {
 							for low_threshold in low_thresholds.iter() {
-								let indicator_result = RelativeStrengthIndicator::new(*period, *high_threshold, *low_threshold);
+								let indicator_result = RelativeStrengthIndicator::new(*period, *low_threshold, *high_threshold);
 								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 							}
 						}
