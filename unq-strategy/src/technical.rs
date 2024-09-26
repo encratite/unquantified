@@ -522,9 +522,9 @@ impl BollingerBands {
 		let buffer = &self.buffer.buffer;
 		let center = mean(buffer.iter()).unwrap();
 		let standard_deviation = standard_deviation_mean_biased(buffer.iter(), center).unwrap();
-		let upper = center + self.multiplier * standard_deviation;
 		let lower = center - self.multiplier * standard_deviation;
-		(center, upper, lower)
+		let upper = center + self.multiplier * standard_deviation;
+		(center, lower, upper)
 	}
 }
 
@@ -539,32 +539,8 @@ impl Indicator for BollingerBands {
 		if !filled {
 			return None;
 		}
-		let (center, upper, lower) = self.calculate();
-		let signal = match state {
-			PositionState::None => {
-				if close > upper {
-					TradeSignal::Long
-				} else if close < lower {
-					TradeSignal::Short
-				} else {
-					TradeSignal::Close
-				}
-			},
-			PositionState::Long => {
-				if close > center {
-					TradeSignal::Long
-				} else {
-					TradeSignal::Close
-				}
-			},
-			PositionState::Short => {
-				if close < center {
-					TradeSignal::Short
-				} else {
-					TradeSignal::Close
-				}
-			}
-		};
+		let (center, lower, upper) = self.calculate();
+		let signal = translate_band_state_signal(close, center, lower, upper, state);
 		Some(signal)
 	}
 
@@ -587,14 +563,13 @@ pub struct KeltnerChannel {
 impl KeltnerChannel {
 	pub const ID: &'static str = "keltner";
 
-	pub fn new(period: usize, true_range_period: usize, multiplier: f64) -> Result<Self> {
+	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
 		validate_period(period)?;
-		validate_period(true_range_period)?;
 		validate_multiplier(multiplier)?;
 		let output = Self {
 			multiplier,
 			close_buffer: IndicatorBuffer::new(period),
-			true_range_buffer: IndicatorBuffer::new(true_range_period)
+			true_range_buffer: IndicatorBuffer::new(period)
 		};
 		Ok(output)
 	}
@@ -602,10 +577,10 @@ impl KeltnerChannel {
 
 impl Indicator for KeltnerChannel {
 	fn get_description(&self) -> String {
-		format!("Keltner({}, {}, {:.1})", self.close_buffer.size, self.true_range_buffer.size, self.multiplier)
+		format!("Keltner({}, {:.1})", self.close_buffer.size, self.multiplier)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
 		if let Some(previous_close) = self.close_buffer.buffer.front() {
 			let part1 = record.high - record.low;
 			let part2 = (record.high - previous_close).abs();
@@ -617,23 +592,22 @@ impl Indicator for KeltnerChannel {
 		let close_filled = self.close_buffer.add(close);
 		let true_range_filled = self.true_range_buffer.filled();
 		if close_filled && true_range_filled {
-			let moving_average = ExponentialMovingAverage::calculate(self.close_buffer.size, &self.close_buffer.buffer);
+			let center = ExponentialMovingAverage::calculate(self.close_buffer.size, &self.close_buffer.buffer);
 			let average_true_range = self.true_range_buffer.average();
 			let multiplier_range = self.multiplier * average_true_range;
-			let upper_band = moving_average + multiplier_range;
-			let lower_band = moving_average - multiplier_range;
-			translate_band_signal(close, lower_band, upper_band)
+			let lower = center - multiplier_range;
+			let upper = center + multiplier_range;
+			let signal = translate_band_state_signal(close, center, lower, upper, state);
+			Some(signal)
 		} else {
 			None
 		}
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		match (self.close_buffer.needs_initialization(), self.true_range_buffer.needs_initialization()) {
-			(None, None) => None,
-			(None, Some(true_range)) => Some(true_range),
-			(Some(close), None) => Some(close),
-			(Some(close), Some(true_range)) => Some(close.max(true_range))
+		match self.close_buffer.needs_initialization() {
+			Some(size) => Some(size + 1),
+			None => None
 		}
 	}
 
@@ -705,6 +679,34 @@ fn translate_band_signal(signal: f64, lower: f64, upper: f64) -> Option<TradeSig
 		Some(TradeSignal::Long)
 	} else {
 		Some(TradeSignal::Close)
+	}
+}
+
+fn translate_band_state_signal(close: f64, center: f64, lower: f64, upper: f64, state: PositionState) -> TradeSignal {
+	match state {
+		PositionState::None => {
+			if close > upper {
+				TradeSignal::Long
+			} else if close < lower {
+				TradeSignal::Short
+			} else {
+				TradeSignal::Close
+			}
+		},
+		PositionState::Long => {
+			if close > center {
+				TradeSignal::Long
+			} else {
+				TradeSignal::Close
+			}
+		},
+		PositionState::Short => {
+			if close < center {
+				TradeSignal::Short
+			} else {
+				TradeSignal::Close
+			}
+		}
 	}
 }
 
