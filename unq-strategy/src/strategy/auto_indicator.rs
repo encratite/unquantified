@@ -50,7 +50,8 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			RelativeStrengthIndicator::ID,
 			MovingAverageConvergence::ID,
 			PercentagePriceOscillator::ID,
-			BollingerBands::ID
+			BollingerBands::ID,
+			KeltnerChannel::ID
 		];
 		for x in enabled_indicators {
 			if !known_indicators.contains(&x.as_str()) {
@@ -150,7 +151,8 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		let signal_periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 		let high_thresholds = vec![70.0, 75.0, 80.0, 85.0, 90.0];
 		let low_thresholds = vec![10.0, 15.0, 20.0, 25.0, 30.0];
-		let multipliers = vec![1.0, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0];
+		let channel_periods = vec![5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50];
+		let multipliers = vec![1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5];
 		for indicator_string in self.enabled_indicators.iter() {
 			match indicator_string.as_str() {
 				MomentumIndicator::ID => {
@@ -232,10 +234,20 @@ impl<'a> AutoIndicatorStrategy<'a> {
 					}
 				},
 				BollingerBands::ID => {
-					for period in periods.iter() {
+					for period in channel_periods.iter() {
 						for multiplier in multipliers.iter() {
 							let indicator_result = BollingerBands::new(*period, *multiplier);
 							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
+						}
+					}
+				},
+				KeltnerChannel::ID => {
+					for period in channel_periods.iter() {
+						for atr_period in channel_periods.iter() {
+							for multiplier in multipliers.iter() {
+								let indicator_result = KeltnerChannel::new(*period, *atr_period, *multiplier);
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
+							}
 						}
 					}
 				},

@@ -68,6 +68,16 @@ impl IndicatorBuffer {
 		}
 	}
 
+	pub fn average(&self) -> f64 {
+		let sum: f64 = self.buffer.iter().sum();
+		let average = sum / (self.buffer.len() as f64);
+		average
+	}
+
+	pub fn filled(&self) -> bool {
+		self.buffer.len() >= self.size
+	}
+
 	pub fn needs_initialization(&self) -> Option<usize> {
 		if self.buffer.len() < self.size {
 			Some(self.size)
@@ -92,7 +102,7 @@ impl MomentumIndicator {
 
 impl Indicator for MomentumIndicator {
 	fn get_description(&self) -> String {
-		format!("MOM({})", self.0.size)
+		format!("Momentum({})", self.0.size)
 	}
 
 	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
@@ -520,7 +530,7 @@ impl BollingerBands {
 
 impl Indicator for BollingerBands {
 	fn get_description(&self) -> String {
-		format!("BB({}, {:.2})", self.buffer.size, self.multiplier)
+		format!("Bollinger({}, {:.1})", self.buffer.size, self.multiplier)
 	}
 
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
@@ -560,6 +570,71 @@ impl Indicator for BollingerBands {
 
 	fn needs_initialization(&self) -> Option<usize> {
 		self.buffer.needs_initialization()
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
+}
+
+#[derive(Clone)]
+pub struct KeltnerChannel {
+	multiplier: f64,
+	close_buffer: IndicatorBuffer,
+	true_range_buffer: IndicatorBuffer
+}
+
+impl KeltnerChannel {
+	pub const ID: &'static str = "keltner";
+
+	pub fn new(period: usize, true_range_period: usize, multiplier: f64) -> Result<Self> {
+		validate_period(period)?;
+		validate_period(true_range_period)?;
+		validate_multiplier(multiplier)?;
+		let output = Self {
+			multiplier,
+			close_buffer: IndicatorBuffer::new(period),
+			true_range_buffer: IndicatorBuffer::new(true_range_period)
+		};
+		Ok(output)
+	}
+}
+
+impl Indicator for KeltnerChannel {
+	fn get_description(&self) -> String {
+		format!("Keltner({}, {}, {:.1})", self.close_buffer.size, self.true_range_buffer.size, self.multiplier)
+	}
+
+	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+		if let Some(previous_close) = self.close_buffer.buffer.front() {
+			let part1 = record.high - record.low;
+			let part2 = (record.high - previous_close).abs();
+			let part3 = (record.low - previous_close).abs();
+			let true_range = part1.max(part2).max(part3);
+			self.true_range_buffer.add(true_range);
+		}
+		let close = record.close;
+		let close_filled = self.close_buffer.add(close);
+		let true_range_filled = self.true_range_buffer.filled();
+		if close_filled && true_range_filled {
+			let moving_average = ExponentialMovingAverage::calculate(self.close_buffer.size, &self.close_buffer.buffer);
+			let average_true_range = self.true_range_buffer.average();
+			let multiplier_range = self.multiplier * average_true_range;
+			let upper_band = moving_average + multiplier_range;
+			let lower_band = moving_average - multiplier_range;
+			translate_band_signal(close, lower_band, upper_band)
+		} else {
+			None
+		}
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		match (self.close_buffer.needs_initialization(), self.true_range_buffer.needs_initialization()) {
+			(None, None) => None,
+			(None, Some(true_range)) => Some(true_range),
+			(Some(close), None) => Some(close),
+			(Some(close), Some(true_range)) => Some(close.max(true_range))
+		}
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {

@@ -73,6 +73,7 @@ impl<'a> IndicatorStrategy<'a> {
 		let signal_period_opt = Self::get_period("signalPeriod", parameters)?;
 		let fast_period_opt = Self::get_period("fastPeriod", parameters)?;
 		let slow_period_opt = Self::get_period("slowPeriod", parameters)?;
+		let atr_period_opt = Self::get_period("atrPeriod", parameters)?;
 		let indicator: Box<dyn Indicator> = match indicator_string.as_str() {
 			MomentumIndicator::ID => {
 				let period = get_period(period_opt)?;
@@ -134,6 +135,13 @@ impl<'a> IndicatorStrategy<'a> {
 				let period = get_period(period_opt)?;
 				let multiplier = get_multiplier()?;
 				let indicator = BollingerBands::new(period, multiplier)?;
+				Box::new(indicator)
+			},
+			KeltnerChannel::ID => {
+				let period = get_period(period_opt)?;
+				let atr_period = get_period(atr_period_opt)?;
+				let multiplier = get_multiplier()?;
+				let indicator = KeltnerChannel::new(period, atr_period, multiplier)?;
 				Box::new(indicator)
 			},
 			other => bail!("Unknown indicator type \"{other}\"")
