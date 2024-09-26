@@ -1,5 +1,6 @@
 :root {
 	--base-width: 50rem;
+	--events-height: 11.8rem;
 }
 
 body {
@@ -213,7 +214,7 @@ body {
 	}
 
 	.events {
-		height: 11.8rem;
+		max-height: var(--events-height);
 
 		td:first-child {
 			text-align: right;
@@ -234,7 +235,7 @@ body {
 	}
 
 	.parameters {
-		height: 11.8rem;
+		max-height: var(--events-height);
 		margin-top: 1.5em;
 		margin-bottom: 1em;
 
