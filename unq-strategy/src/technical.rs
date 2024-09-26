@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use anyhow::{bail, Result};
+use strum_macros::Display;
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::{mean, standard_deviation_mean_biased};
 
@@ -17,6 +18,14 @@ pub enum PositionState {
 	Long,
 	None,
 	Short
+}
+
+#[derive(PartialEq, Debug, Clone, Display)]
+pub enum ChannelExitMode {
+	#[strum(serialize = "center")]
+	Center,
+	#[strum(serialize = "opposite")]
+	Opposite
 }
 
 pub trait Indicator: Send + Sync {
@@ -309,8 +318,8 @@ impl Indicator for ExponentialMovingAverage {
 #[derive(Clone)]
 pub struct RelativeStrengthIndicator {
 	period: usize,
-	lower_band: f64,
-	upper_band: f64,
+	low_threshold: f64,
+	high_threshold: f64,
 	buffer: IndicatorBuffer,
 }
 
@@ -321,8 +330,8 @@ impl RelativeStrengthIndicator {
 		validate_period(period)?;
 		let output = Self {
 			period,
-			lower_band: low_threshold,
-			upper_band: high_threshold,
+			low_threshold,
+			high_threshold,
 			buffer: IndicatorBuffer::new(period + 1)
 		};
 		Ok(output)
@@ -351,14 +360,34 @@ impl RelativeStrengthIndicator {
 
 impl Indicator for RelativeStrengthIndicator {
 	fn get_description(&self) -> String {
-		format!("RSI({}, {}, {})", self.period, self.lower_band, self.upper_band)
+		format!("RSI({}, {}, {})", self.period, self.low_threshold, self.high_threshold)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
 		let filled = self.buffer.add(record.close);
 		if filled {
 			let rsi = self.calculate();
-			translate_band_signal(rsi, self.lower_band, self.upper_band)
+			if state == PositionState::Long {
+				if rsi > self.high_threshold  {
+					Some(TradeSignal::Close)
+				} else {
+					None
+				}
+			} else if state == PositionState::Short {
+				if rsi < self.low_threshold  {
+					Some(TradeSignal::Close)
+				} else {
+					None
+				}
+			} else {
+				if rsi > self.high_threshold  {
+					Some(TradeSignal::Short)
+				} else if rsi < self.low_threshold {
+					Some(TradeSignal::Long)
+				} else {
+					None
+				}
+			}
 		} else {
 			None
 		}
@@ -502,17 +531,19 @@ impl Indicator for PercentagePriceOscillator {
 #[derive(Clone)]
 pub struct BollingerBands {
 	multiplier: f64,
+	exit_mode: ChannelExitMode,
 	buffer: IndicatorBuffer
 }
 
 impl BollingerBands {
 	pub const ID: &'static str = "bollinger";
 
-	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
+	pub fn new(period: usize, multiplier: f64, exit_mode: ChannelExitMode) -> Result<Self> {
 		validate_period(period)?;
 		validate_multiplier(multiplier)?;
 		let output = Self {
 			multiplier,
+			exit_mode,
 			buffer: IndicatorBuffer::new(period)
 		};
 		Ok(output)
@@ -520,7 +551,7 @@ impl BollingerBands {
 
 	fn calculate(&self) -> (f64, f64, f64) {
 		let buffer = &self.buffer.buffer;
-		let center = mean(buffer.iter()).unwrap();
+		let center = exponential_moving_average(buffer.iter(), buffer.len());
 		let standard_deviation = standard_deviation_mean_biased(buffer.iter(), center).unwrap();
 		let lower = center - self.multiplier * standard_deviation;
 		let upper = center + self.multiplier * standard_deviation;
@@ -530,7 +561,7 @@ impl BollingerBands {
 
 impl Indicator for BollingerBands {
 	fn get_description(&self) -> String {
-		format!("Bollinger({}, {:.1})", self.buffer.size, self.multiplier)
+		format!("Bollinger({}, {:.1}, {})", self.buffer.size, self.multiplier, self.exit_mode)
 	}
 
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
@@ -540,7 +571,7 @@ impl Indicator for BollingerBands {
 			return None;
 		}
 		let (center, lower, upper) = self.calculate();
-		let signal = translate_band_state_signal(close, center, lower, upper, state);
+		let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
 		Some(signal)
 	}
 
@@ -556,6 +587,7 @@ impl Indicator for BollingerBands {
 #[derive(Clone)]
 pub struct KeltnerChannel {
 	multiplier: f64,
+	exit_mode: ChannelExitMode,
 	close_buffer: IndicatorBuffer,
 	true_range_buffer: IndicatorBuffer
 }
@@ -563,11 +595,12 @@ pub struct KeltnerChannel {
 impl KeltnerChannel {
 	pub const ID: &'static str = "keltner";
 
-	pub fn new(period: usize, multiplier: f64) -> Result<Self> {
+	pub fn new(period: usize, multiplier: f64, exit_mode: ChannelExitMode) -> Result<Self> {
 		validate_period(period)?;
 		validate_multiplier(multiplier)?;
 		let output = Self {
 			multiplier,
+			exit_mode,
 			close_buffer: IndicatorBuffer::new(period),
 			true_range_buffer: IndicatorBuffer::new(period)
 		};
@@ -577,7 +610,7 @@ impl KeltnerChannel {
 
 impl Indicator for KeltnerChannel {
 	fn get_description(&self) -> String {
-		format!("Keltner({}, {:.1})", self.close_buffer.size, self.multiplier)
+		format!("Keltner({}, {:.1}, {})", self.close_buffer.size, self.multiplier, self.exit_mode)
 	}
 
 	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
@@ -592,12 +625,12 @@ impl Indicator for KeltnerChannel {
 		let close_filled = self.close_buffer.add(close);
 		let true_range_filled = self.true_range_buffer.filled();
 		if close_filled && true_range_filled {
-			let center = ExponentialMovingAverage::calculate(self.close_buffer.size, &self.close_buffer.buffer);
+			let center = exponential_moving_average(self.close_buffer.buffer.iter(), self.close_buffer.size);
 			let average_true_range = self.true_range_buffer.average();
 			let multiplier_range = self.multiplier * average_true_range;
 			let lower = center - multiplier_range;
 			let upper = center + multiplier_range;
-			let signal = translate_band_state_signal(close, center, lower, upper, state);
+			let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
 			Some(signal)
 		} else {
 			None
@@ -606,6 +639,57 @@ impl Indicator for KeltnerChannel {
 
 	fn needs_initialization(&self) -> Option<usize> {
 		match self.close_buffer.needs_initialization() {
+			Some(size) => Some(size + 1),
+			None => None
+		}
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
+}
+
+#[derive(Clone)]
+pub struct DonchianChannel {
+	exit_mode: ChannelExitMode,
+	buffer: IndicatorBuffer,
+}
+
+impl DonchianChannel {
+	pub const ID: &'static str = "donchian";
+
+	pub fn new(period: usize, exit_mode: ChannelExitMode) -> Result<Self> {
+		validate_period(period)?;
+		let output = Self {
+			exit_mode,
+			buffer: IndicatorBuffer::new(period),
+		};
+		Ok(output)
+	}
+}
+
+impl Indicator for DonchianChannel {
+	fn get_description(&self) -> String {
+		format!("Donchian({}, {})", self.buffer.size, self.exit_mode)
+	}
+
+	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
+		let close = record.close;
+		self.buffer.add(close);
+		if self.buffer.filled() {
+			let buffer = &self.buffer.buffer;
+			let lower = buffer.iter().cloned().reduce(f64::min).unwrap();
+			let upper = buffer.iter().cloned().reduce(f64::max).unwrap();
+			let center = (lower + upper) / 2.0;
+			let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
+			Some(signal)
+		} else {
+			None
+		}
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		match self.buffer.needs_initialization() {
 			Some(size) => Some(size + 1),
 			None => None
 		}
@@ -672,40 +756,22 @@ fn translate_signal(signal: f64) -> Option<TradeSignal> {
 	}
 }
 
-fn translate_band_signal(signal: f64, lower: f64, upper: f64) -> Option<TradeSignal> {
-	if signal < lower {
-		Some(TradeSignal::Short)
-	} else if signal > upper {
-		Some(TradeSignal::Long)
+fn translate_channel_signal(close: f64, center: f64, lower: f64, upper: f64, state: PositionState, exit_mode: &ChannelExitMode) -> TradeSignal {
+	if close >= upper {
+		TradeSignal::Long
+	} else if close <= lower {
+		TradeSignal::Short
 	} else {
-		Some(TradeSignal::Close)
-	}
-}
-
-fn translate_band_state_signal(close: f64, center: f64, lower: f64, upper: f64, state: PositionState) -> TradeSignal {
-	match state {
-		PositionState::None => {
-			if close > upper {
+		if *exit_mode == ChannelExitMode::Center {
+			if state == PositionState::Long && close > center {
 				TradeSignal::Long
-			} else if close < lower {
+			} else if state == PositionState::Short && close < center {
 				TradeSignal::Short
 			} else {
 				TradeSignal::Close
 			}
-		},
-		PositionState::Long => {
-			if close > center {
-				TradeSignal::Long
-			} else {
-				TradeSignal::Close
-			}
-		},
-		PositionState::Short => {
-			if close < center {
-				TradeSignal::Short
-			} else {
-				TradeSignal::Close
-			}
+		} else {
+			TradeSignal::Close
 		}
 	}
 }

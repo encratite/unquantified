@@ -1472,6 +1472,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "rayon",
+ "strum",
+ "strum_macros",
  "unq-common",
 ]
 

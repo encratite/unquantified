@@ -51,7 +51,8 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			MovingAverageConvergence::ID,
 			PercentagePriceOscillator::ID,
 			BollingerBands::ID,
-			KeltnerChannel::ID
+			KeltnerChannel::ID,
+			DonchianChannel::ID
 		];
 		for x in enabled_indicators {
 			if !known_indicators.contains(&x.as_str()) {
@@ -145,14 +146,15 @@ impl<'a> AutoIndicatorStrategy<'a> {
 	fn get_indicators(&self, symbol: &String, contracts: u32) -> Result<Vec<SymbolIndicator>> {
 		let mut indicators: Vec<SymbolIndicator> = Vec::new();
 		// Brute-force parameter space for all indicators
-		let periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50];
+		let periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 40, 50];
 		let fast_periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20];
 		let slow_periods = vec![10, 15, 20, 25, 30, 40, 50];
 		let signal_periods = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-		let high_thresholds = vec![70.0, 75.0, 80.0, 85.0, 90.0];
-		let low_thresholds = vec![10.0, 15.0, 20.0, 25.0, 30.0];
-		let channel_periods = vec![5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50];
+		let lower_thresholds = vec![15.0, 20.0, 25.0, 30.0];
+		let upper_thresholds = vec![70.0, 75.0, 80.0, 85.0];
+		let channel_periods = vec![5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 40, 50];
 		let multipliers = vec![1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
+		let exit_modes = vec![ChannelExitMode::Center, ChannelExitMode::Opposite];
 		for indicator_string in self.enabled_indicators.iter() {
 			match indicator_string.as_str() {
 				MomentumIndicator::ID => {
@@ -205,8 +207,8 @@ impl<'a> AutoIndicatorStrategy<'a> {
 				},
 				RelativeStrengthIndicator::ID => {
 					for period in periods.iter() {
-						for high_threshold in high_thresholds.iter() {
-							for low_threshold in low_thresholds.iter() {
+						for high_threshold in upper_thresholds.iter() {
+							for low_threshold in lower_thresholds.iter() {
 								let indicator_result = RelativeStrengthIndicator::new(*period, *low_threshold, *high_threshold);
 								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 							}
@@ -236,15 +238,27 @@ impl<'a> AutoIndicatorStrategy<'a> {
 				BollingerBands::ID => {
 					for period in channel_periods.iter() {
 						for multiplier in multipliers.iter() {
-							let indicator_result = BollingerBands::new(*period, *multiplier);
-							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
+							for exit_mode in exit_modes.iter() {
+								let indicator_result = BollingerBands::new(*period, *multiplier, exit_mode.clone());
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
+							}
 						}
 					}
 				},
 				KeltnerChannel::ID => {
 					for period in channel_periods.iter() {
 						for multiplier in multipliers.iter() {
-							let indicator_result = KeltnerChannel::new(*period, *multiplier);
+							for exit_mode in exit_modes.iter() {
+								let indicator_result = KeltnerChannel::new(*period, *multiplier, exit_mode.clone());
+								Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
+							}
+						}
+					}
+				},
+				DonchianChannel::ID => {
+					for period in channel_periods.iter() {
+						for exit_mode in exit_modes.iter() {
+							let indicator_result = DonchianChannel::new(*period, exit_mode.clone());
 							Self::add_indicator(symbol, contracts, indicator_result, &mut indicators);
 						}
 					}

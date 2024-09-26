@@ -8,3 +8,5 @@ unq-common = { version = "0.5.0", path = "../unq-common" }
 chrono = "0.4.38"
 anyhow = "1.0.86"
 rayon = "1.10.0"
+strum = "0.26.3"
+strum_macros = "0.26.4"

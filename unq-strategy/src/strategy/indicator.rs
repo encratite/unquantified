@@ -73,6 +73,16 @@ impl<'a> IndicatorStrategy<'a> {
 		let signal_period_opt = Self::get_period("signalPeriod", parameters)?;
 		let fast_period_opt = Self::get_period("fastPeriod", parameters)?;
 		let slow_period_opt = Self::get_period("slowPeriod", parameters)?;
+		let exit_mode;
+		if let Some(exit_string) = parameters.get_string("exit")? {
+			exit_mode = match exit_string.as_str() {
+				"center" => ChannelExitMode::Center,
+				"opposite" => ChannelExitMode::Opposite,
+				_ => bail!("Invalid channel exit mode specified")
+			};
+		} else {
+			exit_mode = ChannelExitMode::Center;
+		}
 		let indicator: Box<dyn Indicator> = match indicator_string.as_str() {
 			MomentumIndicator::ID => {
 				let period = get_period(period_opt)?;
@@ -133,13 +143,18 @@ impl<'a> IndicatorStrategy<'a> {
 			BollingerBands::ID => {
 				let period = get_period(period_opt)?;
 				let multiplier = get_multiplier()?;
-				let indicator = BollingerBands::new(period, multiplier)?;
+				let indicator = BollingerBands::new(period, multiplier, exit_mode)?;
 				Box::new(indicator)
 			},
 			KeltnerChannel::ID => {
 				let period = get_period(period_opt)?;
 				let multiplier = get_multiplier()?;
-				let indicator = KeltnerChannel::new(period, multiplier)?;
+				let indicator = KeltnerChannel::new(period, multiplier, exit_mode)?;
+				Box::new(indicator)
+			},
+			DonchianChannel::ID => {
+				let period = get_period(period_opt)?;
+				let indicator = DonchianChannel::new(period, exit_mode)?;
 				Box::new(indicator)
 			},
 			other => bail!("Unknown indicator type \"{other}\"")
