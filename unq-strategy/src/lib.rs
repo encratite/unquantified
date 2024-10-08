@@ -3,6 +3,7 @@ mod strategy {
 	pub mod buy_and_hold;
 	pub mod indicator;
 	pub mod auto_indicator;
+	pub mod script;
 }
 
 use std::cell::RefCell;

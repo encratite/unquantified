@@ -10,3 +10,5 @@ anyhow = "1.0.86"
 rayon = "1.10.0"
 strum = "0.26.3"
 strum_macros = "0.26.4"
+rhai = { version = "1.19.0", features = ["internals"] }
+regex = "1.10.6"

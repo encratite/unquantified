@@ -38,7 +38,7 @@ pub struct AssetManager {
 }
 
 impl AssetManager {
-	pub fn new(ticker_directory: String, csv_directory: String, asset_path: String) -> Result<AssetManager> {
+	pub fn new(ticker_directory: &String, csv_directory: &String, asset_path: &String) -> Result<AssetManager> {
 		let assets = Self::load_assets(asset_path)?;
 		let time_series = Self::load_csv_files(csv_directory)?;
 		let tickers = Self::load_archives(ticker_directory, &assets)?;
@@ -85,7 +85,7 @@ impl AssetManager {
 		Ok(time_series)
 	}
 
-	fn load_assets(csv_path: String) -> Result<HashMap<String, Asset>> {
+	fn load_assets(csv_path: &String) -> Result<HashMap<String, Asset>> {
 		let mut assets = HashMap::new();
 		read_csv::<Asset>(csv_path.into(), |record| {
 			assets.insert(record.symbol.clone(), record);
@@ -93,7 +93,7 @@ impl AssetManager {
 		Ok(assets)
 	}
 
-	fn load_archives(ticker_directory: String, assets: &HashMap<String, Asset>) -> Result<HashMap<String, OhlcArchive>> {
+	fn load_archives(ticker_directory: &String, assets: &HashMap<String, Asset>) -> Result<HashMap<String, OhlcArchive>> {
 		let stem_paths = get_files_by_extension(ticker_directory, "zrk")?;
 		let tuples = stem_paths.par_iter().map(|(symbol, path)| {
 			let physical_delivery = Self::physical_delivery(symbol.to_string(), assets);
@@ -111,7 +111,7 @@ impl AssetManager {
 			x.physical_delivery)
 	}
 
-	fn load_csv_files(csv_directory: String) -> Result<HashMap<String, CsvTimeSeries>> {
+	fn load_csv_files(csv_directory: &String) -> Result<HashMap<String, CsvTimeSeries>> {
 		let stem_paths = get_files_by_extension(csv_directory, "csv")?;
 		let tuples = stem_paths.par_iter().map(|(key, path)| {
 			let time_series = CsvTimeSeries::new(path)?;

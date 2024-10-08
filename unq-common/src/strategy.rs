@@ -1,3 +1,4 @@
+use std::collections::vec_deque::Iter;
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use anyhow::{Result, bail};
@@ -215,5 +216,9 @@ impl StrategyParameters {
 		} else {
 			Ok(None)
 		}
+	}
+
+	pub fn iter(&self) -> Iter<StrategyParameter> {
+		self.0.iter()
 	}
 }

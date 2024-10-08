@@ -64,7 +64,7 @@ where
 	Ok(())
 }
 
-fn get_files_by_extension(directory: String, extension: &str) -> Result<Vec<(String, PathBuf)>> {
+fn get_files_by_extension(directory: &String, extension: &str) -> Result<Vec<(String, PathBuf)>> {
 	let entries = fs::read_dir(&directory)
 		.map_err(Error::msg)
 		.with_context(|| anyhow!("Failed to read list of files from {directory}"))?;

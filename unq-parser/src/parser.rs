@@ -212,6 +212,6 @@ impl CsvParser {
 		let symbol = Self::get_last_token(time_frame_directory);
 		let exchange_symbol = self.symbol_mapper.translate(&symbol);
 		let file_name = get_archive_file_name(&exchange_symbol);
-		return Path::new(&self.output_directory).join(file_name);
+		Path::new(&self.output_directory).join(file_name)
 	}
 }

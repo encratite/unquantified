@@ -5,6 +5,7 @@ mod correlation;
 use std::net::SocketAddr;
 use anyhow::{anyhow, Context, Result};
 use unq_common::{backtest::BacktestConfiguration, get_ini};
+use crate::server::ServerConfiguration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,6 +37,7 @@ async fn main() -> Result<()> {
 	let ticker_directory = get_string(server_section, "ticker_directory")?;
 	let csv_directory = get_string(server_section, "csv_directory")?;
 	let assets_path = get_string(server_section, "assets")?;
+	let script_directory = get_string(server_section, "script_directory")?;
 	let backtest_section = "backtest";
 	let starting_cash = get_f64(backtest_section, "starting_cash")?;
 	let forex_order_fee = get_f64(backtest_section, "forex_order_fee")?;
@@ -46,6 +48,13 @@ async fn main() -> Result<()> {
 	let ruin_ratio = get_f64(backtest_section, "ruin_ratio")?;
 	let enable_interest = get_bool(backtest_section, "enable_interest")?;
 	let enable_logging = true;
+	let server_configuration = ServerConfiguration {
+		address,
+		ticker_directory,
+		csv_directory,
+		assets_path,
+		script_directory
+	};
 	let backtest_configuration = BacktestConfiguration {
 		starting_cash,
 		forex_order_fee,
@@ -57,6 +66,6 @@ async fn main() -> Result<()> {
 		enable_interest,
 		enable_logging
 	};
-	server::run(address, ticker_directory, csv_directory, assets_path, backtest_configuration).await?;
+	server::run(server_configuration, backtest_configuration).await?;
 	Ok(())
 }

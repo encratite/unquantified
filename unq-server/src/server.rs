@@ -21,7 +21,16 @@ use crate::datetime::RelativeDateTime;
 
 const MINUTES_PER_DAY: u16 = 1440;
 
+pub struct ServerConfiguration {
+	pub address: SocketAddr,
+	pub ticker_directory: String,
+	pub csv_directory: String,
+	pub assets_path: String,
+	pub script_directory: String
+}
+
 struct ServerState {
+	server_configuration: ServerConfiguration,
 	asset_manager: AssetManager,
 	backtest_configuration: BacktestConfiguration
 }
@@ -88,13 +97,15 @@ impl OhlcRecordWeb {
 	}
 }
 
-pub async fn run(address: SocketAddr, ticker_directory: String, csv_directory: String, assets_path: String, backtest_configuration: BacktestConfiguration) -> Result<()> {
+pub async fn run(server_configuration: ServerConfiguration, backtest_configuration: BacktestConfiguration) -> Result<()> {
 	println!("Loading assets");
 	let stopwatch = Stopwatch::start_new();
-	let asset_manager = AssetManager::new(ticker_directory, csv_directory, assets_path)?;
+	let asset_manager = AssetManager::new(&server_configuration.ticker_directory, &server_configuration.csv_directory, &server_configuration.assets_path)?;
 	println!("Loaded assets in {} ms", stopwatch.elapsed_ms());
-	println!("Running server on {}", address);
+	let address = server_configuration.address.clone();
+	println!("Running server on {}", &address);
 	let server_state = ServerState {
+		server_configuration,
 		asset_manager,
 		backtest_configuration
 	};
