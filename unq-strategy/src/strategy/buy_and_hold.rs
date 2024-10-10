@@ -5,10 +5,10 @@ use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::{get_symbol_contracts, SymbolContracts};
 
-pub struct BuyAndHoldStrategy<'a> {
+pub struct BuyAndHoldStrategy {
 	remaining_symbols: HashMap<String, u32>,
 	side: PositionSide,
-	backtest: &'a RefCell<Backtest<'a>>
+	backtest: RefCell<Backtest>
 }
 
 /*
@@ -22,10 +22,10 @@ By default, all positions are long and one contract of each asset is held, but t
 - parameters: {contracts: [1, 2, 2]}
 This would change the number of contracts for NG and CL to 2 each.
 */
-impl<'a> BuyAndHoldStrategy<'a> {
+impl BuyAndHoldStrategy {
 	pub const ID: &'static str = "buy and hold";
 
-	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: RefCell<Backtest>) -> Result<Self> {
 		if symbol_contracts.is_empty() {
 			bail!("Need at least one symbol");
 		}
@@ -41,7 +41,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
 		let symbol_contracts = get_symbol_contracts(&symbols, parameters)?;
 		let side = match parameters.get_bool("short")? {
 			Some(value) => {
@@ -57,7 +57,7 @@ impl<'a> BuyAndHoldStrategy<'a> {
 	}
 }
 
-impl<'a> Strategy for BuyAndHoldStrategy<'a> {
+impl Strategy for BuyAndHoldStrategy {
 	fn next(&mut self) -> Result<()> {
 		let mut backtest = self.backtest.borrow_mut();
 		// Try to create all positions in each iteration, just in case we're dealing with illiquid assets and intraday data

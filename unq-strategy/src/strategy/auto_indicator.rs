@@ -12,14 +12,14 @@ use crate::technical::*;
 const WALK_FORWARD_WINDOW_MINIMUM: i64 = 60;
 const OPTIMIZATION_PERIOD_MINIMUM: usize = 5;
 
-pub struct AutoIndicatorStrategy<'a> {
+pub struct AutoIndicatorStrategy {
 	symbol_contracts: SymbolContracts,
 	enabled_indicators: Vec<String>,
 	indicators: Vec<AutoIndicator>,
 	walk_forward_window: i64,
 	optimization_period: usize,
 	periods_since_optimization: usize,
-	backtest: &'a RefCell<Backtest<'a>>
+	backtest: RefCell<Backtest>
 }
 
 #[derive(Clone)]
@@ -29,10 +29,10 @@ pub struct AutoIndicator {
 	enable_short: bool
 }
 
-impl<'a> AutoIndicatorStrategy<'a> {
+impl AutoIndicatorStrategy {
 	pub const ID: &'static str = "auto indicator";
 
-	pub fn new(symbol_contracts: &SymbolContracts, enabled_indicators: &Vec<String>, walk_forward_window: i64, optimization_period: usize, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(symbol_contracts: &SymbolContracts, enabled_indicators: &Vec<String>, walk_forward_window: i64, optimization_period: usize, backtest: RefCell<Backtest>) -> Result<Self> {
 		if symbol_contracts.is_empty() {
 			bail!("No symbols have been specified");
 		}
@@ -77,7 +77,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
 		let Some(enabled_indicators) = parameters.get_strings("indicators")? else {
 			bail!("Missing indicators argument");
 		};
@@ -108,12 +108,12 @@ impl<'a> AutoIndicatorStrategy<'a> {
 			enable_table.iter().map(|(enable_long, enable_short)| {
 				let enable_long = *enable_long;
 				let enable_short = *enable_short;
-				let mut optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager)?;
+				let mut optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager.clone())?;
 				// Disable logging in order to improve performance of optimization runs
 				optimization_backtest.disable_logging();
 				let backtest_refcell = RefCell::new(optimization_backtest);
 				let strategy_indicators = vec![symbol_indicator.clone()];
-				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, &backtest_refcell)?;
+				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, backtest_refcell.clone())?;
 				let mut done = false;
 				while !done {
 					strategy.next()?;
@@ -281,7 +281,7 @@ impl<'a> AutoIndicatorStrategy<'a> {
 	}
 }
 
-impl<'a> Strategy for AutoIndicatorStrategy<'a> {
+impl Strategy for AutoIndicatorStrategy {
 	fn next(&mut self) -> Result<()> {
 		if self.periods_since_optimization >= self.optimization_period {
 			// We have been running the same indicators for too long
@@ -323,7 +323,7 @@ impl<'a> Strategy for AutoIndicatorStrategy<'a> {
 			let Some(signal) = indicator.next(&record, state) else {
 				return Ok(());
 			};
-			IndicatorStrategy::trade(signal, auto_indicator.enable_long, auto_indicator.enable_short, &auto_indicator.symbol_indicator, &self.backtest)?;
+			IndicatorStrategy::trade(signal, auto_indicator.enable_long, auto_indicator.enable_short, &auto_indicator.symbol_indicator, self.backtest.clone())?;
 		}
 		self.periods_since_optimization += 1;
 		Ok(())

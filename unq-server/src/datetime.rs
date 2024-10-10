@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use chrono::{Duration, Local, Months, NaiveDateTime, TimeDelta, Timelike};
 use serde::Deserialize;
 use anyhow::{Result, anyhow, Context, bail};
@@ -58,7 +59,7 @@ pub struct RelativeDateTime {
 }
 
 impl RelativeDateTime {
-	pub fn resolve(&self, other: &RelativeDateTime, time_frame: &TimeFrame, archives: &Vec<&OhlcArchive>) -> Result<NaiveDateTime> {
+	pub fn resolve(&self, other: &RelativeDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 		match (self.date.is_some(), self.offset.is_some(), self.offset_unit.is_some(), self.special_keyword.is_some()) {
 			(true, false, false, false) => Ok(self.date.unwrap()),
 			(false, true, true, false) => {
@@ -75,7 +76,7 @@ impl RelativeDateTime {
 		}
 	}
 
-	fn to_fixed(&self, time_frame: &TimeFrame, archives: &Vec<&OhlcArchive>) -> Result<NaiveDateTime> {
+	fn to_fixed(&self, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 		match (self.date.is_some(), self.special_keyword.is_some()) {
 			(true, false) => Ok(self.date.unwrap()),
 			(false, true) => {
@@ -87,7 +88,7 @@ impl RelativeDateTime {
 	}
 }
 
-fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &OhlcArchive) -> Result<NaiveDateTime> {
+fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: Arc<OhlcArchive>) -> Result<NaiveDateTime> {
 	let data = archive.get_data(time_frame);
 	let get_some_time = |time: Option<NaiveDateTime>| time.with_context(|| "No records available");
 	if is_first {
@@ -103,7 +104,7 @@ fn resolve_first_last(is_first: bool, time_frame: &TimeFrame, archive: &OhlcArch
 	}
 }
 
-fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<&OhlcArchive>) -> Result<NaiveDateTime> {
+fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, archives: &Vec<Arc<OhlcArchive>>) -> Result<NaiveDateTime> {
 	if special_keyword == SpecialDateTime::Now {
 		let now = Local::now();
 		let time = now
@@ -117,7 +118,7 @@ fn resolve_keyword(special_keyword: SpecialDateTime, time_frame: &TimeFrame, arc
 		let is_first = special_keyword == SpecialDateTime::First;
 		let times = archives
 			.iter()
-			.map(|x| resolve_first_last(is_first, time_frame, x))
+			.map(|archive| resolve_first_last(is_first, time_frame, archive.clone()))
 			.collect::<Result<Vec<NaiveDateTime>>>()?;
 		let time = if is_first {
 			times.iter().min()

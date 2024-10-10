@@ -21,17 +21,17 @@ impl Clone for SymbolIndicator {
 	}
 }
 
-pub struct IndicatorStrategy<'a> {
+pub struct IndicatorStrategy {
 	indicators: Vec<SymbolIndicator>,
 	enable_long: bool,
 	enable_short: bool,
-	backtest: &'a RefCell<Backtest<'a>>
+	backtest: RefCell<Backtest>
 }
 
-impl<'a> IndicatorStrategy<'a> {
+impl IndicatorStrategy {
 	pub const ID: &'static str = "indicator";
 
-	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: RefCell<Backtest>) -> Result<Self> {
 		let strategy = Self {
 			indicators,
 			enable_long,
@@ -41,7 +41,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
 		let Some(indicator_string) = parameters.get_string("indicator")? else {
 			bail!("Missing required parameter \"indicator\"");
 		};
@@ -174,7 +174,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) -> Result<()> {
+	pub fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: RefCell<Backtest>) -> Result<()> {
 		let position_opt = backtest
 			.borrow()
 			.get_position_by_root(&indicator_data.symbol)
@@ -194,7 +194,7 @@ impl<'a> IndicatorStrategy<'a> {
 				2. We have a short position and the signal is long
 				Close the current position and create a new one with the correct side.
 				*/
-				Self::close_position(&position_opt, backtest);
+				Self::close_position(&position_opt, backtest.clone());
 				Self::open_position(enable_long, enable_short, target_side, indicator_data, backtest);
 			}
 		} else {
@@ -233,7 +233,7 @@ impl<'a> IndicatorStrategy<'a> {
 		Ok(target_side)
 	}
 
-	fn open_position(enable_long: bool, enable_short: bool, target_side: PositionSide, indicator_data: &SymbolIndicator, backtest: &'a RefCell<Backtest<'a>>) {
+	fn open_position(enable_long: bool, enable_short: bool, target_side: PositionSide, indicator_data: &SymbolIndicator, backtest: RefCell<Backtest>) {
 		let long_valid = enable_long && target_side == PositionSide::Long;
 		let short_valid = enable_short && target_side == PositionSide::Short;
 		if long_valid || short_valid {
@@ -244,7 +244,7 @@ impl<'a> IndicatorStrategy<'a> {
 		}
 	}
 
-	fn close_position(position_opt: &Option<SimplePosition>, backtest: &'a RefCell<Backtest<'a>>) {
+	fn close_position(position_opt: &Option<SimplePosition>, backtest: RefCell<Backtest>) {
 		if let Some(position) = position_opt {
 			let _ = backtest
 				.borrow_mut()
@@ -253,7 +253,7 @@ impl<'a> IndicatorStrategy<'a> {
 	}
 }
 
-impl<'a> Strategy for IndicatorStrategy<'a> {
+impl Strategy for IndicatorStrategy {
 	fn next(&mut self) -> Result<()> {
 		for indicator_data in self.indicators.iter_mut() {
 			let signal = {
@@ -278,7 +278,7 @@ impl<'a> Strategy for IndicatorStrategy<'a> {
 				};
 				signal
 			};
-			Self::trade(signal, self.enable_long, self.enable_short, indicator_data, &self.backtest)?;
+			Self::trade(signal, self.enable_long, self.enable_short, indicator_data, self.backtest.clone())?;
 		}
 		Ok(())
 	}

@@ -34,7 +34,7 @@ pub trait Indicator: Send + Sync {
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
 
-	fn initialize(&mut self, records: &Vec<&OhlcRecord>) {
+	fn initialize(&mut self, records: &Vec<OhlcRecord>) {
 		for record in records {
 			let _ = self.next(record, PositionState::None);
 		}

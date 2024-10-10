@@ -1,5 +1,6 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}};
 use std::cmp::Ordering;
+use std::sync::Arc;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
 use anyhow::{Context, Result, anyhow, bail};
@@ -10,7 +11,7 @@ use crate::{globex::parse_globex_code, manager::{Asset, AssetManager, AssetType}
 use crate::globex::GlobexCode;
 use crate::manager::CsvTimeSeries;
 use crate::OhlcArchive;
-use crate::ohlc::{OhlcData, OhlcRecord, TimeFrame};
+use crate::ohlc::{OhlcRecord, TimeFrame};
 use crate::stats::{mean, standard_deviation_mean};
 use crate::strategy::StrategyParameters;
 use crate::web::WebF64;
@@ -55,20 +56,20 @@ pub enum EventType {
 }
 
 #[derive(Clone)]
-pub struct Backtest<'a> {
+pub struct Backtest {
 	// Point in time when the backtest starts (from <= t < to)
 	from: NaiveDateTime,
 	// Point in time when the backtest terminates (from <= t < to)
 	to: NaiveDateTime,
-	// This struct is where all of the backtest parameters other than from/to are from
+	// This struct is where all the backtest parameters other than from/to are from
 	configuration: BacktestConfiguration,
 	// The asset manager is used to access asset definitions and OHLC records
-	asset_manager: &'a AssetManager,
+	asset_manager: Arc<AssetManager>,
 	// All cash is kept in USD. There are no separate currency accounts.
 	// Buying or selling securities that are traded in other currencies cause implicit conversion.
 	cash: f64,
 	// Long and short positions held by the account
-	positions: Vec<Position<'a>>,
+	positions: Vec<Position>,
 	// The current point in time
 	now: NaiveDateTime,
 	// Controls the speed of the event loop, specified by the strategy
@@ -92,7 +93,7 @@ pub struct Backtest<'a> {
 	// Statistics for profits and losses and bars spent in trades specific to long/short side
 	profit_duration_stats: Vec<ProfitDurationStats>,
 	// Interest rate time series for calculating interest
-	fed_funds_rate: &'a CsvTimeSeries,
+	fed_funds_rate: Arc<CsvTimeSeries>,
 	// Total interest accumulated
 	interest: f64,
 	// Indicates whether the backtest is still running (terminated = false) or not (terminated = true)
@@ -127,7 +128,7 @@ pub struct BacktestConfiguration {
 }
 
 #[derive(Clone)]
-pub struct Position<'a> {
+pub struct Position {
 	// Positions are uniquely identified by a sequential ID
 	pub id: u32,
 	// In case of futures this is the full name of the contract, i.e. a Globex code such as "ESU24"
@@ -146,7 +147,7 @@ pub struct Position<'a> {
 	// This amount is later re-added to the account when the position is closed.
 	pub margin: f64,
 	// Underlying OHLC archive of the asset
-	pub archive: &'a OhlcArchive,
+	pub archive: Arc<OhlcArchive>,
 	// Time the position was opened, doesn't get updated when it's partially sold off
 	pub time_opened: NaiveDateTime,
 	// Number of bars spent in the trade, relevant for statistics
@@ -264,7 +265,7 @@ struct ProfitDurationStats {
 	bars_in_trade: u32
 }
 
-impl<'a> Position<'a> {
+impl Position {
 	pub fn simple(&self) -> SimplePosition {
 		SimplePosition {
 			id: self.id,
@@ -274,12 +275,12 @@ impl<'a> Position<'a> {
 	}
 }
 
-impl<'a> Backtest<'a> {
-	pub fn new(from: NaiveDateTime, to: NaiveDateTime, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: &AssetManager) -> Result<Backtest> {
+impl Backtest {
+	pub fn new(from: NaiveDateTime, to: NaiveDateTime, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest> {
 		if from >= to {
 			bail!("Invalid from/to parameters");
 		}
-		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager)?;
+		let time_sequence = Self::get_time_sequence(&from, &to, &time_frame, asset_manager.clone())?;
 		let equity_curve_data = EquityCurveData {
 			account_value: WebF64::new(configuration.starting_cash),
 			drawdown: WebF64::new(0.0),
@@ -419,8 +420,9 @@ impl<'a> Backtest<'a> {
 			.cloned()
 	}
 
-	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<&OhlcRecord>> {
-		let source = self.get_symbol_source(symbol)?;
+	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<OhlcRecord>> {
+		let archive = self.get_symbol_archive(symbol)?;
+		let source = archive.get_data(&self.time_frame);
 		/*
 		Use .. instead of ..= because the primary use case of this function is filling up buffers with data
 		from outside the backtest from/to configuration, when the "next" function of a strategy is executed
@@ -432,7 +434,8 @@ impl<'a> Backtest<'a> {
 			.rev()
 			.take(bars)
 			.map(|(_, record)| record)
-			.collect::<Vec<&OhlcRecord>>();
+			.cloned()
+			.collect::<Vec<OhlcRecord>>();
 		Ok(records)
 	}
 
@@ -441,7 +444,8 @@ impl<'a> Backtest<'a> {
 	}
 
 	pub fn is_available(&self, symbol: &String) -> Result<bool> {
-		let source = self.get_symbol_source(symbol)?;
+		let archive = self.get_symbol_archive(symbol)?;
+		let source = archive.get_data(&self.time_frame);
 		let Some((first_timestamp, _)) = source.get_adjusted_fallback().first_key_value() else {
 			bail!("Unable to find any records for symbol {symbol}");
 		};
@@ -465,8 +469,8 @@ impl<'a> Backtest<'a> {
 		self.configuration.enable_logging = false;
 	}
 
-	pub fn get_state(&self) -> (&NaiveDateTime, &TimeFrame, &BacktestConfiguration, &'a AssetManager) {
-		(&self.now, &self.time_frame, &self.configuration, self.asset_manager)
+	pub fn get_state(&self) -> (&NaiveDateTime, &TimeFrame, &BacktestConfiguration, Arc<AssetManager>) {
+		(&self.now, &self.time_frame, &self.configuration, self.asset_manager.clone())
 	}
 
 	fn next_internal(&mut self) -> Result<bool> {
@@ -504,7 +508,7 @@ impl<'a> Backtest<'a> {
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
 		if asset.asset_type == AssetType::Futures {
 			let current_record = self.current_record(&symbol)?;
-			let maintenance_margin = self.get_asset_margin(&asset, archive)?;
+			let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
 			let initial_margin = (count as f64) * self.configuration.initial_margin_ratio * maintenance_margin_usd;
@@ -630,7 +634,7 @@ impl<'a> Backtest<'a> {
 		Some(latest_record.symbol.clone())
 	}
 
-	fn get_asset_margin(&self, asset: &Asset, archive: &OhlcArchive) -> Result<f64> {
+	fn get_asset_margin(&self, asset: &Asset, archive: Arc<OhlcArchive>) -> Result<f64> {
 		let current_record = archive.daily.unadjusted
 			.range(..=self.now)
 			.next_back()
@@ -688,7 +692,7 @@ impl<'a> Backtest<'a> {
 	fn get_record(&self, symbol: &String, time: NaiveDateTime, most_recent: bool) -> Result<OhlcRecord> {
 		let record;
 		let map_error = || anyhow!("Unable to find a record for {symbol} at {}", self.now);
-		let get_record = |archive: &OhlcArchive| -> Result<OhlcRecord> {
+		let get_record = |archive: Arc<OhlcArchive>| -> Result<OhlcRecord> {
 			let source = archive.get_data(&self.time_frame);
 			let adjusted = source.get_adjusted_fallback();
 			let record = if most_recent {
@@ -739,7 +743,7 @@ impl<'a> Backtest<'a> {
 		Ok(record)
 	}
 
-	fn get_time_sequence(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: &TimeFrame, asset_manager: &AssetManager) -> Result<VecDeque<NaiveDateTime>> {
+	fn get_time_sequence(from: &NaiveDateTime, to: &NaiveDateTime, time_frame: &TimeFrame, asset_manager: Arc<AssetManager>) -> Result<VecDeque<NaiveDateTime>> {
 		// Use S&P 500 futures as a timestamp reference for the core loop
 		// This only makes sense because the backtest currently targets futures
 		let time_reference_symbol = "ES".to_string();
@@ -1104,14 +1108,13 @@ impl<'a> Backtest<'a> {
 		Ok(())
 	}
 
-	fn get_symbol_source(&self, symbol: &String) -> Result<&OhlcData> {
+	fn get_symbol_archive(&self, symbol: &String) -> Result<Arc<OhlcArchive>> {
 		let root = match parse_globex_code(symbol) {
 			Some((root, _, _)) => root,
 			None => symbol.clone()
 		};
 		let (_, archive) = self.asset_manager.get_asset(&root)?;
-		let source = archive.get_data(&self.time_frame);
-		Ok(source)
+		Ok(archive)
 	}
 }
 

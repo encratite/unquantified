@@ -12,7 +12,7 @@ const DECLARE_STATEMENT: &'static str = "declare";
 const API_CONSTANT: &'static str = "api";
 const POSITIONS_PARAMETER: &'static str = "positions";
 
-type ApiContextCell<'a> = Rc<RefCell<ApiContext<'a>>>;
+type ApiContextCell<'a> = Rc<RefCell<ApiContext>>;
 
 #[derive(Clone)]
 enum PositionSizing {
@@ -32,7 +32,7 @@ pub struct ScriptStrategy<'a> {
 	symbols: Vec<String>,
 	context: ApiContextCell<'a>,
 	script: CompiledScript<'a>,
-	backtest: &'a RefCell<Backtest<'a>>
+	backtest: RefCell<Backtest>
 }
 
 struct CompiledScript<'a> {
@@ -43,16 +43,16 @@ struct CompiledScript<'a> {
 }
 
 #[derive(Clone)]
-struct ApiContext<'a> {
+struct ApiContext {
 	current_symbol: String,
 	position_sizing: PositionSizing,
 	contracts: Option<Vec<u32>>,
 	signals: Vec<TradeSignal>,
-	backtest: &'a RefCell<Backtest<'a>>
+	backtest: RefCell<Backtest>
 }
 
 impl<'a> ScriptStrategy<'a> {
-	pub fn new(script: &String, script_directory: &String, symbols: &Vec<String>, position_sizing: PositionSizing, contracts: Option<Vec<u32>>, scope: &Scope<'a>, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(script: &String, script_directory: &String, symbols: &Vec<String>, position_sizing: PositionSizing, contracts: Option<Vec<u32>>, scope: &Scope<'a>, backtest: RefCell<Backtest>) -> Result<Self> {
 		// Basic restriction to prevent directory traversal attacks
 		let pattern = Regex::new("^[A-Za-z0-9 ]+$")?;
 		if !pattern.is_match(script.as_str()) {
@@ -74,7 +74,7 @@ impl<'a> ScriptStrategy<'a> {
 			position_sizing,
 			contracts,
 			signals,
-			backtest
+			backtest: backtest.clone()
 		};
 		let context_cell = Rc::new(RefCell::new(context));
 		let mut strategy = Self {
@@ -87,7 +87,7 @@ impl<'a> ScriptStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(script: &String, script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn from_parameters(script: &String, script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
 		let mut scope = Scope::new();
 		for parameter in parameters.iter() {
 			let name = parameter.name.as_str();
@@ -238,7 +238,7 @@ impl<'a> Strategy for ScriptStrategy<'a> {
 	}
 }
 
-impl<'a> ApiContext<'a> {
+impl ApiContext {
 	fn buy(&mut self) {
 	}
 

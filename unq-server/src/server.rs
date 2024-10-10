@@ -31,7 +31,7 @@ pub struct ServerConfiguration {
 
 struct ServerState {
 	server_configuration: ServerConfiguration,
-	asset_manager: AssetManager,
+	asset_manager: Arc<AssetManager>,
 	backtest_configuration: BacktestConfiguration
 }
 
@@ -101,12 +101,13 @@ pub async fn run(server_configuration: ServerConfiguration, backtest_configurati
 	println!("Loading assets");
 	let stopwatch = Stopwatch::start_new();
 	let asset_manager = AssetManager::new(&server_configuration.ticker_directory, &server_configuration.csv_directory, &server_configuration.assets_path)?;
+	let asset_manager_arc = Arc::new(asset_manager);
 	println!("Loaded assets in {} ms", stopwatch.elapsed_ms());
 	let address = server_configuration.address.clone();
 	println!("Running server on {}", &address);
 	let server_state = ServerState {
 		server_configuration,
-		asset_manager,
+		asset_manager: asset_manager_arc,
 		backtest_configuration
 	};
 	let state_arc = Arc::new(server_state);
@@ -153,7 +154,7 @@ async fn get_history(
 	Json(request): Json<GetHistoryRequest>
 ) -> impl IntoResponse {
 	get_response(state, request, Box::new(|request, state| {
-		get_history_data(request, &state.asset_manager)
+		get_history_data(request, state.asset_manager.clone())
 	})).await
 }
 
@@ -162,7 +163,7 @@ async fn get_correlation(
 	Json(request): Json<GetCorrelationRequest>
 ) -> impl IntoResponse {
 	get_response(state, request, Box::new(|request, state| {
-		get_correlation_data(request, &state.asset_manager)
+		get_correlation_data(request, state.asset_manager.clone())
 	})).await
 }
 
@@ -171,11 +172,11 @@ async fn run_backtest(
 	Json(request): Json<RunBacktestRequest>
 ) -> impl IntoResponse {
 	get_response(state, request, Box::new(|request, state| {
-		get_backtest_result(request, &state.asset_manager, &state.backtest_configuration)
+		get_backtest_result(request, state.asset_manager.clone(), &state.backtest_configuration)
 	})).await
 }
 
-fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
+fn get_history_data(request: GetHistoryRequest, asset_manager: Arc<AssetManager>) -> Result<HashMap<String, Vec<OhlcRecordWeb>>> {
 	let time_frame = if request.time_frame >= MINUTES_PER_DAY {
 		TimeFrame::Daily
 	} else {
@@ -198,14 +199,14 @@ fn get_history_data(request: GetHistoryRequest, asset_manager: &AssetManager) ->
 	}
 }
 
-fn get_ticker_archives<'a>(symbols: &Vec<String>, asset_manager: &'a AssetManager) -> Result<Vec<&'a OhlcArchive>> {
+fn get_ticker_archives<'a>(symbols: &Vec<String>, asset_manager: Arc<AssetManager>) -> Result<Vec<Arc<OhlcArchive>>> {
 	symbols
 		.iter()
 		.map(|x| asset_manager.get_archive(&x))
 		.collect()
 }
 
-fn get_correlation_data(request: GetCorrelationRequest, asset_manager: &AssetManager) -> Result<CorrelationData> {
+fn get_correlation_data(request: GetCorrelationRequest, asset_manager: Arc<AssetManager>) -> Result<CorrelationData> {
 	let resolved_symbols = asset_manager.resolve_symbols(&request.symbols)?;
 	let archives = get_ticker_archives(&resolved_symbols, asset_manager)?;
 	let time_frame = TimeFrame::Daily;
@@ -277,9 +278,9 @@ fn get_unprocessed_records(from: &NaiveDateTime, to: &NaiveDateTime, source: &Oh
 		.collect()
 }
 
-fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager, backtest_configuration: &BacktestConfiguration) -> Result<BacktestSeries> {
+fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetManager>, backtest_configuration: &BacktestConfiguration) -> Result<BacktestSeries> {
 	let stopwatch = Stopwatch::start_new();
-	let archives = get_ticker_archives(&request.symbols, asset_manager)?;
+	let archives = get_ticker_archives(&request.symbols, asset_manager.clone())?;
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
 	let to = request.to.resolve(&request.from, &request.time_frame, &archives)?;
 	let parameters = StrategyParameters::from_vec(request.parameters);
@@ -287,9 +288,9 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: &AssetManager
 	// This isn't very memory-efficient but might be faster than using a mutex for now
 	let expanded_parameters = expand_parameters(&parameters)?;
 	let results = expanded_parameters.par_iter().map(|parameters| -> Result<(&StrategyParameters, BacktestResult)> {
-		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager)?;
+		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager.clone())?;
 		let backtest_refcell = RefCell::new(backtest);
-		let strategy_result = get_strategy(&request.strategy, &request.symbols, parameters, &backtest_refcell);
+		let strategy_result = get_strategy(&request.strategy, &request.symbols, parameters, backtest_refcell.clone());
 		let mut strategy = match strategy_result {
 			Ok(strategy) => strategy,
 			Err(error) => bail!(StrategyParameterError::new(error.to_string()))

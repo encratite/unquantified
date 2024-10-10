@@ -19,7 +19,7 @@ const CONTRACTS_PARAMETER: &'static str = "contracts";
 
 type SymbolContracts = Vec<(String, u32)>;
 
-pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Box<dyn Strategy + 'a>> {
+pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Box<dyn Strategy + 'a>> {
 	match name.as_str() {
 		BuyAndHoldStrategy::ID => {
 			let strategy = BuyAndHoldStrategy::from_parameters(symbols, parameters, backtest)?;
