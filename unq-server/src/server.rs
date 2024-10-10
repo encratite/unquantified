@@ -172,7 +172,7 @@ async fn run_backtest(
 	Json(request): Json<RunBacktestRequest>
 ) -> impl IntoResponse {
 	get_response(state, request, Box::new(|request, state| {
-		get_backtest_result(request, state.asset_manager.clone(), &state.backtest_configuration)
+		get_backtest_result(request, state.asset_manager.clone(), &state.server_configuration, &state.backtest_configuration)
 	})).await
 }
 
@@ -278,7 +278,7 @@ fn get_unprocessed_records(from: &NaiveDateTime, to: &NaiveDateTime, source: &Oh
 		.collect()
 }
 
-fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetManager>, backtest_configuration: &BacktestConfiguration) -> Result<BacktestSeries> {
+fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetManager>, server_configuration: &ServerConfiguration, backtest_configuration: &BacktestConfiguration) -> Result<BacktestSeries> {
 	let stopwatch = Stopwatch::start_new();
 	let archives = get_ticker_archives(&request.symbols, asset_manager.clone())?;
 	let from = request.from.resolve(&request.to, &request.time_frame, &archives)?;
@@ -290,7 +290,7 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetMana
 	let results = expanded_parameters.par_iter().map(|parameters| -> Result<(&StrategyParameters, BacktestResult)> {
 		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager.clone())?;
 		let backtest_refcell = RefCell::new(backtest);
-		let strategy_result = get_strategy(&request.strategy, &request.symbols, parameters, backtest_refcell.clone());
+		let strategy_result = get_strategy(&request.strategy, &request.symbols, &server_configuration.script_directory, parameters, backtest_refcell.clone());
 		let mut strategy = match strategy_result {
 			Ok(strategy) => strategy,
 			Err(error) => bail!(StrategyParameterError::new(error.to_string()))

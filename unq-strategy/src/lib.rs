@@ -14,12 +14,13 @@ use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, S
 use crate::strategy::auto_indicator::AutoIndicatorStrategy;
 use crate::strategy::buy_and_hold::BuyAndHoldStrategy;
 use crate::strategy::indicator::IndicatorStrategy;
+use crate::strategy::script::ScriptStrategy;
 
 const CONTRACTS_PARAMETER: &'static str = "contracts";
 
 type SymbolContracts = Vec<(String, u32)>;
 
-pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Box<dyn Strategy + 'a>> {
+pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, script_directory: &String, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Box<dyn Strategy + 'a>> {
 	match name.as_str() {
 		BuyAndHoldStrategy::ID => {
 			let strategy = BuyAndHoldStrategy::from_parameters(symbols, parameters, backtest)?;
@@ -31,6 +32,10 @@ pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, parameters: &Strat
 		},
 		AutoIndicatorStrategy::ID => {
 			let strategy = AutoIndicatorStrategy::from_parameters(symbols, parameters, backtest)?;
+			Ok(Box::new(strategy))
+		},
+		ScriptStrategy::ID => {
+			let strategy = ScriptStrategy::from_parameters(script_directory, symbols, parameters, backtest)?;
 			Ok(Box::new(strategy))
 		},
 		_ => bail!("No such strategy")
