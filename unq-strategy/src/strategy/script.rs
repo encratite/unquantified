@@ -1,21 +1,38 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use anyhow::{Result, bail, anyhow};
+use anyhow::{Result, bail, anyhow, Context};
 use regex::Regex;
 use rhai::{Engine, Expr, Scope, Stmt, AST};
 use unq_common::backtest::Backtest;
-use unq_common::strategy::{Strategy, StrategyParameterType, StrategyParameters};
+use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
+use crate::CONTRACTS_PARAMETER;
 
 const DECLARE_STATEMENT: &'static str = "declare";
+const API_CONSTANT: &'static str = "api";
+const POSITIONS_PARAMETER: &'static str = "positions";
 
 type ApiContextCell<'a> = Rc<RefCell<ApiContext<'a>>>;
 
+#[derive(Clone)]
+enum PositionSizing {
+	FixedContracts,
+	FixedSlots,
+	DynamicSlots
+}
+
+#[derive(Clone)]
+enum TradeSignal {
+	Long,
+	Short,
+	Close
+}
+
 pub struct ScriptStrategy<'a> {
 	symbols: Vec<String>,
+	context: ApiContextCell<'a>,
 	script: CompiledScript<'a>,
-	backtest: &'a RefCell<Backtest<'a>>,
-	current_symbol: Option<String>
+	backtest: &'a RefCell<Backtest<'a>>
 }
 
 struct CompiledScript<'a> {
@@ -25,14 +42,17 @@ struct CompiledScript<'a> {
 	declared_variables: Vec<String>
 }
 
-// #[derive(Clone)]
+#[derive(Clone)]
 struct ApiContext<'a> {
-	backtest: &'a RefCell<Backtest<'a>>,
-	current_symbol: Option<String>
+	current_symbol: String,
+	position_sizing: PositionSizing,
+	contracts: Option<Vec<u32>>,
+	signals: Vec<TradeSignal>,
+	backtest: &'a RefCell<Backtest<'a>>
 }
 
 impl<'a> ScriptStrategy<'a> {
-	pub fn from_parameters(script: &String, script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
+	pub fn new(script: &String, script_directory: &String, symbols: &Vec<String>, position_sizing: PositionSizing, contracts: Option<Vec<u32>>, scope: &Scope<'a>, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		// Basic restriction to prevent directory traversal attacks
 		let pattern = Regex::new("^[A-Za-z0-9 ]+$")?;
 		if !pattern.is_match(script.as_str()) {
@@ -40,56 +60,101 @@ impl<'a> ScriptStrategy<'a> {
 		}
 		let file_name = format!("{script}.rhai");
 		let path = Path::new(script_directory).join(&file_name);
-		let mut script = Self::compile_script(path)?;
-		for parameter in parameters.iter() {
-			if !script.declared_variables.contains(&parameter.name) {
-				bail!("Script \"{file_name}\" has not declared a variable called \"{}\"", parameter.name);
-			}
-			match parameter.get_type()? {
-				StrategyParameterType::NumericSingle => {
-					if let Some(value) = parameter.value.clone() {
-						script.scope.push(&parameter.name, value.get());
-					}
-				},
-				StrategyParameterType::NumericMulti => {
-					if let Some(web_values) = parameter.values.clone() {
-						let values: Vec<f64> = web_values.iter().map(|x| x.get()).collect();
-						script.scope.push(&parameter.name, values);
-					}
-				},
-				StrategyParameterType::NumericRange => {
-					bail!("The scripting engine does not support numeric range parameters");
-				},
-				StrategyParameterType::Bool => {
-					if let Some(value) = parameter.bool_value.clone() {
-						script.scope.push(&parameter.name, value);
-					}
-				},
-				StrategyParameterType::StringSingle => {
-					if let Some(value) = parameter.string_value.clone() {
-						script.scope.push(&parameter.name, value);
-					}
-				},
-				StrategyParameterType::StringMulti => {
-					if let Some(values) = parameter.string_values.clone() {
-						script.scope.push(&parameter.name, values);
-					}
-				}
-			}
-		}
+		let mut scope: Scope<'a> = scope.clone();
+		let script = Self::compile_script(path, &mut scope)?;
+		let current_symbol = symbols.first()
+			.with_context(|| "No symbols specified")?
+			.clone();
+		let signals = symbols
+			.iter()
+			.map(|_| TradeSignal::Close)
+			.collect();
+		let context = ApiContext {
+			current_symbol,
+			position_sizing,
+			contracts,
+			signals,
+			backtest
+		};
+		let context_cell = Rc::new(RefCell::new(context));
 		let mut strategy = Self {
 			symbols: symbols.clone(),
+			context: context_cell,
 			script,
-			backtest,
-			current_symbol: None
+			backtest
 		};
 		strategy.register_functions();
 		Ok(strategy)
 	}
 
-	fn compile_script(path: PathBuf) -> Result<CompiledScript<'a>> {
-		let engine = Engine::new();
+	pub fn from_parameters(script: &String, script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Self> {
 		let mut scope = Scope::new();
+		for parameter in parameters.iter() {
+			let name = parameter.name.as_str();
+			if name != POSITIONS_PARAMETER && name != CONTRACTS_PARAMETER {
+				Self::process_declared_variable(parameter, &mut scope)?;
+			}
+		}
+		let positions_parameter = parameters.get_string(POSITIONS_PARAMETER)?;
+		let contracts_parameter = parameters.get_values(CONTRACTS_PARAMETER)?;
+		let (position_sizing, contracts) = match (positions_parameter, contracts_parameter) {
+			(Some(positions_string), None) => {
+				let position_sizing = match positions_string.as_str() {
+					"fixed" => PositionSizing::FixedSlots,
+					"dynamic" => PositionSizing::DynamicSlots,
+					_ => bail!("Unknown positions sizing mode")
+				};
+				(position_sizing, None)
+			},
+			(None, Some(contracts)) => {
+				let integers = contracts
+					.iter()
+					.map(|x| *x as u32)
+					.collect();
+				(PositionSizing::FixedContracts, Some(integers))
+			},
+			_ => bail!("Invalid combination of positions/contracts parameters")
+		};
+		Self::new(script, script_directory, symbols, position_sizing, contracts, &scope, backtest)
+	}
+
+	fn process_declared_variable(parameter: &StrategyParameter, scope: &mut Scope) -> Result<()> {
+		match parameter.get_type()? {
+			StrategyParameterType::NumericSingle => {
+				if let Some(value) = parameter.value.clone() {
+					scope.push(&parameter.name, value.get());
+				}
+			},
+			StrategyParameterType::NumericMulti => {
+				if let Some(web_values) = parameter.values.clone() {
+					let values: Vec<f64> = web_values.iter().map(|x| x.get()).collect();
+					scope.push(&parameter.name, values);
+				}
+			},
+			StrategyParameterType::NumericRange => {
+				bail!("The scripting engine does not support numeric range parameters");
+			},
+			StrategyParameterType::Bool => {
+				if let Some(value) = parameter.bool_value.clone() {
+					scope.push(&parameter.name, value);
+				}
+			},
+			StrategyParameterType::StringSingle => {
+				if let Some(value) = parameter.string_value.clone() {
+					scope.push(&parameter.name, value);
+				}
+			},
+			StrategyParameterType::StringMulti => {
+				if let Some(values) = parameter.string_values.clone() {
+					scope.push(&parameter.name, values);
+				}
+			}
+		}
+		Ok(())
+	}
+
+	fn compile_script(path: PathBuf, scope: &mut Scope<'a>) -> Result<CompiledScript<'a>> {
+		let engine = Engine::new();
 		let original_ast = engine.compile_file(path)
 			.map_err(|error| anyhow!("Failed to compile script: {error}"))?;
 		let mut declared_variables = Vec::new();
@@ -144,7 +209,7 @@ impl<'a> ScriptStrategy<'a> {
 		let transformed_ast = AST::new(filtered_statements, module);
 		let script = CompiledScript {
 			engine,
-			scope,
+			scope: scope.clone(),
 			script_ast: transformed_ast,
 			declared_variables
 		};
@@ -152,8 +217,9 @@ impl<'a> ScriptStrategy<'a> {
 	}
 
 	fn register_functions(&mut self) {
-		let mut engine = &mut self.script.engine;
-		engine.register_type_with_name::<ApiContextCell>("api");
+		self.script.scope.push_constant(API_CONSTANT, self.context.clone());
+		let engine = &mut self.script.engine;
+		engine.register_type_with_name::<ApiContextCell>(API_CONSTANT);
 		engine.register_fn("buy", |api: &mut ApiContextCell| api.borrow_mut().buy());
 		engine.register_fn("sell", |api: &mut ApiContextCell| api.borrow_mut().sell());
 		engine.register_fn("close", |api: &mut ApiContextCell| api.borrow_mut().close());
@@ -163,8 +229,8 @@ impl<'a> ScriptStrategy<'a> {
 impl<'a> Strategy for ScriptStrategy<'a> {
 	fn next(&mut self) -> Result<()> {
 		for symbol in self.symbols.iter() {
-			self.current_symbol = Some(symbol.clone());
-			let mut script = &mut self.script;
+			self.context.borrow_mut().current_symbol = symbol.clone();
+			let script = &mut self.script;
 			script.engine.run_ast_with_scope(&mut script.scope, &script.script_ast)
 				.map_err(|error| anyhow!("Failed to run script: {error}"))?;
 		}

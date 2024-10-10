@@ -15,6 +15,8 @@ use crate::strategy::auto_indicator::AutoIndicatorStrategy;
 use crate::strategy::buy_and_hold::BuyAndHoldStrategy;
 use crate::strategy::indicator::IndicatorStrategy;
 
+const CONTRACTS_PARAMETER: &'static str = "contracts";
+
 type SymbolContracts = Vec<(String, u32)>;
 
 pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: &'a RefCell<Backtest<'a>>) -> Result<Box<dyn Strategy + 'a>> {
@@ -62,7 +64,7 @@ fn generate_parameters(parameters_input: &StrategyParameters, parameters_output:
 		generate_parameters(&parameters_input, new_parameters_output, output)?;
 		Ok(())
 	};
-	if &parameter.name == "contracts" {
+	if &parameter.name == CONTRACTS_PARAMETER {
 		/*
 		Hard-coded check to prevent this parameter from getting expanded by the StrategyParameterType::NumericMulti logic
 		since it actually contains array data rather than variations in parameter values that are supposed to spawn multiple backtests.
@@ -110,7 +112,7 @@ fn generate_parameters(parameters_input: &StrategyParameters, parameters_output:
 }
 
 fn get_symbol_contracts(symbols: &Vec<String>, parameters: &StrategyParameters) -> Result<SymbolContracts> {
-	let contracts: Vec<u32> = match parameters.get_values("contracts")? {
+	let contracts: Vec<u32> = match parameters.get_values(CONTRACTS_PARAMETER)? {
 		Some(count) => count
 			.iter()
 			.map(|x| *x as u32)
