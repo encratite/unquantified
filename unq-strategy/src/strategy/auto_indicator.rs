@@ -95,7 +95,10 @@ impl AutoIndicatorStrategy {
 	}
 
 	fn optimize_indicator(&self, symbol: &String, contracts: u32, backtest: &Ref<Backtest>) -> Result<AutoIndicator> {
-		let (now, time_frame, configuration, asset_manager) = backtest.get_state();
+		let now = backtest.get_time();
+		let time_frame = backtest.get_time_frame();
+		let configuration = backtest.get_configuration();
+		let asset_manager = backtest.get_asset_manager();
 		let from = now.add(TimeDelta::days(- self.walk_forward_window));
 		let to = now.clone();
 		let indicators = self.get_indicators(symbol, contracts)?;

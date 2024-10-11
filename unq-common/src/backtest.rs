@@ -398,6 +398,10 @@ impl Backtest {
 		Ok(result)
 	}
 
+	pub fn get_positions(&self) -> Vec<Position> {
+		self.positions.clone()
+	}
+
 	pub fn get_position(&self, id: u32) -> Result<Position> {
 		self.positions
 			.iter()
@@ -469,8 +473,31 @@ impl Backtest {
 		self.configuration.enable_logging = false;
 	}
 
-	pub fn get_state(&self) -> (&NaiveDateTime, &TimeFrame, &BacktestConfiguration, Arc<AssetManager>) {
-		(&self.now, &self.time_frame, &self.configuration, self.asset_manager.clone())
+	pub fn get_time(&self) -> &NaiveDateTime {
+		&self.now
+	}
+
+	pub fn get_time_frame(&self) -> &TimeFrame {
+		&self.time_frame
+	}
+
+	pub fn get_configuration(&self) -> &BacktestConfiguration {
+		&self.configuration
+	}
+
+	pub fn get_asset_manager(&self) -> Arc<AssetManager> {
+		self.asset_manager.clone()
+	}
+
+	pub fn get_account_value(&self) -> f64 {
+		self.get_account_value_internal(true)
+	}
+
+	pub fn get_margin(&self, symbol: &String) -> Result<f64> {
+		let (_, asset, archive) = self.get_asset(symbol)?;
+		let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
+		let (maintenance_margin_usd, _) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
+		Ok(maintenance_margin_usd)
 	}
 
 	fn next_internal(&mut self) -> Result<bool> {
@@ -490,10 +517,7 @@ impl Backtest {
 		Ok(self.terminated)
 	}
 
-	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
-		if count == 0 {
-			bail!("Invalid count");
-		}
+	fn get_asset(&self, symbol: &String) -> Result<(String, Asset, Arc<OhlcArchive>)> {
 		let (root, symbol) = match parse_globex_code(&symbol) {
 			Some((root, _, _)) => (root, symbol.clone()),
 			None => {
@@ -506,8 +530,16 @@ impl Backtest {
 			}
 		};
 		let (asset, archive) = self.asset_manager.get_asset(&root)?;
+		let output = (symbol, asset, archive);
+		Ok(output)
+	}
+
+	fn open_position_internal(&mut self, symbol: &String, count: u32, side: PositionSide, automatic_rollover: Option<bool>, enable_fees: bool, enable_logging: bool) -> Result<u32> {
+		if count == 0 {
+			bail!("Invalid count");
+		}
+		let (symbol, asset, archive) = self.get_asset(symbol)?;
 		if asset.asset_type == AssetType::Futures {
-			let current_record = self.current_record(&symbol)?;
 			let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
@@ -523,6 +555,7 @@ impl Backtest {
 			let cost = (count as f64) * maintenance_margin_usd + fees;
 			self.cash -= cost;
 			self.fees += fees;
+			let current_record = self.current_record(&symbol)?;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
 			let position = Position {
 				id: self.next_position_id,
@@ -602,7 +635,7 @@ impl Backtest {
 	}
 
 	fn update_equity_curve(&mut self) -> EquityCurveData {
-		let account_value = self.get_account_value(true);
+		let account_value = self.get_account_value_internal(true);
 		if account_value > self.max_account_value {
 			self.max_account_value = account_value;
 		}
@@ -618,7 +651,7 @@ impl Backtest {
 		}
 	}
 
-	fn get_symbol_from_root(&mut self, root: &String) -> Option<String> {
+	fn get_symbol_from_root(&self, root: &String) -> Option<String> {
 		let Ok(archive) = self.asset_manager.get_archive(root) else {
 			return None;
 		};
@@ -764,7 +797,7 @@ impl Backtest {
 		Ok(time_sequence)
 	}
 
-	fn get_account_value(&self, enable_fees: bool) -> f64 {
+	fn get_account_value_internal(&self, enable_fees: bool) -> f64 {
 		let position_value: f64 = self.positions
 			.iter()
 			.map(|position| self.get_position_value(position, position.count, enable_fees)
@@ -819,7 +852,7 @@ impl Backtest {
 			let Some((position_id, position_count)) = self.get_first_position() else {
 				break;
 			};
-			let account_value = self.get_account_value(true);
+			let account_value = self.get_account_value_internal(true);
 			/*
 			The current overnight margin check is wrong for two reasons:
 			1. It doesn't differentiate between different time zones (US session vs. European session vs. Asian session)
