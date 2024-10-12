@@ -6,6 +6,7 @@ use anyhow::{Result, bail, anyhow, Context};
 use regex::Regex;
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Scope, AST};
 use unq_common::backtest::{Backtest, PositionSide};
+use unq_common::stats::{mean, standard_deviation_mean_biased};
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
 use crate::CONTRACTS_PARAMETER;
 
@@ -121,7 +122,7 @@ impl<'a> ScriptStrategy<'a> {
 			backtest: backtest.clone()
 		};
 		let context_cell = Rc::new(RefCell::new(context));
-		let mut scope = Scope::new();
+		let scope = Scope::new();
 		let mut strategy = Self {
 			symbols: symbols.clone(),
 			position_sizing,
@@ -400,24 +401,24 @@ impl<'a> ScriptStrategy<'a> {
 			context.borrow().relative_strength_indicator(period)
 		});
 		let context = self.context.clone();
-		engine.register_fn("macd", move |fast_period: i64, slow_period: i64| {
-			context.borrow().moving_average_convergence(fast_period, slow_period)
+		engine.register_fn("macd", move |signal_period: i64, fast_period: i64, slow_period: i64| {
+			context.borrow().moving_average_convergence(signal_period, fast_period, slow_period)
 		});
 		let context = self.context.clone();
-		engine.register_fn("ppo", move |fast_period: i64, slow_period: i64| {
-			context.borrow().percentage_price_oscillator(fast_period, slow_period)
+		engine.register_fn("ppo", move |signal_period: i64, fast_period: i64, slow_period: i64| {
+			context.borrow().percentage_price_oscillator(signal_period, fast_period, slow_period)
 		});
 		let context = self.context.clone();
-		engine.register_fn("bollinger", move |period: i64, multiplier: f64, upper_band: bool| {
-			context.borrow().bollinger_band(period, multiplier, upper_band)
+		engine.register_fn("bollinger", move |period: i64, multiplier: f64| {
+			context.borrow().bollinger_band(period, multiplier)
 		});
 		let context = self.context.clone();
-		engine.register_fn("keltner", move |period: i64, multiplier: f64, upper_band: bool| {
-			context.borrow().keltner_channel(period, multiplier, upper_band)
+		engine.register_fn("keltner", move |period: i64, multiplier: f64| {
+			context.borrow().keltner_channel(period, multiplier)
 		});
 		let context = self.context.clone();
-		engine.register_fn("donchian", move |period: i64, upper_band: bool| {
-			context.borrow().donchian_channel(period, upper_band)
+		engine.register_fn("donchian", move |period: i64| {
+			context.borrow().donchian_channel(period)
 		});
 	}
 }
@@ -445,12 +446,39 @@ impl ApiContext {
 		let period = period as usize;
 		let values = match self.backtest.borrow().get_close_values(&self.current_symbol, period) {
 			Ok(values) => values,
-			Err(error) => return Err("Failed to get close values".into())
+			Err(error) => return Err(error.to_string().into())
 		};
 		if values.len() < period {
 			return Err(format!("Not enough records available ({} < {period})", values.len()).into());
 		}
 		Ok(values)
+	}
+
+	fn get_true_range(&self, period: i64) -> ApiResult<Vec<f64>> {
+		let period = period as usize;
+		let records = match self.backtest.borrow().get_records(&self.current_symbol, period + 1) {
+			Ok(values) => values,
+			Err(error) => return Err(error.to_string().into())
+		};
+		if records.len() < period {
+			return Err(format!("Not enough records available to calculate true range ({} < {period})", records.len()).into());
+		}
+		let mut true_range_buffer = Vec::new();
+		for window in records.windows(2) {
+			let record = &window[0];
+			let previous = &window[1];
+			let part1 = record.high - record.low;
+			let part2 = (record.high - previous.close).abs();
+			let part3 = (record.low - previous.close).abs();
+			let true_range = part1.max(part2).max(part3);
+			true_range_buffer.push(true_range);
+		}
+		Ok(true_range_buffer.into())
+	}
+
+	fn pack_channel(center: f64, upper: f64, lower: f64) -> ApiResult<Dynamic> {
+		let output = vec![center, upper, lower];
+		Ok(output.into())
 	}
 
 	fn validate_period(period: i64) -> ApiResult<()> {
@@ -460,11 +488,15 @@ impl ApiContext {
 		Ok(())
 	}
 
-	fn validate_periods(fast_period: i64, slow_period: i64) -> ApiResult<()> {
-		if fast_period < 1 {
+	fn validate_periods(signal_period: i64, fast_period: i64, slow_period: i64) -> ApiResult<()> {
+		if signal_period < 1 {
+			return Err(format!("Invalid signal period ({signal_period})").into())
+		} else if fast_period < 1 {
 			return Err(format!("Invalid fast period ({fast_period})").into())
 		} else if slow_period < 1 {
 			return Err(format!("Invalid slow period ({slow_period})").into())
+		} else if signal_period >= fast_period {
+			return Err(format!("Signal period must be less than fast period ({signal_period}, {fast_period})").into())
 		} else if fast_period >= slow_period {
 			return Err(format!("Fast period must be less than slow period ({fast_period}, {slow_period})").into())
 		}
@@ -501,17 +533,33 @@ impl ApiContext {
 		self.signals.insert(self.current_symbol.clone(), signal);
 	}
 
-	fn simple_moving_average(&self, period: i64) -> ApiResult<f64> {
-		Self::validate_period(period)?;
-		let values = self.get_close_values(period)?;
-		let sum: f64 = values.iter().sum();
-		let average = sum / (period as f64);
-		Ok(average)
+	fn get_exponential_moving_average(period: i64, skip: i64, values: &Vec<f64>) -> f64 {
+		let mut sum = 0.0;
+		let mut i = 0;
+		let lambda = 2.0 / ((period + 1) as f64);
+		for x in values.iter().skip(skip as usize) {
+			let coefficient = lambda * (1.0 - lambda).powi(i);
+			sum += coefficient * x;
+			i += 1;
+		}
+		sum
 	}
 
-	fn linear_moving_average(&self, period: i64) -> ApiResult<f64> {
+	fn simple_moving_average(&self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
-		let values = self.get_close_values(period)?;
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
+		let sum: f64 = values.iter().sum();
+		let average = sum / (period as f64);
+		Ok(average.into())
+	}
+
+	fn linear_moving_average(&self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
 		let mut average = 0.0;
 		let mut i = 0;
 		for x in values.iter() {
@@ -519,52 +567,126 @@ impl ApiContext {
 			i += 1;
 		}
 		average /= ((period * (period + 1)) as f64) / 2.0;
-		Ok(average)
+		Ok(average.into())
 	}
 
-	fn exponential_moving_average(&self, period: i64) -> ApiResult<f64> {
+	fn exponential_moving_average(&self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
-		let values = self.get_close_values(period)?;
-		let mut sum = 0.0;
-		let mut i = 0;
-		let lambda = 2.0 / ((period + 1) as f64);
-		for x in values.iter() {
-			let coefficient = lambda * (1.0 - lambda).powi(i);
-			sum += coefficient * x;
-			i += 1;
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
+		let sum = Self::get_exponential_moving_average(period, 0, &values);
+		Ok(sum.into())
+	}
+
+	fn relative_strength_indicator(&self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
+		let mut up = Vec::new();
+		let mut down = Vec::new();
+		let mut previous_close = values.iter().last().unwrap();
+		for close in values.iter().rev() {
+			let difference = close - previous_close;
+			if difference >= 0.0 {
+				up.push(difference)
+			} else {
+				down.push(- difference)
+			}
+			previous_close = close;
 		}
-		Ok(sum)
+		let up_mean = mean(up.iter()).unwrap_or(0.0);
+		let down_mean = mean(down.iter()).unwrap_or(0.0);
+		let rsi = 100.0 * up_mean / (up_mean + down_mean);
+		Ok(rsi.into())
 	}
 
-	fn relative_strength_indicator(&self, period: i64) -> ApiResult<f64> {
-		Self::validate_period(period)?;
-		todo!()
+	fn moving_average_convergence(&self, signal_period: i64, fast_period: i64, slow_period: i64) -> ApiResult<Dynamic> {
+		Self::validate_periods(signal_period, fast_period, slow_period)?;
+		let Ok(values) = self.get_close_values(slow_period + signal_period) else {
+			return Ok(().into())
+		};
+		let mut macd_buffer = Vec::new();
+		for i in 0..signal_period {
+			let fast_ema = Self::get_exponential_moving_average(fast_period, i, &values);
+			let slow_ema = Self::get_exponential_moving_average(slow_period, i, &values);
+			let macd = fast_ema - slow_ema;
+			macd_buffer.push(macd);
+		}
+		let signal = Self::get_exponential_moving_average(signal_period, 0, &macd_buffer);
+		let Some(macd) = macd_buffer.first() else {
+			return Err("MACD buffer is empty".into());
+		};
+		let output = vec![signal, *macd];
+		Ok(output.into())
 	}
 
-	fn moving_average_convergence(&self, fast_period: i64, slow_period: i64) -> ApiResult<f64> {
-		Self::validate_periods(fast_period, slow_period)?;
-		todo!()
+	fn percentage_price_oscillator(&self, signal_period: i64, fast_period: i64, slow_period: i64) -> ApiResult<Dynamic> {
+		Self::validate_periods(signal_period, fast_period, slow_period)?;
+		let Ok(values) = self.get_close_values(slow_period + signal_period) else {
+			return Ok(().into())
+		};
+		let mut ppo_buffer = Vec::new();
+		for i in 0..signal_period {
+			let fast_ema = Self::get_exponential_moving_average(fast_period, i, &values);
+			let slow_ema = Self::get_exponential_moving_average(slow_period, i, &values);
+			let ppo = 100.0 * (fast_ema - slow_ema) / slow_ema;
+			ppo_buffer.push(ppo);
+		}
+		let signal = Self::get_exponential_moving_average(signal_period, 0, &ppo_buffer);
+		let Some(ppo) = ppo_buffer.first() else {
+			return Err("PPO buffer is empty".into());
+		};
+		let output = vec![signal, *ppo];
+		Ok(output.into())
 	}
 
-	fn percentage_price_oscillator(&self, fast_period: i64, slow_period: i64) -> ApiResult<f64> {
-		Self::validate_periods(fast_period, slow_period)?;
-		todo!()
-	}
-
-	fn bollinger_band(&self, period: i64, multiplier: f64, upper_band: bool) -> ApiResult<f64> {
+	fn bollinger_band(&self, period: i64, multiplier: f64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
 		Self::validate_multiplier(multiplier)?;
-		todo!()
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
+		let center = Self::get_exponential_moving_average(period, 0, &values);
+		let standard_deviation = match standard_deviation_mean_biased(values.iter(), center) {
+			Ok(value) => value,
+			Err(error) => return Err(error.to_string().into())
+		};
+		let upper = center + multiplier * standard_deviation;
+		let lower = center - multiplier * standard_deviation;
+		Self::pack_channel(center, upper, lower)
 	}
 
-	fn keltner_channel(&self, period: i64, multiplier: f64, upper_band: bool) -> ApiResult<f64> {
+	fn keltner_channel(&self, period: i64, multiplier: f64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
 		Self::validate_multiplier(multiplier)?;
-		todo!()
+		let Ok(true_range_values) = self.get_true_range(period) else {
+			return Ok(().into())
+		};
+		let center = Self::get_exponential_moving_average(period, 0, &true_range_values);
+		let average_true_range = true_range_values.iter().sum::<f64>() / (true_range_values.len() as f64);
+		let multiplier_range = multiplier * average_true_range;
+		let lower = center - multiplier_range;
+		let upper = center + multiplier_range;
+		Self::pack_channel(center, upper, lower)
 	}
 
-	fn donchian_channel(&self, period: i64, upper_band: bool) -> ApiResult<f64> {
+	fn donchian_channel(&self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
-		todo!()
+		let Ok(values) = self.get_close_values(period) else {
+			return Ok(().into())
+		};
+		let Some(first) = values.first() else {
+			return Err("No values in buffer".into());
+		};
+		let mut upper = *first;
+		let mut lower = *first;
+		for x in values {
+			upper = upper.max(x);
+			lower = lower.min(x);
+		}
+		let center = (upper + lower) / 2.0;
+		Self::pack_channel(center, upper, lower)
 	}
 }
