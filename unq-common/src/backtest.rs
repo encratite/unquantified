@@ -443,6 +443,19 @@ impl Backtest {
 		Ok(records)
 	}
 
+	pub fn get_close_values(&self, symbol: &String, bars: usize) -> Result<Vec<f64>> {
+		let archive = self.get_symbol_archive(symbol)?;
+		let source = archive.get_data(&self.time_frame);
+		let records = source
+			.get_adjusted_fallback()
+			.range(..self.now)
+			.rev()
+			.take(bars)
+			.map(|(_, record)| record.close)
+			.collect::<Vec<f64>>();
+		Ok(records)
+	}
+
 	pub fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now, true)
 	}

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::rc::Rc;
 use anyhow::{Result, bail, anyhow, Context};
 use regex::Regex;
-use rhai::{Dynamic, Engine, ImmutableString, Scope, AST};
+use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Scope, AST};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
 use crate::CONTRACTS_PARAMETER;
@@ -13,9 +13,8 @@ const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
 const MARGIN_RATIO_PARAMETER: &'static str = "margin";
 
-const API_CONSTANT: &'static str = "api";
-
 type ApiContextCell = Rc<RefCell<ApiContext>>;
+type ApiResult<T> = Result<T, Box<EvalAltResult>>;
 
 /*
 The scripting strategy uses one of the following three position sizing algorithms:
@@ -123,7 +122,6 @@ impl<'a> ScriptStrategy<'a> {
 		};
 		let context_cell = Rc::new(RefCell::new(context));
 		let mut scope = Scope::new();
-		scope.push_constant(API_CONSTANT, context_cell.clone());
 		let mut strategy = Self {
 			symbols: symbols.clone(),
 			position_sizing,
@@ -212,17 +210,6 @@ impl<'a> ScriptStrategy<'a> {
 		bail!("Unable to convert parameter to dynamic value for scripting engine");
 	}
 
-	fn register_functions(&mut self) {
-		let engine = &mut self.engine;
-		engine.register_type_with_name::<ApiContextCell>(API_CONSTANT);
-		engine.register_fn("parameter", |api: &ApiContextCell, name: ImmutableString, default_value: Dynamic| {
-			api.borrow().get_parameter(name, default_value)
-		});
-		engine.register_fn("buy", |api: &mut ApiContextCell| api.borrow_mut().buy_signal());
-		engine.register_fn("sell", |api: &mut ApiContextCell| api.borrow_mut().sell_signal());
-		engine.register_fn("close", |api: &mut ApiContextCell| api.borrow_mut().close_position_signal());
-	}
-
 	fn get_side_from_signal(signal: &TradeSignal) -> Result<PositionSide> {
 		match signal {
 			TradeSignal::Long => Ok(PositionSide::Long),
@@ -233,7 +220,7 @@ impl<'a> ScriptStrategy<'a> {
 
 	fn get_position_targets(&self) -> Result<Vec<PositionTarget>> {
 		let position_targets = match self.position_sizing {
-			PositionSizing::FixedContracts => self.get_fixed_contracts_targets()?,
+			PositionSizing::FixedContracts => self.get_fixed_contract_targets()?,
 			PositionSizing::FixedSlots | PositionSizing::DynamicSlots => self.get_slot_targets()?
 		};
 		Ok(position_targets)
@@ -248,7 +235,7 @@ impl<'a> ScriptStrategy<'a> {
 		}
 	}
 
-	fn get_fixed_contracts_targets(&self) -> Result<Vec<PositionTarget>> {
+	fn get_fixed_contract_targets(&self) -> Result<Vec<PositionTarget>> {
 		let Some(contracts) = &self.contracts else {
 			bail!("Unable to retrieve contracts");
 		};
@@ -368,6 +355,71 @@ impl<'a> ScriptStrategy<'a> {
 		}
 		Ok(())
 	}
+
+	fn register_functions(&mut self) {
+		self.register_general_functions();
+		self.register_indicators();
+	}
+
+	fn register_general_functions(&mut self) {
+		let engine = &mut self.engine;
+		let context = self.context.clone();
+		engine.register_fn("parameter", move |name: ImmutableString, default_value: Dynamic| {
+			context.borrow().get_parameter(name, default_value)
+		});
+		let context = self.context.clone();
+		engine.register_fn("buy", move || {
+			context.borrow_mut().buy_signal()
+		});
+		let context = self.context.clone();
+		engine.register_fn("sell", move || {
+			context.borrow_mut().sell_signal()
+		});
+		let context = self.context.clone();
+		engine.register_fn("close", move || {
+			context.borrow_mut().close_position_signal()
+		});
+	}
+
+	fn register_indicators(&mut self) {
+		let engine = &mut self.engine;
+		let context = self.context.clone();
+		engine.register_fn("sma", move |period: i64| {
+			context.borrow().simple_moving_average(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("lma", move |period: i64| {
+			context.borrow().linear_moving_average(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("ema", move |period: i64| {
+			context.borrow().exponential_moving_average(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("rsi", move |period: i64| {
+			context.borrow().relative_strength_indicator(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("macd", move |fast_period: i64, slow_period: i64| {
+			context.borrow().moving_average_convergence(fast_period, slow_period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("ppo", move |fast_period: i64, slow_period: i64| {
+			context.borrow().percentage_price_oscillator(fast_period, slow_period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("bollinger", move |period: i64, multiplier: f64, upper_band: bool| {
+			context.borrow().bollinger_band(period, multiplier, upper_band)
+		});
+		let context = self.context.clone();
+		engine.register_fn("keltner", move |period: i64, multiplier: f64, upper_band: bool| {
+			context.borrow().keltner_channel(period, multiplier, upper_band)
+		});
+		let context = self.context.clone();
+		engine.register_fn("donchian", move |period: i64, upper_band: bool| {
+			context.borrow().donchian_channel(period, upper_band)
+		});
+	}
 }
 
 impl<'a> Strategy for ScriptStrategy<'a> {
@@ -389,6 +441,43 @@ impl<'a> Strategy for ScriptStrategy<'a> {
 }
 
 impl ApiContext {
+	fn get_close_values(&self, period: i64) -> ApiResult<Vec<f64>> {
+		let period = period as usize;
+		let values = match self.backtest.borrow().get_close_values(&self.current_symbol, period) {
+			Ok(values) => values,
+			Err(error) => return Err("Failed to get close values".into())
+		};
+		if values.len() < period {
+			return Err(format!("Not enough records available ({} < {period})", values.len()).into());
+		}
+		Ok(values)
+	}
+
+	fn validate_period(period: i64) -> ApiResult<()> {
+		if period < 1 {
+			return Err(format!("Invalid period ({period})").into())
+		}
+		Ok(())
+	}
+
+	fn validate_periods(fast_period: i64, slow_period: i64) -> ApiResult<()> {
+		if fast_period < 1 {
+			return Err(format!("Invalid fast period ({fast_period})").into())
+		} else if slow_period < 1 {
+			return Err(format!("Invalid slow period ({slow_period})").into())
+		} else if fast_period >= slow_period {
+			return Err(format!("Fast period must be less than slow period ({fast_period}, {slow_period})").into())
+		}
+		Ok(())
+	}
+
+	fn validate_multiplier(multiplier: f64) -> ApiResult<()> {
+		if multiplier <= 0.0 {
+			return Err(format!("Invalid multiplier ({multiplier})").into())
+		}
+		Ok(())
+	}
+
 	fn get_parameter(&self, name: ImmutableString, default_value: Dynamic) -> Dynamic {
 		match self.parameters.get(&name.to_string()) {
 			Some(value) => value.clone(),
@@ -410,5 +499,72 @@ impl ApiContext {
 
 	fn insert_signal(&mut self, signal: TradeSignal) {
 		self.signals.insert(self.current_symbol.clone(), signal);
+	}
+
+	fn simple_moving_average(&self, period: i64) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		let values = self.get_close_values(period)?;
+		let sum: f64 = values.iter().sum();
+		let average = sum / (period as f64);
+		Ok(average)
+	}
+
+	fn linear_moving_average(&self, period: i64) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		let values = self.get_close_values(period)?;
+		let mut average = 0.0;
+		let mut i = 0;
+		for x in values.iter() {
+			average += ((period - i) as f64) * x;
+			i += 1;
+		}
+		average /= ((period * (period + 1)) as f64) / 2.0;
+		Ok(average)
+	}
+
+	fn exponential_moving_average(&self, period: i64) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		let values = self.get_close_values(period)?;
+		let mut sum = 0.0;
+		let mut i = 0;
+		let lambda = 2.0 / ((period + 1) as f64);
+		for x in values.iter() {
+			let coefficient = lambda * (1.0 - lambda).powi(i);
+			sum += coefficient * x;
+			i += 1;
+		}
+		Ok(sum)
+	}
+
+	fn relative_strength_indicator(&self, period: i64) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		todo!()
+	}
+
+	fn moving_average_convergence(&self, fast_period: i64, slow_period: i64) -> ApiResult<f64> {
+		Self::validate_periods(fast_period, slow_period)?;
+		todo!()
+	}
+
+	fn percentage_price_oscillator(&self, fast_period: i64, slow_period: i64) -> ApiResult<f64> {
+		Self::validate_periods(fast_period, slow_period)?;
+		todo!()
+	}
+
+	fn bollinger_band(&self, period: i64, multiplier: f64, upper_band: bool) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		Self::validate_multiplier(multiplier)?;
+		todo!()
+	}
+
+	fn keltner_channel(&self, period: i64, multiplier: f64, upper_band: bool) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		Self::validate_multiplier(multiplier)?;
+		todo!()
+	}
+
+	fn donchian_channel(&self, period: i64, upper_band: bool) -> ApiResult<f64> {
+		Self::validate_period(period)?;
+		todo!()
 	}
 }
