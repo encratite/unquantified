@@ -6,7 +6,7 @@ use unq_common::stats::{mean, standard_deviation_mean_biased};
 
 const EMA_BUFFER_SIZE_MULTIPLIER: usize = 2;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum TradeSignal {
 	Long,
 	Close,
@@ -29,14 +29,59 @@ pub enum ChannelExitMode {
 }
 
 pub trait Indicator: Send + Sync {
+	fn get_id(&self) -> IndicatorId;
 	fn get_description(&self) -> String;
-	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal>;
+	fn next(&mut self, record: &OhlcRecord);
+	fn get_indicators(&self) -> Option<Vec<f64>>;
+	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal>;
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
 
 	fn initialize(&mut self, records: &Vec<OhlcRecord>) {
 		for record in records {
-			let _ = self.next(record, PositionState::None);
+			let _ = self.next(record);
+		}
+	}
+}
+
+#[derive(PartialEq)]
+pub struct IndicatorId {
+	name: &'static str,
+	parameters: Vec<f64>
+}
+
+impl IndicatorId {
+	fn from_period(name: &'static str, period: usize) -> Self {
+		Self {
+			name,
+			parameters: vec![period as f64]
+		}
+	}
+
+	fn from_fast_slow(name: &'static str, fast_period: usize, slow_period: Option<usize>) -> Self {
+		match slow_period {
+			Some(slow_period) => Self {
+				name,
+				parameters: vec![fast_period as f64, slow_period as f64]
+			},
+			None => Self {
+				name,
+				parameters: vec![fast_period as f64]
+			}
+		}
+	}
+
+	fn from_signal_fast_slow(name: &'static str, signal_period: usize, fast_period: usize, slow_period: usize) -> Self {
+		Self {
+			name,
+			parameters: vec![signal_period as f64, fast_period as f64, slow_period as f64]
+		}
+	}
+
+	fn from_period_multiplier(name: &'static str, period: usize, multiplier: f64) -> Self {
+		Self {
+			name,
+			parameters: vec![period as f64, multiplier]
 		}
 	}
 }
@@ -67,13 +112,10 @@ impl IndicatorBuffer {
 		}
 	}
 
-	pub fn add(&mut self, sample: f64) -> bool {
+	pub fn add(&mut self, sample: f64) {
 		self.buffer.push_back(sample);
 		if self.buffer.len() > self.size {
 			self.buffer.pop_front();
-			true
-		} else {
-			false
 		}
 	}
 
@@ -97,37 +139,60 @@ impl IndicatorBuffer {
 }
 
 #[derive(Clone)]
-pub struct MomentumIndicator(IndicatorBuffer);
+pub struct MomentumIndicator {
+	buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64)>
+}
 
 impl MomentumIndicator {
 	pub const ID: &'static str = "momentum";
 
 	pub fn new(period: usize) -> Result<Self> {
 		validate_period(period)?;
-		let output = Self(IndicatorBuffer::new(period));
+		let output = Self {
+			buffer: IndicatorBuffer::new(period),
+			indicators: None
+		};
 		Ok(output)
 	}
 }
 
 impl Indicator for MomentumIndicator {
-	fn get_description(&self) -> String {
-		format!("Momentum({})", self.0.size)
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_period("mom", self.buffer.size)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
-		let filled = self.0.add(record.close);
-		if !filled {
-			return None;
+	fn get_description(&self) -> String {
+		format!("Momentum({})", self.buffer.size)
+	}
+
+	fn next(&mut self, record: &OhlcRecord) {
+		let buffer = &mut self.buffer;
+		buffer.add(record.close);
+		if !buffer.filled() {
+			return;
 		}
-		let buffer = &self.0.buffer;
-		let first = buffer.front().unwrap();
-		let last = buffer.iter().last().unwrap();
-		let momentum = first - last;
-		translate_signal(momentum)
+		if let (Some(first), Some(last)) = (buffer.buffer.front(), buffer.buffer.iter().last()) {
+			self.indicators = Some((*first, *last));
+		}
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_dual_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		match self.indicators {
+			Some((first, last)) => {
+				let momentum = first - last;
+				translate_signal(momentum)
+			},
+			None => None
+		}
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		self.0.needs_initialization()
+		self.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {
@@ -139,11 +204,14 @@ impl Indicator for MomentumIndicator {
 struct MovingAverage {
 	fast_period: usize,
 	slow_period: Option<usize>,
-	buffer: IndicatorBuffer
+	buffer: IndicatorBuffer,
+	fast_average: Option<f64>,
+	slow_average: Option<f64>,
+	trade_signal: Option<TradeSignal>
 }
 
 impl MovingAverage {
-	pub fn new(fast_period: usize, slow_period: Option<usize>, buffer_size_multiplier: usize) -> Result<Self> {
+	fn new(fast_period: usize, slow_period: Option<usize>, buffer_size_multiplier: usize) -> Result<Self> {
 		if buffer_size_multiplier < 1 || buffer_size_multiplier > 5 {
 			bail!("Invalid buffer size multiplier specified ({buffer_size_multiplier}");
 		}
@@ -151,26 +219,39 @@ impl MovingAverage {
 		let output = Self {
 			fast_period,
 			slow_period,
-			buffer: IndicatorBuffer::with_slow(fast_period, slow_period, buffer_size_multiplier)
+			buffer: IndicatorBuffer::with_slow(fast_period, slow_period, buffer_size_multiplier),
+			fast_average: None,
+			slow_average: None,
+			trade_signal: None
 		};
 		Ok(output)
 	}
 
-	fn calculate_next(&mut self, record: &OhlcRecord, calculate: &dyn Fn(usize, &VecDeque<f64>) -> f64) -> Option<TradeSignal> {
-		let filled = self.buffer.add(record.close);
-		if !filled {
-			return None;
+	fn calculate_averages(&mut self, record: &OhlcRecord, calculate: &dyn Fn(usize, &VecDeque<f64>) -> f64) {
+		self.buffer.add(record.close);
+		if !self.buffer.filled() {
+			return;
 		}
 		let buffer = &self.buffer.buffer;
 		let fast_average = calculate(self.fast_period, buffer);
+		self.fast_average = Some(fast_average);
 		let difference = if let Some(slow_period) = self.slow_period {
 			let slow_average = calculate(slow_period, buffer);
+			self.slow_average = Some(slow_average);
 			fast_average - slow_average
 		} else {
 			let price = *buffer.front().unwrap();
 			price - fast_average
 		};
-		translate_signal(difference)
+		self.trade_signal = translate_signal(difference);
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		match (self.fast_average, self.slow_average) {
+			(Some(fast_average), Some(slow_average)) => Some(vec![fast_average, slow_average]),
+			(Some(fast_average), None) => Some(vec![fast_average]),
+			_ => None
+		}
 	}
 }
 
@@ -189,6 +270,10 @@ impl SimpleMovingAverage {
 }
 
 impl Indicator for SimpleMovingAverage {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_fast_slow("sma", self.0.fast_period, self.0.slow_period)
+	}
+
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("SMAC({}, {})", self.0.fast_period, slow_period)
@@ -197,13 +282,21 @@ impl Indicator for SimpleMovingAverage {
 		}
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let sum: f64 = buffer.iter().take(period).sum();
 			let average = sum / (period as f64);
 			average
 		};
-		self.0.calculate_next(record, &calculate)
+		self.0.calculate_averages(record, &calculate)
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		self.0.get_indicators()
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		self.0.trade_signal.clone()
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -230,6 +323,10 @@ impl LinearMovingAverage {
 }
 
 impl Indicator for LinearMovingAverage {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_fast_slow("lma", self.0.fast_period, self.0.slow_period)
+	}
+
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("LMAC({}, {})", self.0.fast_period, slow_period)
@@ -238,7 +335,7 @@ impl Indicator for LinearMovingAverage {
 		}
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		let calculate = |period: usize, buffer: &VecDeque<f64>| -> f64 {
 			let mut average = 0.0;
 			let mut i = 0;
@@ -249,7 +346,15 @@ impl Indicator for LinearMovingAverage {
 			average /= ((period * (period + 1)) as f64) / 2.0;
 			average
 		};
-		self.0.calculate_next(record, &calculate)
+		self.0.calculate_averages(record, &calculate)
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		self.0.get_indicators()
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		self.0.trade_signal.clone()
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -293,6 +398,10 @@ impl ExponentialMovingAverage {
 }
 
 impl Indicator for ExponentialMovingAverage {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_fast_slow("ema", self.0.fast_period, self.0.slow_period)
+	}
+
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("EMAC({}, {})", self.0.fast_period, slow_period)
@@ -301,9 +410,17 @@ impl Indicator for ExponentialMovingAverage {
 		}
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		let calculate = ExponentialMovingAverage::calculate;
-		self.0.calculate_next(record, &calculate)
+		self.0.calculate_averages(record, &calculate)
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		self.0.get_indicators()
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		self.0.trade_signal.clone()
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -321,6 +438,7 @@ pub struct RelativeStrengthIndicator {
 	low_threshold: f64,
 	high_threshold: f64,
 	buffer: IndicatorBuffer,
+	indicator: Option<f64>
 }
 
 impl RelativeStrengthIndicator {
@@ -332,7 +450,8 @@ impl RelativeStrengthIndicator {
 			period,
 			low_threshold,
 			high_threshold,
-			buffer: IndicatorBuffer::new(period + 1)
+			buffer: IndicatorBuffer::new(period + 1),
+			indicator: None
 		};
 		Ok(output)
 	}
@@ -359,27 +478,51 @@ impl RelativeStrengthIndicator {
 }
 
 impl Indicator for RelativeStrengthIndicator {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_period(RelativeStrengthIndicator::ID, self.period)
+	}
+
 	fn get_description(&self) -> String {
 		format!("RSI({}, {}, {})", self.period, self.low_threshold, self.high_threshold)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
-		let filled = self.buffer.add(record.close);
-		if filled {
-			let rsi = self.calculate();
-			if state == PositionState::Long {
+	fn next(&mut self, record: &OhlcRecord) {
+		self.buffer.add(record.close);
+		if !self.buffer.filled() {
+			return;
+		}
+		let rsi = self.calculate();
+		self.indicator = Some(rsi);
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		match self.indicator {
+			Some(rsi) => Some(vec![rsi]),
+			None => None
+		}
+	}
+
+	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal> {
+		if !self.buffer.filled() {
+			return None;
+		}
+		let rsi = self.calculate();
+		match state {
+			PositionState::Long => {
 				if rsi > self.high_threshold  {
 					Some(TradeSignal::Close)
 				} else {
 					None
 				}
-			} else if state == PositionState::Short {
+			},
+			PositionState::Short => {
 				if rsi < self.low_threshold  {
 					Some(TradeSignal::Close)
 				} else {
 					None
 				}
-			} else {
+			},
+			_ => {
 				if rsi > self.high_threshold  {
 					Some(TradeSignal::Short)
 				} else if rsi < self.low_threshold {
@@ -388,8 +531,6 @@ impl Indicator for RelativeStrengthIndicator {
 					None
 				}
 			}
-		} else {
-			None
 		}
 	}
 
@@ -409,6 +550,7 @@ pub struct MovingAverageConvergence {
 	slow_period: usize,
 	close_buffer: IndicatorBuffer,
 	signal_buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64)>
 }
 
 impl MovingAverageConvergence {
@@ -423,7 +565,8 @@ impl MovingAverageConvergence {
 			fast_period,
 			slow_period,
 			close_buffer: IndicatorBuffer::new(close_buffer_size),
-			signal_buffer: IndicatorBuffer::new(signal_buffer_size)
+			signal_buffer: IndicatorBuffer::new(signal_buffer_size),
+			indicators: None
 		};
 		Ok(output)
 	}
@@ -440,21 +583,33 @@ impl MovingAverageConvergence {
 }
 
 impl Indicator for MovingAverageConvergence {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_signal_fast_slow(MovingAverageConvergence::ID, self.signal_period, self.fast_period, self.slow_period)
+	}
+
 	fn get_description(&self) -> String {
 		format!("MACD({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
-		let close_filled = self.close_buffer.add(record.close);
-		if !close_filled {
-			return None;
+	fn next(&mut self, record: &OhlcRecord) {
+		self.close_buffer.add(record.close);
+		if !self.close_buffer.filled() {
+			return;
 		}
 		let (signal, macd) = self.calculate();
-		let signal_filled = self.signal_buffer.add(macd);
-		if !signal_filled {
-			return None;
+		self.signal_buffer.add(macd);
+		if !self.signal_buffer.filled() {
+			return;
 		}
-		translate_signal(signal - macd)
+		self.indicators = Some((signal, macd));
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_dual_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		get_difference_trade_signal(&self.indicators)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -472,7 +627,8 @@ pub struct PercentagePriceOscillator {
 	fast_period: usize,
 	slow_period: usize,
 	close_buffer: IndicatorBuffer,
-	signal_buffer: IndicatorBuffer
+	signal_buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64)>
 }
 
 impl PercentagePriceOscillator {
@@ -486,7 +642,8 @@ impl PercentagePriceOscillator {
 			fast_period,
 			slow_period,
 			close_buffer: IndicatorBuffer::new(close_buffer_size),
-			signal_buffer: IndicatorBuffer::new(signal_period)
+			signal_buffer: IndicatorBuffer::new(signal_period),
+			indicators: None
 		};
 		Ok(output)
 	}
@@ -501,22 +658,34 @@ impl PercentagePriceOscillator {
 }
 
 impl Indicator for PercentagePriceOscillator {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_signal_fast_slow(PercentagePriceOscillator::ID, self.signal_period, self.fast_period, self.slow_period)
+	}
+
 	fn get_description(&self) -> String {
 		format!("PPO({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, _: PositionState) -> Option<TradeSignal> {
-		let close_filled = self.close_buffer.add(record.close);
-		if !close_filled {
-			return None;
+	fn next(&mut self, record: &OhlcRecord) {
+		self.close_buffer.add(record.close);
+		if !self.close_buffer.filled() {
+			return;
 		}
 		let ppo = self.calculate();
-		let ppo_filled = self.signal_buffer.add(ppo);
-		if !ppo_filled {
-			return None;
+		self.signal_buffer.add(ppo);
+		if !self.signal_buffer.filled() {
+			return;
 		}
 		let signal = exponential_moving_average(self.signal_buffer.buffer.iter(), self.signal_period);
-		translate_signal(signal - ppo)
+		self.indicators = Some((signal, ppo));
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_dual_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		get_difference_trade_signal(&self.indicators)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -532,7 +701,8 @@ impl Indicator for PercentagePriceOscillator {
 pub struct BollingerBands {
 	multiplier: f64,
 	exit_mode: ChannelExitMode,
-	buffer: IndicatorBuffer
+	buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64, f64)>
 }
 
 impl BollingerBands {
@@ -544,7 +714,8 @@ impl BollingerBands {
 		let output = Self {
 			multiplier,
 			exit_mode,
-			buffer: IndicatorBuffer::new(period)
+			buffer: IndicatorBuffer::new(period),
+			indicators: None
 		};
 		Ok(output)
 	}
@@ -560,19 +731,30 @@ impl BollingerBands {
 }
 
 impl Indicator for BollingerBands {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_period_multiplier("bb", self.buffer.size, self.multiplier)
+	}
+
 	fn get_description(&self) -> String {
 		format!("Bollinger({}, {:.1}, {})", self.buffer.size, self.multiplier, self.exit_mode)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		let close = record.close;
-		let filled = self.buffer.add(close);
-		if !filled {
-			return None;
+		self.buffer.add(close);
+		if !self.buffer.filled() {
+			return;
 		}
 		let (center, lower, upper) = self.calculate();
-		let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
-		Some(signal)
+		self.indicators = Some((center, lower, upper));
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_channel_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal> {
+		get_channel_trade_signal(&self.buffer, &self.indicators, &self.exit_mode, state)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -589,7 +771,8 @@ pub struct KeltnerChannel {
 	multiplier: f64,
 	exit_mode: ChannelExitMode,
 	close_buffer: IndicatorBuffer,
-	true_range_buffer: IndicatorBuffer
+	true_range_buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64, f64)>
 }
 
 impl KeltnerChannel {
@@ -602,18 +785,23 @@ impl KeltnerChannel {
 			multiplier,
 			exit_mode,
 			close_buffer: IndicatorBuffer::new(period),
-			true_range_buffer: IndicatorBuffer::new(period)
+			true_range_buffer: IndicatorBuffer::new(period),
+			indicators: None
 		};
 		Ok(output)
 	}
 }
 
 impl Indicator for KeltnerChannel {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_period_multiplier("kelt", self.close_buffer.size, self.multiplier)
+	}
+
 	fn get_description(&self) -> String {
 		format!("Keltner({}, {:.1}, {})", self.close_buffer.size, self.multiplier, self.exit_mode)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		if let Some(previous_close) = self.close_buffer.buffer.front() {
 			let part1 = record.high - record.low;
 			let part2 = (record.high - previous_close).abs();
@@ -622,19 +810,24 @@ impl Indicator for KeltnerChannel {
 			self.true_range_buffer.add(true_range);
 		}
 		let close = record.close;
-		let close_filled = self.close_buffer.add(close);
-		let true_range_filled = self.true_range_buffer.filled();
-		if close_filled && true_range_filled {
-			let center = exponential_moving_average(self.close_buffer.buffer.iter(), self.close_buffer.size);
-			let average_true_range = self.true_range_buffer.average();
-			let multiplier_range = self.multiplier * average_true_range;
-			let lower = center - multiplier_range;
-			let upper = center + multiplier_range;
-			let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
-			Some(signal)
-		} else {
-			None
+		self.close_buffer.add(close);
+		if !self.close_buffer.filled() || !self.true_range_buffer.filled() {
+			return;
 		}
+		let center = exponential_moving_average(self.close_buffer.buffer.iter(), self.close_buffer.size);
+		let average_true_range = self.true_range_buffer.average();
+		let multiplier_range = self.multiplier * average_true_range;
+		let lower = center - multiplier_range;
+		let upper = center + multiplier_range;
+		self.indicators = Some((center, lower, upper));
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_channel_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal> {
+		get_channel_trade_signal(&self.close_buffer, &self.indicators, &self.exit_mode, state)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -653,6 +846,7 @@ impl Indicator for KeltnerChannel {
 pub struct DonchianChannel {
 	exit_mode: ChannelExitMode,
 	buffer: IndicatorBuffer,
+	indicators: Option<(f64, f64, f64)>
 }
 
 impl DonchianChannel {
@@ -663,29 +857,40 @@ impl DonchianChannel {
 		let output = Self {
 			exit_mode,
 			buffer: IndicatorBuffer::new(period),
+			indicators: None
 		};
 		Ok(output)
 	}
 }
 
 impl Indicator for DonchianChannel {
+	fn get_id(&self) -> IndicatorId {
+		IndicatorId::from_period("don", self.buffer.size)
+	}
+
 	fn get_description(&self) -> String {
 		format!("Donchian({}, {})", self.buffer.size, self.exit_mode)
 	}
 
-	fn next(&mut self, record: &OhlcRecord, state: PositionState) -> Option<TradeSignal> {
+	fn next(&mut self, record: &OhlcRecord) {
 		let close = record.close;
 		self.buffer.add(close);
-		if self.buffer.filled() {
-			let buffer = &self.buffer.buffer;
-			let lower = buffer.iter().cloned().reduce(f64::min).unwrap();
-			let upper = buffer.iter().cloned().reduce(f64::max).unwrap();
-			let center = (lower + upper) / 2.0;
-			let signal = translate_channel_signal(close, center, lower, upper, state, &self.exit_mode);
-			Some(signal)
-		} else {
-			None
+		if !self.buffer.filled() {
+			return;
 		}
+		let buffer = &self.buffer.buffer;
+		let lower = buffer.iter().cloned().reduce(f64::min).unwrap();
+		let upper = buffer.iter().cloned().reduce(f64::max).unwrap();
+		let center = (lower + upper) / 2.0;
+		self.indicators = Some((center, lower, upper));
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		get_channel_indicators(&self.indicators)
+	}
+
+	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal> {
+		get_channel_trade_signal(&self.buffer, &self.indicators, &self.exit_mode, state)
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
@@ -784,5 +989,36 @@ fn needs_initialization(close_buffer: &IndicatorBuffer, signal_buffer: &Indicato
 		(Some(x), None) => Some(x),
 		(None, Some(y)) => Some(y),
 		(None, None) => None,
+	}
+}
+
+fn get_dual_indicators(indicators: &Option<(f64, f64)>) -> Option<Vec<f64>> {
+	match indicators {
+		Some((first, second)) => Some(vec![*first, *second]),
+		None => None
+	}
+}
+
+fn get_channel_indicators(indicators: &Option<(f64, f64, f64)>) -> Option<Vec<f64>> {
+	match indicators {
+		Some((center, lower, upper)) => Some(vec![*center, *lower, *upper]),
+		None => None
+	}
+}
+
+fn get_difference_trade_signal(indicators: &Option<(f64, f64)>) -> Option<TradeSignal> {
+	match indicators {
+		Some((first, second)) => translate_signal(first - second),
+		None => None
+	}
+}
+
+fn get_channel_trade_signal(buffer: &IndicatorBuffer, indicators: &Option<(f64, f64, f64)>, exit_mode: &ChannelExitMode, state: PositionState) -> Option<TradeSignal> {
+	match (buffer.buffer.front(), indicators) {
+		(Some(close), Some((center, lower, upper))) => {
+			let signal = translate_channel_signal(*close, *center, *lower, *upper, state, exit_mode);
+			Some(signal)
+		}
+		_ => None
 	}
 }

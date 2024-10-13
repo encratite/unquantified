@@ -273,7 +273,8 @@ impl Strategy for IndicatorStrategy {
 				}
 				let record = backtest.most_recent_record(symbol)?;
 				let state = Self::get_position_state(symbol, &backtest);
-				let Some(signal) = indicator.next(&record, state) else {
+				indicator.next(&record);
+				let Some(signal) = indicator.get_trade_signal(state) else {
 					return Ok(());
 				};
 				signal

@@ -323,7 +323,8 @@ impl Strategy for AutoIndicatorStrategy {
 			}
 			let record = self.backtest.borrow().most_recent_record(symbol)?;
 			let state = IndicatorStrategy::get_position_state(symbol, &self.backtest.borrow());
-			let Some(signal) = indicator.next(&record, state) else {
+			indicator.next(&record);
+			let Some(signal) = indicator.get_trade_signal(state) else {
 				return Ok(());
 			};
 			IndicatorStrategy::trade(signal, auto_indicator.enable_long, auto_indicator.enable_short, &auto_indicator.symbol_indicator, self.backtest.clone())?;
