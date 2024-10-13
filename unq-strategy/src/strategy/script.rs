@@ -14,6 +14,10 @@ const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
 const MARGIN_RATIO_PARAMETER: &'static str = "margin";
 
+const TRADE_SIGNAL_LONG: i64 = 1;
+const TRADE_SIGNAL_CLOSE: i64 = 0;
+const TRADE_SIGNAL_SHORT: i64 = -1;
+
 type ApiContextCell = Rc<RefCell<ApiContext>>;
 type ApiResult<T> = Result<T, Box<EvalAltResult>>;
 
@@ -50,8 +54,8 @@ pub enum PositionSizing {
 #[derive(Clone, PartialEq, Eq)]
 enum TradeSignal {
 	Long,
-	Short,
-	Close
+	Close,
+	Short
 }
 
 pub struct ScriptStrategy<'a> {
@@ -122,7 +126,9 @@ impl<'a> ScriptStrategy<'a> {
 			backtest: backtest.clone()
 		};
 		let context_cell = Rc::new(RefCell::new(context));
-		let scope = Scope::new();
+		let mut scope = Scope::new();
+		engine.run_ast_with_scope(&mut scope, &script)
+			.map_err(|error| anyhow!("Failed to run script: {error}"))?;
 		let mut strategy = Self {
 			symbols: symbols.clone(),
 			position_sizing,
@@ -134,6 +140,7 @@ impl<'a> ScriptStrategy<'a> {
 			script,
 			backtest
 		};
+		strategy.push_constants();
 		strategy.register_functions();
 		Ok(strategy)
 	}
@@ -357,6 +364,21 @@ impl<'a> ScriptStrategy<'a> {
 		Ok(())
 	}
 
+	fn get_trade_signal(trade_signal_int: i64) -> Result<TradeSignal> {
+		match trade_signal_int {
+			TRADE_SIGNAL_LONG => Ok(TradeSignal::Long),
+			TRADE_SIGNAL_CLOSE => Ok(TradeSignal::Close),
+			TRADE_SIGNAL_SHORT => Ok(TradeSignal::Short),
+			_ => bail!("Unable to convert trade signal integer ({trade_signal_int})")
+		}
+	}
+
+	fn push_constants(&mut self) {
+		self.scope.push_constant("LONG", TRADE_SIGNAL_LONG);
+		self.scope.push_constant("CLOSE", TRADE_SIGNAL_CLOSE);
+		self.scope.push_constant("SHORT", TRADE_SIGNAL_SHORT);
+	}
+
 	fn register_functions(&mut self) {
 		self.register_general_functions();
 		self.register_indicators();
@@ -367,18 +389,6 @@ impl<'a> ScriptStrategy<'a> {
 		let context = self.context.clone();
 		engine.register_fn("parameter", move |name: ImmutableString, default_value: Dynamic| {
 			context.borrow().get_parameter(name, default_value)
-		});
-		let context = self.context.clone();
-		engine.register_fn("buy", move || {
-			context.borrow_mut().buy_signal()
-		});
-		let context = self.context.clone();
-		engine.register_fn("sell", move || {
-			context.borrow_mut().sell_signal()
-		});
-		let context = self.context.clone();
-		engine.register_fn("close", move || {
-			context.borrow_mut().close_position_signal()
 		});
 	}
 
@@ -428,11 +438,13 @@ impl<'a> Strategy for ScriptStrategy<'a> {
 		let close_signals = self.symbols.iter().map(|symbol| (symbol.clone(), TradeSignal::Close));
 		// Reset trade signals
 		self.context.borrow_mut().signals = HashMap::from_iter(close_signals);
-		// Execute script once for each symbol to generate new signals
+		// Execute function for each symbol to generate new signals
 		for symbol in self.symbols.iter() {
 			self.context.borrow_mut().current_symbol = symbol.clone();
-			self.engine.run_ast_with_scope(&mut self.scope, &self.script)
-				.map_err(|error| anyhow!("Failed to run script: {error}"))?;
+			let signal_int = self.engine.call_fn::<i64>(&mut self.scope, &self.script, "next", (symbol.clone(),))
+				.map_err(|error| anyhow!("Failed to execute next function: {error}"))?;
+			let signal = Self::get_trade_signal(signal_int)?;
+			self.context.borrow_mut().signals.insert(symbol.clone(), signal);
 		}
 		let position_targets = self.get_position_targets()?;
 		self.close_positions(&position_targets)?;
@@ -515,22 +527,6 @@ impl ApiContext {
 			Some(value) => value.clone(),
 			None => default_value
 		}
-	}
-
-	fn buy_signal(&mut self) {
-		self.insert_signal(TradeSignal::Long);
-	}
-
-	fn sell_signal(&mut self) {
-		self.insert_signal(TradeSignal::Short);
-	}
-
-	fn close_position_signal(&mut self) {
-		self.insert_signal(TradeSignal::Close);
-	}
-
-	fn insert_signal(&mut self, signal: TradeSignal) {
-		self.signals.insert(self.current_symbol.clone(), signal);
 	}
 
 	fn get_exponential_moving_average(period: i64, skip: i64, values: &Vec<f64>) -> f64 {
