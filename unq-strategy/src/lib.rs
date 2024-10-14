@@ -8,6 +8,7 @@ mod strategy {
 
 use std::cell::RefCell;
 use std::iter;
+use std::rc::Rc;
 use anyhow::{Result, bail};
 use unq_common::backtest::Backtest;
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
@@ -20,7 +21,7 @@ const CONTRACTS_PARAMETER: &'static str = "contracts";
 
 type SymbolContracts = Vec<(String, u32)>;
 
-pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, script_directory: &String, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Box<dyn Strategy + 'a>> {
+pub fn get_strategy<'a>(name: &String, symbols: &Vec<String>, script_directory: &String, parameters: &StrategyParameters, backtest: Rc<RefCell<Backtest>>) -> Result<Box<dyn Strategy + 'a>> {
 	match name.as_str() {
 		BuyAndHoldStrategy::ID => {
 			let strategy = BuyAndHoldStrategy::from_parameters(symbols, parameters, backtest)?;

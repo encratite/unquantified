@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use anyhow::{Result, bail};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::strategy::{Strategy, StrategyParameters};
@@ -8,7 +9,7 @@ use crate::{get_symbol_contracts, SymbolContracts};
 pub struct BuyAndHoldStrategy {
 	remaining_symbols: HashMap<String, u32>,
 	side: PositionSide,
-	backtest: RefCell<Backtest>
+	backtest: Rc<RefCell<Backtest>>
 }
 
 /*
@@ -25,7 +26,7 @@ This would change the number of contracts for NG and CL to 2 each.
 impl BuyAndHoldStrategy {
 	pub const ID: &'static str = "buy and hold";
 
-	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: RefCell<Backtest>) -> Result<Self> {
+	fn new(symbol_contracts: SymbolContracts, side: PositionSide, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		if symbol_contracts.is_empty() {
 			bail!("Need at least one symbol");
 		}
@@ -41,7 +42,7 @@ impl BuyAndHoldStrategy {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		let symbol_contracts = get_symbol_contracts(&symbols, parameters)?;
 		let side = match parameters.get_bool("short")? {
 			Some(value) => {

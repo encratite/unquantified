@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefCell};
 use std::ops::Add;
+use std::rc::Rc;
 use anyhow::{bail, Result};
 use chrono::TimeDelta;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -19,7 +20,7 @@ pub struct AutoIndicatorStrategy {
 	walk_forward_window: i64,
 	optimization_period: usize,
 	periods_since_optimization: usize,
-	backtest: RefCell<Backtest>
+	backtest: Rc<RefCell<Backtest>>
 }
 
 #[derive(Clone)]
@@ -32,7 +33,7 @@ pub struct AutoIndicator {
 impl AutoIndicatorStrategy {
 	pub const ID: &'static str = "auto indicator";
 
-	pub fn new(symbol_contracts: &SymbolContracts, enabled_indicators: &Vec<String>, walk_forward_window: i64, optimization_period: usize, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn new(symbol_contracts: &SymbolContracts, enabled_indicators: &Vec<String>, walk_forward_window: i64, optimization_period: usize, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		if symbol_contracts.is_empty() {
 			bail!("No symbols have been specified");
 		}
@@ -77,7 +78,7 @@ impl AutoIndicatorStrategy {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		let Some(enabled_indicators) = parameters.get_strings("indicators")? else {
 			bail!("Missing indicators argument");
 		};
@@ -111,20 +112,17 @@ impl AutoIndicatorStrategy {
 			enable_table.iter().map(|(enable_long, enable_short)| {
 				let enable_long = *enable_long;
 				let enable_short = *enable_short;
-				let mut optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager.clone())?;
+				let optimization_backtest = Backtest::new(from, to, time_frame.clone(), configuration.clone(), asset_manager.clone())?;
 				// Disable logging in order to improve performance of optimization runs
-				optimization_backtest.disable_logging();
-				let backtest_refcell = RefCell::new(optimization_backtest);
+				optimization_backtest.borrow_mut().disable_logging();
 				let strategy_indicators = vec![symbol_indicator.clone()];
-				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, backtest_refcell.clone())?;
+				let mut strategy = IndicatorStrategy::new(strategy_indicators, enable_long, enable_short, optimization_backtest.clone())?;
 				let mut done = false;
 				while !done {
 					strategy.next()?;
-					let mut backtest_mut = backtest_refcell.borrow_mut();
-					done = backtest_mut.next()?;
+					done = optimization_backtest.borrow_mut().next()?;
 				}
-				let backtest = backtest_refcell.borrow_mut();
-				let result = backtest.get_result()?;
+				let result = optimization_backtest.borrow_mut().get_result()?;
 				let auto_indicator = AutoIndicator {
 					symbol_indicator: symbol_indicator.clone(),
 					enable_long,

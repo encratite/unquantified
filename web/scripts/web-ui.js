@@ -8,6 +8,7 @@ import {
 	Symbol,
 	SymbolArray,
 	String,
+	Parameter,
 	Parameters,
 	SECONDS_PER_DAY,
 	Keyword
@@ -104,7 +105,8 @@ export class WebUi {
 			candle: this.plotCandlestick.bind(this),
 			plot: this.plotLine.bind(this),
 			correlation: this.correlation.bind(this),
-			backtest: this.backtest.bind(this)
+			backtest: this.backtest.bind(this),
+			script: this.script.bind(this)
 		};
 		this.engine = new ScriptingEngine(callHandlers);
 		await this.engine.initialize();
@@ -1188,6 +1190,28 @@ export class WebUi {
 		this.createBacktestTables(backtestResult);
 		this.createChart(backtestResult.bestResult, ChartMode.EQUITY_CURVE);
 		console.log(backtestResult);
+	}
+
+	async script(callArguments) {
+		this.validateArgumentCount(callArguments, 4, 6);
+		const strategy = new String("script");
+		const script = callArguments[0];
+		const symbolArgument = callArguments[1];
+		const from = callArguments[2];
+		const to = callArguments[3];
+		const parameters = callArguments[4] || new Parameters([]);
+		const timeFrame = callArguments[5] || new String("daily");
+		const scriptParameter = new Parameter("script", null, null, null, null, null, script.value, null);
+		parameters.value.push(scriptParameter);
+		const backtestArguments = [
+			strategy,
+			symbolArgument,
+			from,
+			to,
+			parameters,
+			timeFrame
+		];
+		await this.backtest(backtestArguments);
 	}
 
 	validateArgumentCount(callArguments, min, max) {

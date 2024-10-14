@@ -52,7 +52,7 @@ pub enum PositionSizing {
 	DynamicSlots
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum TradeSignal {
 	Long,
 	Close,
@@ -68,7 +68,7 @@ pub struct ScriptStrategy<'a> {
 	engine: Engine,
 	scope: Scope<'a>,
 	script: AST,
-	backtest: RefCell<Backtest>
+	backtest: Rc<RefCell<Backtest>>
 }
 
 struct ApiContext {
@@ -76,9 +76,10 @@ struct ApiContext {
 	parameters: HashMap<String, Dynamic>,
 	indicators: Vec<ApiIndicator>,
 	signals: HashMap<String, TradeSignal>,
-	backtest: RefCell<Backtest>
+	backtest: Rc<RefCell<Backtest>>
 }
 
+#[derive(Debug)]
 struct PositionTarget {
 	symbol: String,
 	side: PositionSide,
@@ -104,7 +105,7 @@ impl ApiIndicator {
 impl<'a> ScriptStrategy<'a> {
 	pub const ID: &'static str = "script";
 
-	pub fn new(script: String, script_directory: &String, symbols: &Vec<String>, position_sizing: PositionSizing, contracts: Option<Vec<u32>>, margin_ratio: Option<f64>, parameters: HashMap<String, Dynamic>, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn new(script: String, script_directory: &String, symbols: &Vec<String>, position_sizing: PositionSizing, contracts: Option<Vec<u32>>, margin_ratio: Option<f64>, parameters: HashMap<String, Dynamic>, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		// Basic restriction to prevent directory traversal attacks
 		let pattern = Regex::new("^[A-Za-z0-9 ]+$")?;
 		if !pattern.is_match(script.as_str()) {
@@ -163,7 +164,7 @@ impl<'a> ScriptStrategy<'a> {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn from_parameters(script_directory: &String, symbols: &Vec<String>, parameters: &StrategyParameters, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		let script_parameter = parameters.get_string(SCRIPT_PARAMETER)?;
 		let script = script_parameter.with_context(|| "Script parameter has not been specified")?;
 		let positions_parameter = parameters.get_string(POSITIONS_PARAMETER)?;
@@ -551,8 +552,9 @@ impl ApiContext {
 					}
 				}
 				let api_indicator = ApiIndicator::new(self.current_symbol.clone(), indicator_id, indicator);
+				let indicator_values = api_indicator.indicator.get_indicators();
 				self.indicators.push(api_indicator);
-				Ok(().into())
+				Self::translate_indicator_values(indicator_values)
 			}
 		}
 	}

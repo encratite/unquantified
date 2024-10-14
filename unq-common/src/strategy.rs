@@ -192,7 +192,7 @@ impl StrategyParameters {
 			if parameter_type == expected_type {
 				 Ok(select(parameter))
 			} else {
-				bail!("Found parameter type \"{parameter_type:?}\", expected \"{expected_type:?}\"")
+				bail!("Found parameter type \"{parameter_type:?}\" for parameter \"{name}\", expected \"{expected_type:?}\"")
 			}
 		} else {
 			Ok(None)
@@ -211,7 +211,7 @@ impl StrategyParameters {
 				let values = multi_select(parameter);
 				Ok(Some(values))
 			} else {
-				bail!("Found parameter type \"{parameter_type:?}\", expected \"{single_type:?}\" or \"{multi_type:?}\"")
+				bail!("Found parameter type \"{parameter_type:?}\" for parameter \"{name}\", expected \"{single_type:?}\" or \"{multi_type:?}\"")
 			}
 		} else {
 			Ok(None)

@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell};
+use std::rc::Rc;
 use anyhow::{bail, Result};
 use unq_common::backtest::{Backtest, PositionSide, SimplePosition};
 use unq_common::strategy::{Strategy, StrategyParameters};
@@ -25,13 +26,13 @@ pub struct IndicatorStrategy {
 	indicators: Vec<SymbolIndicator>,
 	enable_long: bool,
 	enable_short: bool,
-	backtest: RefCell<Backtest>
+	backtest: Rc<RefCell<Backtest>>
 }
 
 impl IndicatorStrategy {
 	pub const ID: &'static str = "indicator";
 
-	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn new(indicators: Vec<SymbolIndicator>, enable_long: bool, enable_short: bool, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		let strategy = Self {
 			indicators,
 			enable_long,
@@ -41,7 +42,7 @@ impl IndicatorStrategy {
 		Ok(strategy)
 	}
 
-	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: RefCell<Backtest>) -> Result<Self> {
+	pub fn from_parameters(symbols: &Vec<String>, parameters: &StrategyParameters, backtest: Rc<RefCell<Backtest>>) -> Result<Self> {
 		let Some(indicator_string) = parameters.get_string("indicator")? else {
 			bail!("Missing required parameter \"indicator\"");
 		};
@@ -174,7 +175,7 @@ impl IndicatorStrategy {
 		Ok(strategy)
 	}
 
-	pub fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: RefCell<Backtest>) -> Result<()> {
+	pub fn trade(signal: TradeSignal, enable_long: bool, enable_short: bool, indicator_data: &SymbolIndicator, backtest: Rc<RefCell<Backtest>>) -> Result<()> {
 		let position_opt = backtest
 			.borrow()
 			.get_position_by_root(&indicator_data.symbol)
@@ -233,7 +234,7 @@ impl IndicatorStrategy {
 		Ok(target_side)
 	}
 
-	fn open_position(enable_long: bool, enable_short: bool, target_side: PositionSide, indicator_data: &SymbolIndicator, backtest: RefCell<Backtest>) {
+	fn open_position(enable_long: bool, enable_short: bool, target_side: PositionSide, indicator_data: &SymbolIndicator, backtest: Rc<RefCell<Backtest>>) {
 		let long_valid = enable_long && target_side == PositionSide::Long;
 		let short_valid = enable_short && target_side == PositionSide::Short;
 		if long_valid || short_valid {
@@ -244,7 +245,7 @@ impl IndicatorStrategy {
 		}
 	}
 
-	fn close_position(position_opt: &Option<SimplePosition>, backtest: RefCell<Backtest>) {
+	fn close_position(position_opt: &Option<SimplePosition>, backtest: Rc<RefCell<Backtest>>) {
 		if let Some(position) = position_opt {
 			let _ = backtest
 				.borrow_mut()

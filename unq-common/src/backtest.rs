@@ -1,5 +1,7 @@
 use std::{collections::{BTreeSet, HashMap, VecDeque}};
+use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::rc::Rc;
 use std::sync::Arc;
 use chrono::NaiveDateTime;
 use lazy_static::lazy_static;
@@ -276,7 +278,7 @@ impl Position {
 }
 
 impl Backtest {
-	pub fn new(from: NaiveDateTime, to: NaiveDateTime, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Backtest> {
+	pub fn new(from: NaiveDateTime, to: NaiveDateTime, time_frame: TimeFrame, configuration: BacktestConfiguration, asset_manager: Arc<AssetManager>) -> Result<Rc<RefCell<Backtest>>> {
 		if from >= to {
 			bail!("Invalid from/to parameters");
 		}
@@ -317,7 +319,7 @@ impl Backtest {
 			interest: 0.0,
 			terminated: false
 		};
-		Ok(backtest)
+		Ok(Rc::new(RefCell::new(backtest)))
 	}
 
 	/*
@@ -711,7 +713,7 @@ impl Backtest {
 	fn convert_currency(&self, from: &String, to: &String, amount: f64) -> Result<(f64, f64)> {
 		let get_record = |currency, reciprocal| -> Result<(f64, f64)> {
 			let symbol = FOREX_MAP.get(currency)
-					.with_context(|| "Unable to find currency")?;
+				.with_context(|| "Unable to find currency")?;
 			let record = self.current_record(symbol)?;
 			let value = if reciprocal {
 				amount / record.close

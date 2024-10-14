@@ -1,5 +1,4 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use std::cell::RefCell;
 use axum::{response::IntoResponse, extract::{Json, State}, routing::post, Router};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -289,8 +288,7 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetMana
 	let expanded_parameters = expand_parameters(&parameters)?;
 	let results = expanded_parameters.par_iter().map(|parameters| -> Result<(&StrategyParameters, BacktestResult)> {
 		let backtest = Backtest::new(from, to, request.time_frame.clone(), backtest_configuration.clone(), asset_manager.clone())?;
-		let backtest_refcell = RefCell::new(backtest);
-		let strategy_result = get_strategy(&request.strategy, &request.symbols, &server_configuration.script_directory, parameters, backtest_refcell.clone());
+		let strategy_result = get_strategy(&request.strategy, &request.symbols, &server_configuration.script_directory, parameters, backtest.clone());
 		let mut strategy = match strategy_result {
 			Ok(strategy) => strategy,
 			Err(error) => bail!(StrategyParameterError::new(error.to_string()))
@@ -298,12 +296,10 @@ fn get_backtest_result(request: RunBacktestRequest, asset_manager: Arc<AssetMana
 		let mut done = false;
 		while !done {
 			strategy.next()?;
-			let mut backtest_mut = backtest_refcell.borrow_mut();
-			done = backtest_mut.next()?;
+			done = backtest.borrow_mut().next()?;
 		}
 		let result;
-		let backtest = backtest_refcell.borrow_mut();
-		result = backtest.get_result()?;
+		result = backtest.borrow_mut().get_result()?;
 		Ok((parameters, result))
 	}).collect::<Vec<Result<(&StrategyParameters, BacktestResult)>>>();
 	let ok_results: Vec<(&StrategyParameters, BacktestResult)> = results.iter().filter_map(|x| x.as_ref().ok()).cloned().collect();
