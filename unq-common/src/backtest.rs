@@ -456,6 +456,10 @@ impl Backtest {
 		Ok(records)
 	}
 
+	pub fn get_current_record(&self, symbol: &String) -> Result<OhlcRecord> {
+		self.get_record(symbol, self.now, false)
+	}
+
 	pub fn most_recent_record(&self, symbol: &String) -> Result<OhlcRecord> {
 		self.get_record(symbol, self.now, true)
 	}

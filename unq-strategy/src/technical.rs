@@ -29,7 +29,6 @@ pub enum ChannelExitMode {
 }
 
 pub trait Indicator: Send + Sync {
-	fn get_id(&self) -> IndicatorId;
 	fn get_description(&self) -> String;
 	fn next(&mut self, record: &OhlcRecord);
 	fn get_indicators(&self) -> Option<Vec<f64>>;
@@ -44,44 +43,43 @@ pub trait Indicator: Send + Sync {
 	}
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct IndicatorId {
 	name: &'static str,
-	parameters: Vec<f64>
+	period1: usize,
+	period2: usize,
+	period3: usize,
+	multiplier: f64
 }
 
 impl IndicatorId {
 	fn from_period(name: &'static str, period: usize) -> Self {
 		Self {
 			name,
-			parameters: vec![period as f64]
-		}
-	}
-
-	fn from_fast_slow(name: &'static str, fast_period: usize, slow_period: Option<usize>) -> Self {
-		match slow_period {
-			Some(slow_period) => Self {
-				name,
-				parameters: vec![fast_period as f64, slow_period as f64]
-			},
-			None => Self {
-				name,
-				parameters: vec![fast_period as f64]
-			}
+			period1: period,
+			period2: 0,
+			period3: 0,
+			multiplier: 0.0
 		}
 	}
 
 	fn from_signal_fast_slow(name: &'static str, signal_period: usize, fast_period: usize, slow_period: usize) -> Self {
 		Self {
 			name,
-			parameters: vec![signal_period as f64, fast_period as f64, slow_period as f64]
+			period1: signal_period,
+			period2: fast_period,
+			period3: slow_period,
+			multiplier: 0.0
 		}
 	}
 
 	fn from_period_multiplier(name: &'static str, period: usize, multiplier: f64) -> Self {
 		Self {
 			name,
-			parameters: vec![period as f64, multiplier]
+			period1: period,
+			period2: 0,
+			period3: 0,
+			multiplier
 		}
 	}
 }
@@ -158,10 +156,6 @@ impl MomentumIndicator {
 }
 
 impl Indicator for MomentumIndicator {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_period("mom", self.buffer.size)
-	}
-
 	fn get_description(&self) -> String {
 		format!("Momentum({})", self.buffer.size)
 	}
@@ -267,13 +261,13 @@ impl SimpleMovingAverage {
 		let output = SimpleMovingAverage(moving_average);
 		Ok(output)
 	}
+
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period("sma", period)
+	}
 }
 
 impl Indicator for SimpleMovingAverage {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_fast_slow("sma", self.0.fast_period, self.0.slow_period)
-	}
-
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("SMAC({}, {})", self.0.fast_period, slow_period)
@@ -320,13 +314,13 @@ impl LinearMovingAverage {
 		let output = LinearMovingAverage(moving_average);
 		Ok(output)
 	}
+
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period("lma", period)
+	}
 }
 
 impl Indicator for LinearMovingAverage {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_fast_slow("lma", self.0.fast_period, self.0.slow_period)
-	}
-
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("LMAC({}, {})", self.0.fast_period, slow_period)
@@ -380,7 +374,11 @@ impl ExponentialMovingAverage {
 		Ok(output)
 	}
 
-	pub fn calculate(period: usize, buffer: &VecDeque<f64>) -> f64 {
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period("ema", period)
+	}
+
+	fn calculate(period: usize, buffer: &VecDeque<f64>) -> f64 {
 		let mut sum = 0.0;
 		let mut coefficient_sum = 0.0;
 		let mut i = 0;
@@ -398,10 +396,6 @@ impl ExponentialMovingAverage {
 }
 
 impl Indicator for ExponentialMovingAverage {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_fast_slow("ema", self.0.fast_period, self.0.slow_period)
-	}
-
 	fn get_description(&self) -> String {
 		if let Some(slow_period) = self.0.slow_period {
 			format!("EMAC({}, {})", self.0.fast_period, slow_period)
@@ -456,6 +450,10 @@ impl RelativeStrengthIndicator {
 		Ok(output)
 	}
 
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period(RelativeStrengthIndicator::ID, period)
+	}
+
 	fn calculate(&self) -> f64 {
 		let mut up = Vec::new();
 		let mut down = Vec::new();
@@ -478,10 +476,6 @@ impl RelativeStrengthIndicator {
 }
 
 impl Indicator for RelativeStrengthIndicator {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_period(RelativeStrengthIndicator::ID, self.period)
-	}
-
 	fn get_description(&self) -> String {
 		format!("RSI({}, {}, {})", self.period, self.low_threshold, self.high_threshold)
 	}
@@ -571,6 +565,10 @@ impl MovingAverageConvergence {
 		Ok(output)
 	}
 
+	pub fn get_id(signal_period: usize, fast_period: usize, slow_period: usize) -> IndicatorId {
+		IndicatorId::from_signal_fast_slow(MovingAverageConvergence::ID, signal_period, fast_period, slow_period)
+	}
+
 	fn calculate(&self) -> (f64, f64) {
 		let signal_iter = self.signal_buffer.buffer.iter();
 		let signal = exponential_moving_average(signal_iter, self.signal_period);
@@ -583,10 +581,6 @@ impl MovingAverageConvergence {
 }
 
 impl Indicator for MovingAverageConvergence {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_signal_fast_slow(MovingAverageConvergence::ID, self.signal_period, self.fast_period, self.slow_period)
-	}
-
 	fn get_description(&self) -> String {
 		format!("MACD({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
 	}
@@ -648,6 +642,10 @@ impl PercentagePriceOscillator {
 		Ok(output)
 	}
 
+	pub fn get_id(signal_period: usize, fast_period: usize, slow_period: usize) -> IndicatorId {
+		IndicatorId::from_signal_fast_slow(PercentagePriceOscillator::ID, signal_period, fast_period, slow_period)
+	}
+
 	fn calculate(&self) -> f64 {
 		let buffer = &self.close_buffer.buffer;
 		let fast_ema = exponential_moving_average(buffer.iter(), self.fast_period);
@@ -658,10 +656,6 @@ impl PercentagePriceOscillator {
 }
 
 impl Indicator for PercentagePriceOscillator {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_signal_fast_slow(PercentagePriceOscillator::ID, self.signal_period, self.fast_period, self.slow_period)
-	}
-
 	fn get_description(&self) -> String {
 		format!("PPO({}, {}, {})", self.signal_period, self.fast_period, self.slow_period)
 	}
@@ -720,6 +714,10 @@ impl BollingerBands {
 		Ok(output)
 	}
 
+	pub fn get_id(period: usize, multiplier: f64) -> IndicatorId {
+		IndicatorId::from_period_multiplier("bb", period, multiplier)
+	}
+
 	fn calculate(&self) -> (f64, f64, f64) {
 		let buffer = &self.buffer.buffer;
 		let center = exponential_moving_average(buffer.iter(), buffer.len());
@@ -731,10 +729,6 @@ impl BollingerBands {
 }
 
 impl Indicator for BollingerBands {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_period_multiplier("bb", self.buffer.size, self.multiplier)
-	}
-
 	fn get_description(&self) -> String {
 		format!("Bollinger({}, {:.1}, {})", self.buffer.size, self.multiplier, self.exit_mode)
 	}
@@ -790,13 +784,13 @@ impl KeltnerChannel {
 		};
 		Ok(output)
 	}
+
+	pub fn get_id(period: usize, multiplier: f64) -> IndicatorId {
+		IndicatorId::from_period_multiplier("kelt", period, multiplier)
+	}
 }
 
 impl Indicator for KeltnerChannel {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_period_multiplier("kelt", self.close_buffer.size, self.multiplier)
-	}
-
 	fn get_description(&self) -> String {
 		format!("Keltner({}, {:.1}, {})", self.close_buffer.size, self.multiplier, self.exit_mode)
 	}
@@ -861,13 +855,13 @@ impl DonchianChannel {
 		};
 		Ok(output)
 	}
+
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period("don", period)
+	}
 }
 
 impl Indicator for DonchianChannel {
-	fn get_id(&self) -> IndicatorId {
-		IndicatorId::from_period("don", self.buffer.size)
-	}
-
 	fn get_description(&self) -> String {
 		format!("Donchian({}, {})", self.buffer.size, self.exit_mode)
 	}
