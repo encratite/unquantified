@@ -145,9 +145,7 @@ impl<'a> ScriptStrategy<'a> {
 			backtest: backtest.clone()
 		};
 		let context_cell = Rc::new(RefCell::new(context));
-		let mut scope = Scope::new();
-		engine.run_ast_with_scope(&mut scope, &script)
-			.map_err(|error| anyhow!("Failed to run script: {error}"))?;
+		let scope = Scope::new();
 		let mut strategy = Self {
 			symbols: symbols.clone(),
 			position_sizing,
@@ -159,8 +157,7 @@ impl<'a> ScriptStrategy<'a> {
 			script,
 			backtest
 		};
-		strategy.push_constants();
-		strategy.register_functions();
+		strategy.initialize_engine()?;
 		Ok(strategy)
 	}
 
@@ -408,12 +405,22 @@ impl<'a> ScriptStrategy<'a> {
 	fn register_general_functions(&mut self) {
 		let engine = &mut self.engine;
 		let context = self.context.clone();
-		engine.register_fn("parameter", move |name: ImmutableString, default_value: Dynamic| {
-			context.borrow().get_parameter(name, default_value)
+		engine.register_fn("parameter", move |name: ImmutableString, default_value: i64| {
+			let output = context.borrow().get_parameter_int(name, default_value);
+			output
+		});
+		let context = self.context.clone();
+		engine.register_fn("parameter", move |name: ImmutableString, default_value: f64| {
+			let output = context.borrow().get_parameter_float(name, default_value);
+			output
 		});
 		let context = self.context.clone();
 		engine.register_fn("time", move || {
 			context.borrow().time()
+		});
+		let context = self.context.clone();
+		engine.register_fn("recent", move |symbol: ImmutableString| {
+			context.borrow().recent(symbol)
 		});
 	}
 
@@ -455,6 +462,14 @@ impl<'a> ScriptStrategy<'a> {
 		engine.register_fn("donchian", move |period: i64| {
 			context.borrow_mut().donchian_channel(period)
 		});
+	}
+
+	fn initialize_engine(&mut self) -> Result<()> {
+		self.push_constants();
+		self.register_functions();
+		self.engine.run_ast_with_scope(&mut self.scope, &self.script)
+			.map_err(|error| anyhow!("Failed to run script: {error}"))?;
+		Ok(())
 	}
 
 	fn update_indicators(&mut self, symbol: &String, record: &OhlcRecord) {
@@ -522,10 +537,31 @@ impl ApiContext {
 		Ok(())
 	}
 
-	fn get_parameter(&self, name: ImmutableString, default_value: Dynamic) -> Dynamic {
+	fn get_parameter_int(&self, name: ImmutableString, default_value: i64) -> ApiResult<i64> {
 		match self.parameters.get(&name.to_string()) {
-			Some(value) => value.clone(),
-			None => default_value
+			Some(value) => {
+				if value.is_float() {
+					let value = value.as_float()?;
+					Ok(value as i64)
+				} else {
+					Ok(value.as_int()?)
+				}
+			},
+			None => Ok(default_value)
+		}
+	}
+
+	fn get_parameter_float(&self, name: ImmutableString, default_value: f64) -> ApiResult<f64> {
+		match self.parameters.get(&name.to_string()) {
+			Some(value) => {
+				if value.is_int() {
+					let value = value.as_int()?;
+					Ok(value as f64)
+				} else {
+					Ok(value.as_float()?)
+				}
+			},
+			None => Ok(default_value)
 		}
 	}
 
@@ -533,6 +569,15 @@ impl ApiContext {
 		let backtest = self.backtest.borrow();
 		let time = backtest.get_time();
 		time.to_string().into()
+	}
+
+	fn recent(&self, symbol: ImmutableString) -> ApiResult<f64> {
+		let backtest = self.backtest.borrow();
+		let record = backtest.most_recent_record(&symbol.to_string())
+			.map_err(|error| -> Box<EvalAltResult> {
+				format!("Failed to retrieve most recent record: {error}").into()
+			})?;
+		Ok(record.close)
 	}
 
 	fn translate_indicator_values(indicators: Option<Vec<f64>>) -> ApiResult<Dynamic> {
