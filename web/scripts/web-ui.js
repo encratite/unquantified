@@ -920,6 +920,11 @@ export class WebUi {
 			this.enableEditor(false);
 			this.executingQuery = true;
 			this.editorContainer.classList.add(readOnlyClass);
+			const previousEditorContainer = this.editorContainer;
+			const removeReadonly = () => {
+				previousEditorContainer.classList.remove(readOnlyClass);
+				this.editorContainer.classList.remove(readOnlyClass);
+			};
 			try {
 				await this.engine.run(script);
 				this.disableHighlight();
@@ -927,7 +932,7 @@ export class WebUi {
 				this.updateHistory(script, data);
 				data.variables = this.engine.serializeVariables();
 				this.setLocalStorageData(data);
-				this.editorContainer.classList.remove(readOnlyClass);
+				removeReadonly();
 				this.createEditor();
 				window.scrollTo(0, document.body.scrollHeight);
 			}
@@ -935,7 +940,7 @@ export class WebUi {
 				toastr.error(error, "Script Error");
 				console.error(error);
 				this.enableEditor(true);
-				this.editorContainer.classList.remove(readOnlyClass);
+				removeReadonly();
 			}
 			this.executingQuery = false;
 		}

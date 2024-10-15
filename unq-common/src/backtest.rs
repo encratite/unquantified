@@ -559,6 +559,7 @@ impl Backtest {
 		}
 		let (symbol, asset, archive) = self.get_asset(symbol)?;
 		if asset.asset_type == AssetType::Futures {
+			let current_record = self.current_record(&symbol)?;
 			let maintenance_margin = self.get_asset_margin(&asset, archive.clone())?;
 			let (maintenance_margin_usd, forex_fee) = self.convert_currency(&FOREX_USD.to_string(), &asset.currency, maintenance_margin)?;
 			// Approximate initial margin with a static factor
@@ -574,7 +575,6 @@ impl Backtest {
 			let cost = (count as f64) * maintenance_margin_usd + fees;
 			self.cash -= cost;
 			self.fees += fees;
-			let current_record = self.current_record(&symbol)?;
 			let ask = current_record.close + (self.configuration.futures_spread_ticks as f64) * asset.tick_size;
 			let position = Position {
 				id: self.next_position_id,

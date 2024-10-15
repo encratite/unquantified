@@ -45,7 +45,7 @@ This approach is identical to the "Fixed Slots" equal weight allocation, but wit
 As long as there's at least one trade signal it will attempt to reach the total target margin.
 Typically, this will increase the number of trades since position sizes are adjusted more aggressively.
 */
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PositionSizing {
 	FixedContracts,
 	FixedSlots,
@@ -257,8 +257,8 @@ impl<'a> ScriptStrategy<'a> {
 		if *signal == TradeSignal::Close {
 			Ok(false)
 		} else {
-			let skip = !self.backtest.borrow().is_available(&symbol)?;
-			Ok(skip)
+			let available = self.backtest.borrow().is_available(&symbol)?;
+			Ok(available)
 		}
 	}
 
@@ -298,7 +298,8 @@ impl<'a> ScriptStrategy<'a> {
 		let mut valid_symbol_signals: Vec<(&String, &TradeSignal)> = Vec::new();
 		let context = self.context.borrow();
 		for (symbol, signal) in context.signals.iter() {
-			if self.is_valid_symbol_signal(symbol, signal)? {
+			let is_valid = self.is_valid_symbol_signal(symbol, signal)?;
+			if is_valid {
 				valid_symbol_signals.push((symbol, signal));
 			}
 		}
@@ -326,7 +327,7 @@ impl<'a> ScriptStrategy<'a> {
 	fn close_positions(&mut self, position_targets: &Vec<PositionTarget>) -> Result<()> {
 		let positions = self.backtest.borrow().get_positions();
 		for position in positions {
-			let close_position = if let Some(position_target) = position_targets.iter().find(|x| x.symbol == position.symbol) {
+			let close_position = if let Some(position_target) = position_targets.iter().find(|x| x.symbol == position.asset.symbol) {
 				// Close all positions whose current side does not match the signal
 				position_target.side != position.side
 			} else {
@@ -360,10 +361,11 @@ impl<'a> ScriptStrategy<'a> {
 		let contract_counts = self.get_contract_counts();
 		// Adjust positions based on the differences in contracts
 		for position_target in position_targets {
-			let Some(count) = contract_counts.get(&position_target.symbol) else {
-				bail!("Missing contract count");
+			let count = match contract_counts.get(&position_target.symbol) {
+				Some(count) => *count,
+				None => 0
 			};
-			let mut difference = (position_target.contracts as i32) - (*count as i32);
+			let mut difference = (position_target.contracts as i32) - (count as i32);
 			if difference > 0 {
 				// Open an additional position, ignore errors
 				let _ = self.backtest.borrow_mut().open_position(&position_target.symbol, difference as u32, position_target.side.clone());
@@ -408,6 +410,10 @@ impl<'a> ScriptStrategy<'a> {
 		let context = self.context.clone();
 		engine.register_fn("parameter", move |name: ImmutableString, default_value: Dynamic| {
 			context.borrow().get_parameter(name, default_value)
+		});
+		let context = self.context.clone();
+		engine.register_fn("time", move || {
+			context.borrow().time()
 		});
 	}
 
@@ -521,6 +527,12 @@ impl ApiContext {
 			Some(value) => value.clone(),
 			None => default_value
 		}
+	}
+
+	fn time(&self) -> ImmutableString {
+		let backtest = self.backtest.borrow();
+		let time = backtest.get_time();
+		time.to_string().into()
 	}
 
 	fn translate_indicator_values(indicators: Option<Vec<f64>>) -> ApiResult<Dynamic> {

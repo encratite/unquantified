@@ -318,10 +318,11 @@ impl Strategy for AutoIndicatorStrategy {
 				let backtest = self.backtest.borrow();
 				let initialization_records = backtest.get_records(symbol, initialization_bars)?;
 				indicator.initialize(&initialization_records);
+			} else {
+				let record = self.backtest.borrow().most_recent_record(symbol)?;
+				indicator.next(&record);
 			}
-			let record = self.backtest.borrow().most_recent_record(symbol)?;
 			let state = IndicatorStrategy::get_position_state(symbol, &self.backtest.borrow());
-			indicator.next(&record);
 			let Some(signal) = indicator.get_trade_signal(state) else {
 				return Ok(());
 			};

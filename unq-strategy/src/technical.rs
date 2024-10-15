@@ -37,7 +37,7 @@ pub trait Indicator: Send + Sync {
 	fn clone_box(&self) -> Box<dyn Indicator>;
 
 	fn initialize(&mut self, records: &Vec<OhlcRecord>) {
-		for record in records {
+		for record in records.iter().rev() {
 			let _ = self.next(record);
 		}
 	}
@@ -111,9 +111,9 @@ impl IndicatorBuffer {
 	}
 
 	pub fn add(&mut self, sample: f64) {
-		self.buffer.push_back(sample);
+		self.buffer.push_front(sample);
 		if self.buffer.len() > self.size {
-			self.buffer.pop_front();
+			self.buffer.pop_back();
 		}
 	}
 

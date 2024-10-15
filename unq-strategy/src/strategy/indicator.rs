@@ -271,10 +271,11 @@ impl Strategy for IndicatorStrategy {
 					// This can actually make a big difference with big buffers (e.g. EMA)
 					let initialization_records = backtest.get_records(symbol, initialization_bars)?;
 					indicator.initialize(&initialization_records);
+				} else {
+					let record = backtest.most_recent_record(symbol)?;
+					indicator.next(&record);
 				}
-				let record = backtest.most_recent_record(symbol)?;
 				let state = Self::get_position_state(symbol, &backtest);
-				indicator.next(&record);
 				let Some(signal) = indicator.get_trade_signal(state) else {
 					return Ok(());
 				};
