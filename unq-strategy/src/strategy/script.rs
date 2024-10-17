@@ -9,7 +9,7 @@ use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
 use crate::CONTRACTS_PARAMETER;
-use crate::technical::{BollingerBands, ChannelExitMode, DonchianChannel, ExponentialMovingAverage, Indicator, IndicatorId, KeltnerChannel, LinearMovingAverage, MovingAverageConvergence, PercentagePriceOscillator, RelativeStrengthIndicator, SimpleMovingAverage};
+use crate::technical::{AverageDirectionalIndex, AverageTrueRange, BollingerBands, ChannelExitMode, DonchianChannel, ExponentialMovingAverage, Indicator, IndicatorId, KeltnerChannel, LinearMovingAverage, MovingAverageConvergence, PercentagePriceOscillator, RelativeStrengthIndicator, SimpleMovingAverage};
 
 const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
@@ -415,12 +415,17 @@ impl<'a> ScriptStrategy<'a> {
 			output
 		});
 		let context = self.context.clone();
+		engine.register_fn("parameter", move |name: ImmutableString, default_value: ImmutableString| {
+			let output = context.borrow().get_parameter_string(name, default_value);
+			output
+		});
+		let context = self.context.clone();
 		engine.register_fn("time", move || {
 			context.borrow().time()
 		});
 		let context = self.context.clone();
-		engine.register_fn("recent", move |symbol: ImmutableString| {
-			context.borrow().recent(symbol)
+		engine.register_fn("close", move || {
+			context.borrow().close()
 		});
 	}
 
@@ -461,6 +466,14 @@ impl<'a> ScriptStrategy<'a> {
 		let context = self.context.clone();
 		engine.register_fn("donchian", move |period: i64| {
 			context.borrow_mut().donchian_channel(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("adx", move |period: i64| {
+			context.borrow_mut().average_directional_index(period)
+		});
+		let context = self.context.clone();
+		engine.register_fn("atr", move |period: i64| {
+			context.borrow_mut().average_true_range(period)
 		});
 	}
 
@@ -565,15 +578,24 @@ impl ApiContext {
 		}
 	}
 
+	fn get_parameter_string(&self, name: ImmutableString, default_value: ImmutableString) -> ApiResult<ImmutableString> {
+		match self.parameters.get(&name.to_string()) {
+			Some(value) => {
+				Ok(value.clone().into_immutable_string()?)
+			},
+			None => Ok(default_value)
+		}
+	}
+
 	fn time(&self) -> ImmutableString {
 		let backtest = self.backtest.borrow();
 		let time = backtest.get_time();
 		time.to_string().into()
 	}
 
-	fn recent(&self, symbol: ImmutableString) -> ApiResult<f64> {
+	fn close(&self) -> ApiResult<f64> {
 		let backtest = self.backtest.borrow();
-		let record = backtest.most_recent_record(&symbol.to_string())
+		let record = backtest.most_recent_record(&self.current_symbol)
 			.map_err(|error| -> Box<EvalAltResult> {
 				format!("Failed to retrieve most recent record: {error}").into()
 			})?;
@@ -723,6 +745,30 @@ impl ApiContext {
 		let indicator_id = DonchianChannel::get_id(period as usize);
 		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
 			let indicator = DonchianChannel::new(period as usize, ChannelExitMode::Center)
+				.map_err(Self::get_error)?;
+			let indicator_box = Box::new(indicator);
+			Ok(indicator_box)
+		};
+		self.execute_indicator(indicator_id, Box::new(get_indicator))
+	}
+
+	fn average_directional_index(&mut self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let indicator_id = AverageDirectionalIndex::get_id(period as usize);
+		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
+			let indicator = AverageDirectionalIndex::new(period as usize)
+				.map_err(Self::get_error)?;
+			let indicator_box = Box::new(indicator);
+			Ok(indicator_box)
+		};
+		self.execute_indicator(indicator_id, Box::new(get_indicator))
+	}
+
+	fn average_true_range(&mut self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let indicator_id = AverageTrueRange::get_id(period as usize);
+		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
+			let indicator = AverageTrueRange::new(period as usize)
 				.map_err(Self::get_error)?;
 			let indicator_box = Box::new(indicator);
 			Ok(indicator_box)
