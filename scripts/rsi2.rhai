@@ -1,5 +1,5 @@
 /*
-RSI 2 long-only strategy with three different regime filters that can be selected using the "mode" parameter.
+RSI(2) long-only strategy with three different regime filters that can be selected using the "mode" parameter.
 
 1. SMA filter (mode "sma")
 - Filter: close > sma(smaPeriod)
@@ -17,6 +17,7 @@ RSI 2 long-only strategy with three different regime filters that can be selecte
 const MODE_SMA = "sma";
 const MODE_ADX = "adx";
 const MODE_ATR = "atr";
+const RSI_PERIOD = 2;
 const ADX_PERIOD = 20;
 const ATR_PERIOD = 20;
 
@@ -29,8 +30,8 @@ let mode = parameter("mode", MODE_SMA);
 
 let previous_signal = CLOSE;
 
-fn next(symbol) {
-	let rsi = rsi(2);
+fn next() {
+	let rsi = rsi(RSI_PERIOD);
 	let close = close();
 	let sma = sma(sma_period);
 	let adx = adx(ADX_PERIOD);

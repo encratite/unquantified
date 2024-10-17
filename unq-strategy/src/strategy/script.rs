@@ -310,7 +310,10 @@ impl<'a> ScriptStrategy<'a> {
 		for (symbol, signal) in valid_symbol_signals.iter() {
 			let side = Self::get_side_from_signal(signal)?;
 			let symbol_margin = backtest.get_margin(symbol)?;
-			let contracts = (position_margin / symbol_margin).round() as u32;
+			let mut contracts = (position_margin / symbol_margin).round() as u32;
+			if valid_symbol_signals.len() == 1 && contracts == 0 {
+				contracts = 1;
+			}
 			let position_target = PositionTarget {
 				symbol: (*symbol).clone(),
 				side,
@@ -508,7 +511,7 @@ impl<'a> Strategy for ScriptStrategy<'a> {
 				_ => continue
 			};
 			self.update_indicators(symbol, &record);
-			let signal_int = self.engine.call_fn::<i64>(&mut self.scope, &self.script, "next", (symbol.clone(),))
+			let signal_int = self.engine.call_fn::<i64>(&mut self.scope, &self.script, "next", ())
 				.map_err(|error| anyhow!("Failed to execute next function: {error}"))?;
 			let signal = Self::get_trade_signal(signal_int)?;
 			self.context.borrow_mut().signals.insert(symbol.clone(), signal);
