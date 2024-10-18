@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use anyhow::{Result, bail, anyhow, Context, Error};
+use chrono::Datelike;
 use regex::Regex;
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Scope, AST};
 use unq_common::backtest::{Backtest, PositionSide};
 use unq_common::ohlc::OhlcRecord;
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
 use crate::CONTRACTS_PARAMETER;
-use crate::technical::{AverageDirectionalIndex, AverageTrueRange, BollingerBands, ChannelExitMode, DonchianChannel, ExponentialMovingAverage, Indicator, IndicatorId, KeltnerChannel, LinearMovingAverage, MovingAverageConvergence, PercentagePriceOscillator, RelativeStrengthIndicator, SimpleMovingAverage};
+use crate::technical::{AverageDirectionalIndex, AverageTrueRange, BollingerBands, ChannelExitMode, DonchianChannel, ExponentialMovingAverage, Indicator, IndicatorId, KeltnerChannel, LinearMovingAverage, MovingAverageConvergence, PercentagePriceOscillator, RateOfChange, RelativeStrengthIndicator, SimpleMovingAverage};
 
 const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
@@ -427,6 +428,10 @@ impl<'a> ScriptStrategy<'a> {
 			context.borrow().time()
 		});
 		let context = self.context.clone();
+		engine.register_fn("month", move || {
+			context.borrow().month()
+		});
+		let context = self.context.clone();
 		engine.register_fn("close", move || {
 			context.borrow().close()
 		});
@@ -477,6 +482,11 @@ impl<'a> ScriptStrategy<'a> {
 		let context = self.context.clone();
 		engine.register_fn("atr", move |period: i64| {
 			context.borrow_mut().average_true_range(period)
+		});
+
+		let context = self.context.clone();
+		engine.register_fn("roc", move |period: i64| {
+			context.borrow_mut().rate_of_change(period)
 		});
 	}
 
@@ -594,6 +604,12 @@ impl ApiContext {
 		let backtest = self.backtest.borrow();
 		let time = backtest.get_time();
 		time.to_string().into()
+	}
+
+	fn month(&self) -> i64 {
+		let backtest = self.backtest.borrow();
+		let time = backtest.get_time();
+		time.month() as i64
 	}
 
 	fn close(&self) -> ApiResult<f64> {
@@ -772,6 +788,18 @@ impl ApiContext {
 		let indicator_id = AverageTrueRange::get_id(period as usize);
 		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
 			let indicator = AverageTrueRange::new(period as usize)
+				.map_err(Self::get_error)?;
+			let indicator_box = Box::new(indicator);
+			Ok(indicator_box)
+		};
+		self.execute_indicator(indicator_id, Box::new(get_indicator))
+	}
+
+	fn rate_of_change(&mut self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let indicator_id = RateOfChange::get_id(period as usize);
+		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
+			let indicator = RateOfChange::new(period as usize)
 				.map_err(Self::get_error)?;
 			let indicator_box = Box::new(indicator);
 			Ok(indicator_box)

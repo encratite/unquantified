@@ -1,29 +1,34 @@
 // RSI(2) long/short strategy with ADX and SMA regime filters
 
+const ROC_PERIOD = 10;
 const RSI_PERIOD = 2;
 const ADX_PERIOD = 14;
 const ADX_THRESHOLD = 20;
 
+let exclude_month = parameter("excludeMonth", 4);
+let roc_limit = parameter("rocLimit", 10);
+let sma_period = parameter("smaPeriod", 300);
 let rsi_long_entry = parameter("rsiLongEntry", 20);
 let rsi_long_exit = parameter("rsiLongExit", 75);
 let rsi_short_entry = parameter("rsiShortEntry", 85);
 let rsi_short_exit = parameter("rsiShortExit", 25);
-let sma_period = parameter("smaPeriod", 300);
 
 let previous_signal = CLOSE;
 
 fn next() {
-	let rsi = rsi(RSI_PERIOD);
-	let adx = adx(ADX_PERIOD);
-	let close = close();
+	let roc = roc(ROC_PERIOD);
 	let sma = sma(sma_period);
-	if rsi == () || adx == () || close == () || sma == () {
+	let adx = adx(ADX_PERIOD);
+	let rsi = rsi(RSI_PERIOD);
+	let close = close();
+	if roc == () || sma == () || adx == () || rsi == () {
 		// Buffers haven't been filled yet
 		return CLOSE;
 	}
-	let signal = if rsi < rsi_long_entry && adx > ADX_THRESHOLD && close > sma {
+	let filter = month() != exclude_month && roc < roc_limit && adx > ADX_THRESHOLD;
+	let signal = if filter && close > sma && rsi < rsi_long_entry {
 		LONG
-	} else if rsi > rsi_short_entry && adx > ADX_THRESHOLD && close < sma {
+	} else if filter && close < sma && rsi > rsi_short_entry {
 		SHORT
 	} else {
 		previous_signal

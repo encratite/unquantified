@@ -1057,6 +1057,64 @@ impl Indicator for AverageTrueRange {
 	}
 }
 
+#[derive(Clone)]
+pub struct RateOfChange {
+	buffer: IndicatorBuffer
+}
+
+impl RateOfChange {
+	pub const ID: &'static str = "roc";
+
+	pub fn new(period: usize) -> Result<Self> {
+		validate_period(period)?;
+		let output = Self {
+			buffer: IndicatorBuffer::new(period)
+		};
+		Ok(output)
+	}
+
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period(Self::ID, period)
+	}
+}
+
+impl Indicator for RateOfChange {
+	fn get_description(&self) -> String {
+		format!("ROC({})", self.buffer.size)
+	}
+
+	fn next(&mut self, record: &OhlcRecord) {
+		self.buffer.add(record.close);
+	}
+
+	fn get_indicators(&self) -> Option<Vec<f64>> {
+		if self.buffer.filled() {
+			match (self.buffer.buffer.front(), self.buffer.buffer.iter().last()) {
+				(Some(first), Some(last)) => {
+					let rate = 100.0 * (first / last - 1.0);
+					let indicators = vec![rate];
+					Some(indicators)
+				},
+				_ => None
+			}
+		} else {
+			None
+		}
+	}
+
+	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
+		None
+	}
+
+	fn needs_initialization(&self) -> Option<usize> {
+		self.buffer.needs_initialization()
+	}
+
+	fn clone_box(&self) -> Box<dyn Indicator> {
+		Box::new(self.clone())
+	}
+}
+
 fn exponential_moving_average<'a, I>(records: I, period: usize) -> f64
 where
 	I: Iterator<Item = &'a f64>
