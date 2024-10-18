@@ -20,7 +20,7 @@ use crate::indicator::ppo::PercentagePriceOscillator;
 use crate::indicator::rate::RateOfChange;
 use crate::indicator::rsi::RelativeStrengthIndicator;
 use crate::indicator::simple::SimpleMovingAverage;
-use crate::strategy::script::TradeSignal;
+use crate::strategy::script::{ScriptStrategy, TradeSignal};
 use crate::technical::{ChannelExitMode, Indicator};
 
 pub type ApiResult<T> = anyhow::Result<T, Box<EvalAltResult>>;
@@ -46,6 +46,7 @@ pub struct ApiContext {
 	parameters: HashMap<String, Dynamic>,
 	indicators: Vec<ApiIndicator>,
 	signals: HashMap<String, TradeSignal>,
+	previous_signals: HashMap<String, TradeSignal>,
 	backtest: Rc<RefCell<Backtest>>
 }
 
@@ -56,6 +57,7 @@ impl ApiContext {
 			parameters,
 			indicators: Vec::new(),
 			signals: HashMap::new(),
+			previous_signals: HashMap::new(),
 			backtest
 		}
 	}
@@ -85,12 +87,22 @@ impl ApiContext {
 	}
 
 	pub fn reset_signals(&mut self, symbols: &Vec<String>) {
+		self.previous_signals = self.signals.clone();
 		let close_signals = symbols.iter().map(|symbol| (symbol.clone(), TradeSignal::Close));
 		self.signals = HashMap::from_iter(close_signals);
 	}
 
 	pub fn insert_signal(&mut self, symbol: &String, signal: TradeSignal) {
-		self.signals.insert(symbol.clone(), signal);
+		let converted_signal = if signal == TradeSignal::Hold {
+			if let Some(previous_signal) = self.previous_signals.get(symbol) {
+				previous_signal.clone()
+			} else {
+				TradeSignal::Close
+			}
+		} else {
+			signal
+		};
+		self.signals.insert(symbol.clone(), converted_signal);
 	}
 
 	pub fn update_indicators(&mut self, symbol: &String, record: &OhlcRecord) {
@@ -161,6 +173,14 @@ impl ApiContext {
 				format!("Failed to retrieve most recent record: {error}").into()
 			})?;
 		Ok(record.close)
+	}
+
+	pub fn previous_signal(&self) -> i64 {
+		let previous_signal = match self.previous_signals.get(&self.current_symbol) {
+			Some(previous_signal) => previous_signal.clone(),
+			None => TradeSignal::Close
+		};
+		ScriptStrategy::get_trade_signal_int(previous_signal)
 	}
 
 	pub fn close_lagged(&mut self, period: i64) -> ApiResult<Dynamic> {

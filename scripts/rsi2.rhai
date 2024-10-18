@@ -28,8 +28,6 @@ let adx_threshold = parameter("adxThreshold", 20);
 let atr_threshold = parameter("atrThreshold", 30);
 let mode = parameter("mode", MODE_SMA);
 
-let previous_signal = CLOSE;
-
 fn next() {
 	let rsi = rsi(RSI_PERIOD);
 	let close = close();
@@ -49,17 +47,15 @@ fn next() {
 	} else {
 		throw `Unknown mode "${mode}"`;
 	};
-	let signal = if filter {
+	if filter {
 		if rsi < low_threshold {
 			LONG
 		} else if rsi > high_threshold {
 			CLOSE
 		} else {
-			previous_signal
+			HOLD
 		}
 	} else {
 		CLOSE
-	};
-	previous_signal = signal;
-	signal
+	}
 }

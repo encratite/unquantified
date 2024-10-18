@@ -15,9 +15,10 @@ const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
 const MARGIN_RATIO_PARAMETER: &'static str = "margin";
 
-const TRADE_SIGNAL_LONG: i64 = 1;
-const TRADE_SIGNAL_CLOSE: i64 = 0;
-const TRADE_SIGNAL_SHORT: i64 = -1;
+const TRADE_SIGNAL_LONG: i64 = 0;
+const TRADE_SIGNAL_SHORT: i64 = 1;
+const TRADE_SIGNAL_HOLD: i64 = 2;
+const TRADE_SIGNAL_CLOSE: i64 = 3;
 
 type ApiContextCell = Rc<RefCell<ApiContext>>;
 
@@ -54,8 +55,9 @@ pub enum PositionSizing {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TradeSignal {
 	Long,
-	Close,
-	Short
+	Short,
+	Hold,
+	Close
 }
 
 pub struct ScriptStrategy<'a> {
@@ -168,6 +170,15 @@ impl<'a> ScriptStrategy<'a> {
 		Self::new(script, script_directory, symbols, position_sizing, contracts, margin_ratio, dynamic_parameters, backtest)
 	}
 
+	pub fn get_trade_signal_int(signal: TradeSignal) -> i64 {
+		match signal {
+			TradeSignal::Long => TRADE_SIGNAL_LONG,
+			TradeSignal::Short => TRADE_SIGNAL_SHORT,
+			TradeSignal::Hold => TRADE_SIGNAL_HOLD,
+			TradeSignal::Close => TRADE_SIGNAL_CLOSE
+		}
+	}
+
 	fn get_dynamic_value(parameter: &StrategyParameter) -> Result<Dynamic> {
 		match parameter.get_type()? {
 			StrategyParameterType::NumericSingle => {
@@ -207,7 +218,7 @@ impl<'a> ScriptStrategy<'a> {
 		match signal {
 			TradeSignal::Long => Ok(PositionSide::Long),
 			TradeSignal::Short => Ok(PositionSide::Short),
-			TradeSignal::Close => bail!("Unable to translate close signal to side")
+			_ => bail!("Unable to translate trade signal to position side")
 		}
 	}
 
@@ -342,16 +353,18 @@ impl<'a> ScriptStrategy<'a> {
 	fn get_trade_signal(trade_signal_int: i64) -> Result<TradeSignal> {
 		match trade_signal_int {
 			TRADE_SIGNAL_LONG => Ok(TradeSignal::Long),
-			TRADE_SIGNAL_CLOSE => Ok(TradeSignal::Close),
 			TRADE_SIGNAL_SHORT => Ok(TradeSignal::Short),
+			TRADE_SIGNAL_HOLD => Ok(TradeSignal::Hold),
+			TRADE_SIGNAL_CLOSE => Ok(TradeSignal::Close),
 			_ => bail!("Unable to convert trade signal integer ({trade_signal_int})")
 		}
 	}
 
 	fn push_constants(&mut self) {
 		self.scope.push_constant("LONG", TRADE_SIGNAL_LONG);
-		self.scope.push_constant("CLOSE", TRADE_SIGNAL_CLOSE);
 		self.scope.push_constant("SHORT", TRADE_SIGNAL_SHORT);
+		self.scope.push_constant("HOLD", TRADE_SIGNAL_HOLD);
+		self.scope.push_constant("CLOSE", TRADE_SIGNAL_CLOSE);
 	}
 
 	fn register_functions(&mut self) {
@@ -387,6 +400,10 @@ impl<'a> ScriptStrategy<'a> {
 		let context = self.context.clone();
 		engine.register_fn("close", move || {
 			context.borrow().close()
+		});
+		let context = self.context.clone();
+		engine.register_fn("previous", move || {
+			context.borrow().previous_signal()
 		});
 	}
 
