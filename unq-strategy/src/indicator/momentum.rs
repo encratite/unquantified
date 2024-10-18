@@ -1,6 +1,7 @@
 use anyhow::Result;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
+use crate::id::IndicatorId;
 use crate::technical::*;
 
 #[derive(Clone)]
@@ -19,6 +20,10 @@ impl MomentumIndicator {
 			indicators: None
 		};
 		Ok(output)
+	}
+
+	pub fn get_id(period: usize) -> IndicatorId {
+		IndicatorId::from_period(Self::ID, period)
 	}
 }
 
@@ -39,7 +44,10 @@ impl Indicator for MomentumIndicator {
 	}
 
 	fn get_indicators(&self) -> Option<Vec<f64>> {
-		get_dual_indicators(&self.indicators)
+		match self.indicators {
+			Some((_, last)) => Some(vec![last]),
+			_ => None
+		}
 	}
 
 	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {

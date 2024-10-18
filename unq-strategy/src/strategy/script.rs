@@ -393,6 +393,10 @@ impl<'a> ScriptStrategy<'a> {
 	fn register_indicators(&mut self) {
 		let engine = &mut self.engine;
 		let context = self.context.clone();
+		engine.register_fn("close", move |offset: i64| {
+			context.borrow_mut().close_lagged(offset)
+		});
+		let context = self.context.clone();
 		engine.register_fn("sma", move |period: i64| {
 			context.borrow_mut().simple_moving_average(period)
 		});
@@ -436,7 +440,6 @@ impl<'a> ScriptStrategy<'a> {
 		engine.register_fn("atr", move |period: i64| {
 			context.borrow_mut().average_true_range(period)
 		});
-
 		let context = self.context.clone();
 		engine.register_fn("roc", move |period: i64| {
 			context.borrow_mut().rate_of_change(period)

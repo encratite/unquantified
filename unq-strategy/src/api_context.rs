@@ -15,6 +15,7 @@ use crate::indicator::exponential::ExponentialMovingAverage;
 use crate::indicator::keltner::KeltnerChannel;
 use crate::indicator::linear::LinearMovingAverage;
 use crate::indicator::macd::MovingAverageConvergence;
+use crate::indicator::momentum::MomentumIndicator;
 use crate::indicator::ppo::PercentagePriceOscillator;
 use crate::indicator::rate::RateOfChange;
 use crate::indicator::rsi::RelativeStrengthIndicator;
@@ -161,6 +162,19 @@ impl ApiContext {
 			})?;
 		Ok(record.close)
 	}
+
+	pub fn close_lagged(&mut self, period: i64) -> ApiResult<Dynamic> {
+		Self::validate_period(period)?;
+		let indicator_id = MomentumIndicator::get_id(period as usize);
+		let get_indicator = move || -> ApiResult<Box<dyn Indicator>> {
+			let indicator = MomentumIndicator::new(period as usize)
+				.map_err(Self::get_error)?;
+			let indicator_box = Box::new(indicator);
+			Ok(indicator_box)
+		};
+		self.execute_indicator(indicator_id, Box::new(get_indicator))
+	}
+
 
 	pub fn simple_moving_average(&mut self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
