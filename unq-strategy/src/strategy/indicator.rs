@@ -4,6 +4,16 @@ use anyhow::{bail, Result};
 use unq_common::backtest::{Backtest, PositionSide, SimplePosition};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::get_symbol_contracts;
+use crate::indicator::bollinger::BollingerBands;
+use crate::indicator::donchian::DonchianChannel;
+use crate::indicator::exponential::ExponentialMovingAverage;
+use crate::indicator::keltner::KeltnerChannel;
+use crate::indicator::linear::LinearMovingAverage;
+use crate::indicator::macd::MovingAverageConvergence;
+use crate::indicator::momentum::MomentumIndicator;
+use crate::indicator::ppo::PercentagePriceOscillator;
+use crate::indicator::rsi::RelativeStrengthIndicator;
+use crate::indicator::simple::SimpleMovingAverage;
 use crate::technical::*;
 
 pub struct SymbolIndicator {

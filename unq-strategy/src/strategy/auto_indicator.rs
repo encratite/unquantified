@@ -8,6 +8,16 @@ use unq_common::backtest::{Backtest, BacktestResult, EventType};
 use unq_common::strategy::{Strategy, StrategyParameters};
 use crate::strategy::indicator::{IndicatorStrategy, SymbolIndicator};
 use crate::{get_symbol_contracts, SymbolContracts};
+use crate::indicator::bollinger::BollingerBands;
+use crate::indicator::donchian::DonchianChannel;
+use crate::indicator::exponential::ExponentialMovingAverage;
+use crate::indicator::keltner::KeltnerChannel;
+use crate::indicator::linear::LinearMovingAverage;
+use crate::indicator::macd::MovingAverageConvergence;
+use crate::indicator::momentum::MomentumIndicator;
+use crate::indicator::ppo::PercentagePriceOscillator;
+use crate::indicator::rsi::RelativeStrengthIndicator;
+use crate::indicator::simple::SimpleMovingAverage;
 use crate::technical::*;
 
 const WALK_FORWARD_WINDOW_MINIMUM: i64 = 60;
