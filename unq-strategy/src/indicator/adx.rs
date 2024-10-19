@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::id::IndicatorId;
@@ -69,11 +70,10 @@ impl Indicator for AverageDirectionalIndex {
 		self.previous_record = Some(record.clone());
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		if self.dx_buffer.filled() {
 			let adx = 100.0 * self.dx_buffer.average();
-			let indicators = vec![adx];
-			Some(indicators)
+			Some(adx.into())
 		} else {
 			None
 		}

@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::standard_deviation_mean_biased;
 use crate::buffer::IndicatorBuffer;
@@ -56,8 +57,8 @@ impl Indicator for BollingerBands {
 		self.indicators = Some((center, lower, upper));
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
-		get_channel_indicators(&self.indicators)
+	fn get_indicators(&self) -> Option<Dynamic> {
+		ChannelIndicators::new(self.indicators)
 	}
 
 	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal> {

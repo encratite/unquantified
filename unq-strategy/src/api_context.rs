@@ -371,17 +371,10 @@ impl ApiContext {
 		Ok(())
 	}
 
-	fn translate_indicator_values(indicators: Option<Vec<f64>>) -> ApiResult<Dynamic> {
+	fn translate_indicator_values(indicators: Option<Dynamic>) -> ApiResult<Dynamic> {
 		match indicators {
-			Some(indicators) => {
-				if indicators.len() == 1 {
-					if let Some(first) = indicators.first() {
-						return Ok((*first).into());
-					}
-				}
-				Ok(indicators.into())
-			},
-			None => Err("Buffer hasn't been filled yet".into())
+			Some(indicators) => Ok(indicators),
+			None => Err("Indicator buffer hasn't been filled yet".into())
 		}
 
 	}

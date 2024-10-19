@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::id::IndicatorId;
@@ -47,11 +48,10 @@ impl Indicator for AverageTrueRange {
 		self.previous_record = Some(record.clone());
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		if self.true_range_buffer.filled() {
 			let atr = self.true_range_buffer.average();
-			let indicators = vec![atr];
-			Some(indicators)
+			Some(atr.into())
 		} else {
 			None
 		}

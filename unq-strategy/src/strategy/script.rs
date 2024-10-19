@@ -10,6 +10,7 @@ use unq_common::ohlc::OhlcRecord;
 use unq_common::strategy::{Strategy, StrategyParameter, StrategyParameterType, StrategyParameters};
 use crate::api_context::ApiContext;
 use crate::CONTRACTS_PARAMETER;
+use crate::technical::{AverageDifference, ChannelIndicators};
 
 const SCRIPT_PARAMETER: &'static str = "script";
 const POSITIONS_PARAMETER: &'static str = "positions";
@@ -360,6 +361,11 @@ impl<'a> ScriptStrategy<'a> {
 		}
 	}
 
+	fn register_custom_types(&mut self) {
+		self.engine.build_type::<AverageDifference>();
+		self.engine.build_type::<ChannelIndicators>();
+	}
+
 	fn push_constants(&mut self) {
 		self.scope.push_constant("LONG", TRADE_SIGNAL_LONG);
 		self.scope.push_constant("SHORT", TRADE_SIGNAL_SHORT);
@@ -464,6 +470,7 @@ impl<'a> ScriptStrategy<'a> {
 	}
 
 	fn initialize_engine(&mut self) -> Result<()> {
+		self.register_custom_types();
 		self.push_constants();
 		self.register_functions();
 		self.engine.run_ast_with_scope(&mut self.scope, &self.script)

@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use unq_common::stats::mean;
 use crate::buffer::IndicatorBuffer;
@@ -67,9 +68,9 @@ impl Indicator for RelativeStrengthIndicator {
 		self.indicator = Some(rsi);
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		match self.indicator {
-			Some(rsi) => Some(vec![rsi]),
+			Some(rsi) => Some(rsi.into()),
 			None => None
 		}
 	}

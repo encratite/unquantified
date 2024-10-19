@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use rhai::{CustomType, Dynamic, TypeBuilder};
 use strum_macros::Display;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
@@ -30,7 +31,7 @@ pub enum ChannelExitMode {
 pub trait Indicator: Send + Sync {
 	fn get_description(&self) -> String;
 	fn next(&mut self, record: &OhlcRecord);
-	fn get_indicators(&self) -> Option<Vec<f64>>;
+	fn get_indicators(&self) -> Option<Dynamic>;
 	fn get_trade_signal(&self, state: PositionState) -> Option<TradeSignal>;
 	fn needs_initialization(&self) -> Option<usize>;
 	fn clone_box(&self) -> Box<dyn Indicator>;
@@ -38,6 +39,55 @@ pub trait Indicator: Send + Sync {
 	fn initialize(&mut self, records: &Vec<OhlcRecord>) {
 		for record in records.iter().rev() {
 			let _ = self.next(record);
+		}
+	}
+}
+
+#[derive(Clone, CustomType)]
+pub struct AverageDifference {
+	#[rhai_type(readonly)]
+	pub average: f64,
+	#[rhai_type(readonly)]
+	pub difference: f64
+}
+
+impl AverageDifference {
+	pub fn new(indicators: Option<(f64, f64)>) -> Option<Dynamic> {
+		match indicators {
+			Some((average, difference)) => {
+				let indicators = Self {
+					average,
+					difference
+				};
+				Some(Dynamic::from(indicators))
+			},
+			None => None
+		}
+	}
+}
+
+#[derive(Clone, CustomType)]
+pub struct ChannelIndicators {
+	#[rhai_type(readonly)]
+	pub center: f64,
+	#[rhai_type(readonly)]
+	pub lower: f64,
+	#[rhai_type(readonly)]
+	pub upper: f64
+}
+
+impl ChannelIndicators {
+	pub fn new(indicators: Option<(f64, f64, f64)>) -> Option<Dynamic> {
+		match indicators {
+			Some((center, lower, upper)) => {
+				let indicators = Self {
+					center,
+					lower,
+					upper
+				};
+				Some(Dynamic::from(indicators))
+			},
+			None => None
 		}
 	}
 }
@@ -118,28 +168,14 @@ pub fn translate_channel_signal(close: f64, center: f64, lower: f64, upper: f64,
 	}
 }
 
-pub fn needs_initialization(close_buffer: &IndicatorBuffer, signal_buffer: &IndicatorBuffer) -> Option<usize> {
+pub fn needs_initialization_sum(close_buffer: &IndicatorBuffer, signal_buffer: &IndicatorBuffer) -> Option<usize> {
 	let close = close_buffer.needs_initialization();
 	let signal = signal_buffer.needs_initialization();
 	match (close, signal) {
-		(Some(x), Some(y)) => Some(x.max(y)),
+		(Some(x), Some(y)) => Some(x + y),
 		(Some(x), None) => Some(x),
 		(None, Some(y)) => Some(y),
 		(None, None) => None,
-	}
-}
-
-pub fn get_dual_indicators(indicators: &Option<(f64, f64)>) -> Option<Vec<f64>> {
-	match indicators {
-		Some((first, second)) => Some(vec![*first, *second]),
-		None => None
-	}
-}
-
-pub fn get_channel_indicators(indicators: &Option<(f64, f64, f64)>) -> Option<Vec<f64>> {
-	match indicators {
-		Some((center, lower, upper)) => Some(vec![*center, *lower, *upper]),
-		None => None
 	}
 }
 

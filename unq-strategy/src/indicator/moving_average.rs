@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use anyhow::{bail, Result};
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::technical::*;
@@ -50,11 +51,10 @@ impl MovingAverage {
 		self.trade_signal = translate_signal(difference);
 	}
 
-	pub fn get_indicators(&self) -> Option<Vec<f64>> {
-		match (self.fast_average, self.slow_average) {
-			(Some(fast_average), Some(slow_average)) => Some(vec![fast_average, slow_average]),
-			(Some(fast_average), None) => Some(vec![fast_average]),
-			_ => None
+	pub fn get_indicators(&self) -> Option<Dynamic> {
+		match self.fast_average {
+			Some(fast_average) => Some(fast_average.into()),
+			None => None
 		}
 	}
 }

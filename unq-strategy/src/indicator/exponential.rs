@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::id::IndicatorId;
 use crate::indicator::moving_average::MovingAverage;
@@ -53,7 +54,7 @@ impl Indicator for ExponentialMovingAverage {
 		self.0.calculate_averages(record, &calculate)
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		self.0.get_indicators()
 	}
 

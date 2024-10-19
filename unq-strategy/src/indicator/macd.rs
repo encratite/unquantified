@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::id::IndicatorId;
@@ -64,8 +65,8 @@ impl Indicator for MovingAverageConvergence {
 		self.indicators = Some((signal, macd));
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
-		get_dual_indicators(&self.indicators)
+	fn get_indicators(&self) -> Option<Dynamic> {
+		AverageDifference::new(self.indicators)
 	}
 
 	fn get_trade_signal(&self, _: PositionState) -> Option<TradeSignal> {
@@ -73,7 +74,7 @@ impl Indicator for MovingAverageConvergence {
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		needs_initialization(&self.close_buffer, &self.signal_buffer)
+		needs_initialization_sum(&self.close_buffer, &self.signal_buffer)
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {

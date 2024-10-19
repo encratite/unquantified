@@ -1,4 +1,5 @@
 use anyhow::Result;
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::id::IndicatorId;
@@ -43,9 +44,9 @@ impl Indicator for MomentumIndicator {
 		}
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		match self.indicators {
-			Some((_, last)) => Some(vec![last]),
+			Some((_, last)) => Some(last.into()),
 			_ => None
 		}
 	}

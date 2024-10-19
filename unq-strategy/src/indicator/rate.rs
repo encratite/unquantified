@@ -1,3 +1,4 @@
+use rhai::Dynamic;
 use unq_common::ohlc::OhlcRecord;
 use crate::buffer::IndicatorBuffer;
 use crate::id::IndicatorId;
@@ -33,13 +34,12 @@ impl Indicator for RateOfChange {
 		self.buffer.add(record.close);
 	}
 
-	fn get_indicators(&self) -> Option<Vec<f64>> {
+	fn get_indicators(&self) -> Option<Dynamic> {
 		if self.buffer.filled() {
 			match (self.buffer.buffer.front(), self.buffer.buffer.iter().last()) {
 				(Some(first), Some(last)) => {
 					let rate = 100.0 * (first / last - 1.0);
-					let indicators = vec![rate];
-					Some(indicators)
+					Some(rate.into())
 				},
 				_ => None
 			}
