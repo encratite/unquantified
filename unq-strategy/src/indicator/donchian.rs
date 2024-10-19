@@ -41,8 +41,9 @@ impl Indicator for DonchianChannel {
 			return;
 		}
 		let buffer = &self.buffer.buffer;
-		let lower = buffer.iter().cloned().reduce(f64::min).unwrap();
-		let upper = buffer.iter().cloned().reduce(f64::max).unwrap();
+		// Exclude the current record from the channel to enable breakouts based on the current close
+		let lower = buffer.iter().skip(1).cloned().reduce(f64::min).unwrap();
+		let upper = buffer.iter().skip(1).cloned().reduce(f64::max).unwrap();
 		let center = (lower + upper) / 2.0;
 		self.indicators = Some((center, lower, upper));
 	}
@@ -56,10 +57,7 @@ impl Indicator for DonchianChannel {
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		match self.buffer.needs_initialization() {
-			Some(size) => Some(size + 1),
-			None => None
-		}
+		self.buffer.needs_initialization()
 	}
 
 	fn clone_box(&self) -> Box<dyn Indicator> {

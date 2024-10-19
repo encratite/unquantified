@@ -183,6 +183,15 @@ impl ApiContext {
 		ScriptStrategy::get_trade_signal_int(previous_signal)
 	}
 
+	pub fn get_holding_time(&self) -> Dynamic {
+		let positions = self.backtest.borrow().get_position_by_root(&self.current_symbol);
+		let bars_in_trade = positions.iter().map(|x| x.bars_in_trade).max();
+		match bars_in_trade {
+			Some(bars_in_trade) => (bars_in_trade as i64).into(),
+			None => ().into()
+		}
+	}
+
 	pub fn close_lagged(&mut self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;
 		let indicator_id = MomentumIndicator::get_id(period as usize);
@@ -194,7 +203,6 @@ impl ApiContext {
 		};
 		self.execute_indicator(indicator_id, Box::new(get_indicator))
 	}
-
 
 	pub fn simple_moving_average(&mut self, period: i64) -> ApiResult<Dynamic> {
 		Self::validate_period(period)?;

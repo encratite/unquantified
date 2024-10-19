@@ -426,6 +426,21 @@ impl Backtest {
 			.cloned()
 	}
 
+	pub fn get_positions_by_root(&self, symbol: &String) -> Vec<Position> {
+		self.positions
+			.iter()
+			.filter(|x| {
+				if let Some(globex_code) = GlobexCode::new(&x.symbol) {
+					if globex_code.root == *symbol {
+						return true;
+					}
+				}
+				false
+			})
+			.cloned()
+			.collect()
+	}
+
 	pub fn get_records(&self, symbol: &String, bars: usize) -> Result<Vec<OhlcRecord>> {
 		let archive = self.get_symbol_archive(symbol)?;
 		let source = archive.get_data(&self.time_frame);

@@ -411,6 +411,10 @@ impl<'a> ScriptStrategy<'a> {
 		engine.register_fn("previous", move || {
 			context.borrow().previous_signal()
 		});
+		let context = self.context.clone();
+		engine.register_fn("holding_time", move || {
+			context.borrow().get_holding_time()
+		});
 	}
 
 	fn register_indicators(&mut self) {
