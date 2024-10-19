@@ -15,10 +15,6 @@ fn next() {
 	let adx = adx(ADX_PERIOD);
 	let rsi = rsi(RSI_PERIOD);
 	let close = close();
-	if sma == () || adx == () || rsi == () || close == () {
-		// Buffers haven't been filled yet
-		return CLOSE;
-	}
 	let previous_signal = previous();
 	let exit_long = previous_signal == LONG && rsi > rsi_long_exit;
 	let exit_short = previous_signal == SHORT && rsi < rsi_short_exit;

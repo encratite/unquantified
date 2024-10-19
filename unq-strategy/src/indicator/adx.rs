@@ -84,8 +84,8 @@ impl Indicator for AverageDirectionalIndex {
 	}
 
 	fn needs_initialization(&self) -> Option<usize> {
-		match self.plus_dm_buffer.needs_initialization() {
-			Some(_) => Some(self.period + 1),
+		match self.dx_buffer.needs_initialization() {
+			Some(_) => Some(2 * self.period),
 			None => None
 		}
 	}

@@ -34,10 +34,6 @@ fn next() {
 	let sma = sma(sma_period);
 	let adx = adx(ADX_PERIOD);
 	let atr = atr(ATR_PERIOD);
-	if rsi == () || close == () || sma == () || adx == () || atr == () {
-		// Buffers haven't been filled yet
-		return CLOSE;
-	}
 	let filter = if mode == MODE_SMA {
 		close > sma
 	} else if mode == MODE_ADX {

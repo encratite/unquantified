@@ -9,10 +9,6 @@ fn next() {
 	let slow_ma = sma(slow_period);
 	let filter_ma = sma(filter_period);
 	let close = close();
-	if fast_ma == () || slow_ma == () || close == () | filter_ma == () {
-		// Buffers haven't been filled yet
-		return CLOSE;
-	}
 	if fast_ma > slow_ma && close > filter_ma {
 		LONG
 	} else {

@@ -23,7 +23,7 @@ use crate::indicator::simple::SimpleMovingAverage;
 use crate::strategy::script::{ScriptStrategy, TradeSignal};
 use crate::technical::{ChannelExitMode, Indicator};
 
-pub type ApiResult<T> = anyhow::Result<T, Box<EvalAltResult>>;
+pub type ApiResult<T> = Result<T, Box<EvalAltResult>>;
 
 pub struct ApiIndicator {
 	symbol: String,
@@ -372,18 +372,18 @@ impl ApiContext {
 	}
 
 	fn translate_indicator_values(indicators: Option<Vec<f64>>) -> ApiResult<Dynamic> {
-		let output = match indicators {
+		match indicators {
 			Some(indicators) => {
 				if indicators.len() == 1 {
 					if let Some(first) = indicators.first() {
 						return Ok((*first).into());
 					}
 				}
-				indicators.into()
+				Ok(indicators.into())
 			},
-			None => ().into()
-		};
-		Ok(output)
+			None => Err("Buffer hasn't been filled yet".into())
+		}
+
 	}
 
 	fn execute_indicator(&mut self, indicator_id: IndicatorId, get_indicator: Box<dyn Fn() -> ApiResult<Box<dyn Indicator>>>) -> ApiResult<Dynamic> {
@@ -407,7 +407,7 @@ impl ApiContext {
 		}
 	}
 
-	fn get_error(error: Error) ->  Box<EvalAltResult> {
+	fn get_error(error: Error) -> Box<EvalAltResult> {
 		format!("Failed to create indicator: {error}").as_str().into()
 	}
 }

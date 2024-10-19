@@ -15,10 +15,6 @@ fn next() {
 	let long_close2 = close(long_offset2);
 	let short_close1 = close(short_offset1);
 	let short_close2 = close(short_offset2);
-	if close == () || long_close1 == () || long_close2 == () || short_close1 == () || short_close2 == () {
-		// Buffers haven't been filled yet
-		return CLOSE;
-	}
 	let long_signal = close > long_close1 && close < long_close2;
 	let short_signal = close < short_close1 && close > short_close2;
 	if long_signal && !short_signal {
